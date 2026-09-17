@@ -1,6 +1,6 @@
 import { ActionIcon, Alert, Flexbox, Text, ThemeProvider, Tooltip } from '@lobehub/ui';
 import { ChatHeader } from '@lobehub/ui/chat';
-import { Dropdown, Drawer, Tag, theme } from 'antd';
+import { Dropdown, Tag, theme } from 'antd';
 import {
   Copy,
   Download,
@@ -21,16 +21,17 @@ import { Composer } from './components/Composer';
 import { DirectoryPicker } from './components/DirectoryPicker';
 import { EmptyState } from './components/EmptyState';
 import { ExtensionDialogs } from './components/Dialogs';
-import type { ModelSelection } from './components/ModelPickerV2';
-import type { WorkspaceGroup } from './components/WorkspaceTree';
+import type { ModelSelection } from './components/ModelSelectV3';
 import { shortPath } from './components/WorkspaceSwitcher';
-import { ModelConfigPage } from './components/models/ModelConfigPage';
 import { NotificationStack } from './components/NotificationStack';
 import { SessionSettings } from './components/SessionSettings';
-import { SessionSidebar } from './components/SessionSidebar';
 import { StatusStrip, WidgetStrip } from './components/StatusStrip';
 import { TranscriptView } from './components/TranscriptView';
 import { UiShowcase } from './components/uikit/UiShowcase';
+import { SidebarRoot } from './components/sidebar/SidebarRoot';
+import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
+import type { WorkspaceItem } from './components/sidebar/tree';
+import { ModelsSection, SettingsModal } from './components/settings';
 import type { ServerConfigResponse, SessionSummary, StoredSession } from './shared/protocol';
 
 type ThemeMode = 'light' | 'dark';
@@ -39,6 +40,12 @@ type RenderStyle = 'ours' | 'tokui';
 
 const THEME_KEY = 'pi-webx-theme';
 const RENDER_STYLE_KEY = 'pi-webx-render-style';
+const SIDEBAR_COLLAPSED_KEY = 'pi-webx-sidebar-collapsed';
+
+/** Expanded sidebar column width (px); the rail is 56. */
+const SIDEBAR_WIDTH = 260;
+/** Matches the dsh AppFrame track transition the collapse crossfade rides on. */
+const SIDEBAR_SLIDE_MS = 300;
 
 function readTheme(): ThemeMode {
   const stored = localStorage.getItem(THEME_KEY);
@@ -48,6 +55,10 @@ function readTheme(): ThemeMode {
 
 function readRenderStyle(): RenderStyle {
   return localStorage.getItem(RENDER_STYLE_KEY) === 'tokui' ? 'tokui' : 'ours';
+}
+
+function readSidebarCollapsed(): boolean {
+  return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1';
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -76,12 +87,11 @@ function Shell({
   const [cwd, setCwd] = useState(boot.cwd ?? '');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [storedLoading, setStoredLoading] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
+  const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [seedText, setSeedText] = useState<string | null>(null);
-  const [showcaseOpen, setShowcaseOpen] = useState(false);
-  const [modelsOpen, setModelsOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [savedWorkspaces, setSavedWorkspaces] = useState<string[]>(() => loadPrefs().workspaces ?? []);
   const [allStored, setAllStored] = useState<StoredSession[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
@@ -102,14 +112,11 @@ function Shell({
   }, []);
 
   const loadStored = useCallback(async () => {
-    setStoredLoading(true);
     try {
       // One unfiltered listing covers both the sidebar list and the per-workspace counts.
       setAllStored((await bridge.storedSessions({ limit: 100 })).sessions);
     } catch {
       setAllStored([]);
-    } finally {
-      setStoredLoading(false);
     }
   }, []);
 
@@ -177,11 +184,16 @@ function Shell({
     void loadStored();
   }, [loadStored]);
 
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, sidebarCollapsed ? '1' : '0');
+  }, [sidebarCollapsed]);
+
   /**
-   * Sessions + history bucketed per workspace, ordered current → saved →
-   * suggested → anything that has sessions. This is the sidebar tree's data.
+   * Workspace rows for the sidebar browser, ordered current → saved →
+   * suggested → anything that has sessions. The browser groups sessions
+   * under these itself.
    */
-  const workspaceGroups = useMemo<WorkspaceGroup[]>(() => {
+  const workspaces = useMemo<WorkspaceItem[]>(() => {
     const order: string[] = [];
     const push = (path: string | undefined): void => {
       if (path && !order.includes(path)) order.push(path);
@@ -194,12 +206,10 @@ function Shell({
     const home = config?.home;
     const defaultCwd = boot.cwd ?? '';
     return order.map((path) => ({
-      path,
+      key: path,
       title: shortPath(path, home),
       isCurrent: path === cwd,
       isDefault: path === defaultCwd,
-      sessions: sessions.filter((entry) => entry.cwd === path).sort((a, b) => b.createdAt - a.createdAt),
-      stored: allStored.filter((entry) => entry.cwd === path),
     }));
   }, [allStored, boot.cwd, config?.home, config?.suggestedCwds, cwd, savedWorkspaces, sessions]);
 
@@ -348,38 +358,59 @@ function Shell({
       horizontal
       style={{ height: '100vh', overflow: 'hidden', background: token.colorBgLayout }}
     >
-      <SessionSidebar
-        config={config}
-        groups={workspaceGroups}
-        storedLoading={storedLoading}
-        activeId={sessionId}
-        themeMode={themeMode}
-        connected={session.status === 'live'}
-        onToggleTheme={onToggleTheme}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onOpenModels={() => setModelsOpen(true)}
-        onOpenShowcase={() => setShowcaseOpen(true)}
-        onNewSession={() => void onNewSession()}
-        onCreateSession={(path) => {
-          pickWorkspace(path);
-          void startSession(path);
+      {/* The sliding column: fixed-width tracks that animate the collapse while
+          the shell freezes its content at the expanded width and crossfades. */}
+      <div
+        style={{
+          flex: 'none',
+          height: '100%',
+          overflow: 'hidden',
+          width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH,
+          transition: `width ${SIDEBAR_SLIDE_MS}ms var(--ds-ease-in-out, ease-in-out)`,
+          borderRight: '1px solid var(--dsw-alias-border-l2)',
         }}
-        onPickWorkspace={(path) => {
-          pickWorkspace(path);
-          void startSession(path);
-        }}
-        onBrowseWorkspace={() => setPickerOpen(true)}
-        onSetDefaultWorkspace={(path) => savePrefs({ cwd: path })}
-        onForgetWorkspace={forgetWorkspace}
-        onSwitchSession={setSessionId}
-        onKillSession={(id) => void onKillSession(id)}
-        onResumeStored={(entry) => void startSession(entry.cwd, entry.path)}
-        onDeleteStored={(entry) => {
-          void bridge.deleteStoredSession(entry.path).then(() => loadStored());
-        }}
-        onRenameSession={(id, name) => void onRenameSession(id, name)}
-        onRefreshStored={() => void loadStored()}
-      />
+      >
+        <SidebarRoot
+          width={SIDEBAR_WIDTH}
+          collapsed={sidebarCollapsed}
+          onToggle={() => { setSidebarCollapsed((prev) => !prev); }}
+          piVersion={config?.piVersion ?? null}
+          themeMode={themeMode}
+          connected={session.status === 'live'}
+          onNewSession={() => { void onNewSession(); }}
+          onToggleTheme={onToggleTheme}
+          onOpenSettings={() => { setAppSettingsOpen(true); }}
+          region={(wide, expandSidebar) => (
+            <WorkspaceBrowser
+              wide={wide}
+              expandSidebar={expandSidebar}
+              home={config?.home}
+              workspaces={workspaces}
+              live={sessions}
+              stored={allStored}
+              currentId={sessionId}
+              onSwitch={setSessionId}
+              onNewSession={(path) => {
+                pickWorkspace(path);
+                void startSession(path);
+              }}
+              onKill={(id) => { void onKillSession(id); }}
+              onRename={(id, name) => { void onRenameSession(id, name); }}
+              onResume={(entry) => { void startSession(entry.cwd, entry.path); }}
+              onDeleteStored={(entry) => {
+                void bridge.deleteStoredSession(entry.path).then(() => loadStored());
+              }}
+              onPickWorkspace={(path) => {
+                pickWorkspace(path);
+                void startSession(path);
+              }}
+              onSetDefault={(path) => { savePrefs({ cwd: path }); }}
+              onForgetWorkspace={forgetWorkspace}
+              onBrowseWorkspace={() => { setPickerOpen(true); }}
+            />
+          )}
+        />
+      </div>
 
       <Flexbox style={{ flex: 1, minWidth: 0, height: '100%' }}>
         <ChatHeader
@@ -421,7 +452,7 @@ function Shell({
                 />
               </Tooltip>
               <Tooltip title="会话设置">
-                <ActionIcon icon={Settings2} size="small" onClick={() => setSettingsOpen(true)} />
+                <ActionIcon icon={Settings2} size="small" onClick={() => setSessionSettingsOpen(true)} />
               </Tooltip>
             </Flexbox>
           }
@@ -501,31 +532,29 @@ function Shell({
         }}
       />
 
-      <ModelConfigPage
-        open={modelsOpen}
-        onClose={() => setModelsOpen(false)}
-        onChanged={() => {
-          // New providers/models only reach the picker after a state refresh.
-          void session.refreshState();
-        }}
-      />
-
       <SessionSettings
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
+        open={sessionSettingsOpen}
+        onClose={() => setSessionSettingsOpen(false)}
         api={session}
         disabled={sessionId === null}
       />
 
-      <Drawer
-        open={showcaseOpen}
-        onClose={() => setShowcaseOpen(false)}
-        title="组件库"
-        width={760}
-        destroyOnHidden
-      >
-        <UiShowcase onAction={sendAction} themeMode={themeMode} />
-      </Drawer>
+      <SettingsModal
+        open={appSettingsOpen}
+        onClose={() => {
+          setAppSettingsOpen(false);
+          // New providers/models only reach the picker after a state refresh.
+          void session.refreshState();
+        }}
+        sections={[
+          { id: 'models', label: '模型配置', render: () => <ModelsSection /> },
+          {
+            id: 'showcase',
+            label: '组件库',
+            render: () => <UiShowcase onAction={sendAction} themeMode={themeMode} />,
+          },
+        ]}
+      />
 
       <ExtensionDialogs
         dialogs={session.dialogs}
@@ -547,6 +576,9 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(THEME_KEY, themeMode);
     document.documentElement.style.colorScheme = themeMode;
+    // The dsw design tokens (the sidebar/settings system) key their dark sheet
+    // off this attribute.
+    document.body.toggleAttribute('data-ds-dark-theme', themeMode === 'dark');
   }, [themeMode]);
 
   useEffect(() => {
