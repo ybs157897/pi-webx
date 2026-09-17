@@ -8,6 +8,11 @@ import App from './App';
 import 'katex/dist/katex.min.css';
 import '@jboltai/tokui/css';
 import './index.css';
+// The dsw design platform (after index.css so its token-driven scrollbar skin
+// wins over the page-wide rules there).
+import './ui/theme/design-platform.css';
+import './ui/theme/elevation.css';
+import './ui/theme/base.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root not found in index.html');
