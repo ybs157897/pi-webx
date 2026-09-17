@@ -17,11 +17,9 @@ function levelToAlert(level: NoticeLevel): 'info' | 'warning' | 'error' {
 function EntryView({
   entry,
   onAction,
-  renderStyle,
 }: {
   entry: TranscriptEntry;
   onAction?: ((action: string) => void) | undefined;
-  renderStyle?: 'ours' | 'tokui';
 }) {
   const { token } = theme.useToken();
 
@@ -30,7 +28,7 @@ function EntryView({
       return <UserMessageItem entry={entry} />;
 
     case 'assistant':
-      return <AssistantMessageItem entry={entry} onAction={onAction} renderStyle={renderStyle} />;
+      return <AssistantMessageItem entry={entry} onAction={onAction} />;
 
     case 'toolResult':
       return <ToolCard run={entry.run} />;
@@ -92,11 +90,9 @@ function EntryView({
 export function TranscriptView({
   transcript,
   onAction,
-  renderStyle,
 }: {
   transcript: TranscriptState;
   onAction?: ((action: string) => void) | undefined;
-  renderStyle?: 'ours' | 'tokui';
 }) {
   const { token } = theme.useToken();
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -133,7 +129,7 @@ export function TranscriptView({
       >
         <Flexbox gap={20} paddingInline={20} paddingBlock={20} style={{ maxWidth: 900, margin: '0 auto' }}>
           {transcript.entries.map((entry) => (
-            <EntryView key={entry.id} entry={entry} onAction={onAction} renderStyle={renderStyle} />
+            <EntryView key={entry.id} entry={entry} onAction={onAction} />
           ))}
           {transcript.entries.length === 0 && (
             <Flexbox align="center" justify="center" gap={8} paddingBlock={80}>

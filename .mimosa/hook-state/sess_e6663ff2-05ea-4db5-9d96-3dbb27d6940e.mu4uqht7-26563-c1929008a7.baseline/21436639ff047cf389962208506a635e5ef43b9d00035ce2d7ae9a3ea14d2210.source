@@ -1,6 +1,6 @@
 import { ActionIcon, Flexbox, Text, Tooltip } from '@lobehub/ui';
 import { ChatInputAreaInner, ChatSendButton } from '@lobehub/ui/chat';
-import { Segmented, Tag, theme } from 'antd';
+import { Tag, theme } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { Eraser, ImagePlus } from 'lucide-react';
 import type { ClipboardEvent } from 'react';
@@ -34,11 +34,7 @@ export interface ComposerProps {
   /** text injected from outside (empty-state suggestions); consumed once */
   seedText?: string | null;
   onSeedConsumed?: () => void;
-  renderStyle?: RenderStyle;
-  onRenderStyleChange?: ((style: RenderStyle) => void) | undefined;
 }
-
-type RenderStyle = 'ours' | 'tokui';
 
 export function Composer({
   api,
@@ -46,8 +42,6 @@ export function Composer({
   contextPercent = null,
   seedText = null,
   onSeedConsumed,
-  renderStyle = 'ours',
-  onRenderStyleChange,
 }: ComposerProps) {
   const { token } = theme.useToken();
   const [text, setText] = useState('');
@@ -199,19 +193,6 @@ export function Composer({
           }
           rightAddons={
             <Flexbox horizontal align="center" gap={8}>
-              {onRenderStyleChange && (
-                <Tooltip title="agent UI 的渲染引擎">
-                  <Segmented
-                    size="small"
-                    value={renderStyle}
-                    onChange={(value) => onRenderStyleChange(value as RenderStyle)}
-                    options={[
-                      { label: '自研', value: 'ours' },
-                      { label: 'TokUI', value: 'tokui' },
-                    ]}
-                  />
-                </Tooltip>
-              )}
               <Tooltip title="附加图片">
                 <ActionIcon
                   icon={ImagePlus}

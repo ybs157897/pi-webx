@@ -1,14 +1,14 @@
 {
   "schemaVersion": "mimosa-hook-status/v1",
-  "recordedAt": "2026-09-17T01:43:21.535Z",
-  "sessionId": "sess_1cf7036e-9960-42b4-bf65-843b08d48d12",
+  "recordedAt": "2026-09-17T01:49:59.661Z",
+  "sessionId": "sess_e6663ff2-05ea-4db5-9d96-3dbb27d6940e",
   "event": "PostToolUse",
-  "toolName": "Edit",
-  "file": "src/components/uikit/UiShowcase.tsx",
+  "toolName": "Write",
+  "file": "src/dsh/primitives/Menu.tsx",
   "outcome": "clear",
   "coverage": "complete",
   "findingCount": 0,
-  "durationMs": 7,
+  "durationMs": 4,
   "hostState": "hook_complete",
   "reportHint": ".mimosa/reports/"
 }

@@ -3,10 +3,8 @@ import { ChatItem } from '@lobehub/ui/chat';
 import { theme } from 'antd';
 import { Bot, Brain, ChevronDown, ChevronRight, CircleAlert, Copy, User } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
-import { useThemeMode } from 'antd-style';
 
 import { formatCost, formatTokens } from '../lib/format';
-import { specToTokDsl } from '../lib/tokui-dsl';
 import type { AssistantEntry, TranscriptUsage, UserEntry } from '../shared/transcript';
 import {
   extractA2uiBlocks,
@@ -16,12 +14,10 @@ import {
   type UiSpec,
 } from '../shared/uikit';
 import { ToolCard } from './ToolCard';
-import { TokUIView } from './tokui/TokUIView';
 import { UiRenderer } from './uikit/UiRenderer';
 
 /** Fired when a rendered component's button/form sends an action back to pi. */
 export type UiActionHandler = (action: string) => void;
-type RenderStyle = 'ours' | 'tokui';
 
 /** Collapsible chain-of-thought panel shown above an assistant message. */
 function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: boolean }) {
@@ -129,14 +125,11 @@ export function UserMessageItem({ entry }: { entry: UserEntry }) {
 export function AssistantMessageItem({
   entry,
   onAction,
-  renderStyle = 'ours',
 }: {
   entry: AssistantEntry;
   onAction?: UiActionHandler | undefined;
-  renderStyle?: RenderStyle;
 }) {
   const { token } = theme.useToken();
-  const { isDarkMode } = useThemeMode();
   const [copied, setCopied] = useState(false);
 
   const onCopy = useCallback(() => {
@@ -216,27 +209,9 @@ export function AssistantMessageItem({
                 ))}
               </Flexbox>
             )}
-            {uiSpecs.map((spec, index) =>
-              renderStyle === 'tokui' ? (
-                <div
-                  key={String(index)}
-                  style={{
-                    border: `1px solid ${token.colorBorderSecondary}`,
-                    borderRadius: token.borderRadiusLG,
-                    padding: 12,
-                    background: token.colorBgContainer,
-                  }}
-                >
-                  <TokUIView
-                    dsl={specToTokDsl(spec)}
-                    theme={isDarkMode ? 'dark' : 'light'}
-                    onAction={onAction}
-                  />
-                </div>
-              ) : (
-                <UiRenderer key={String(index)} spec={spec} onAction={onAction} />
-              ),
-            )}
+            {uiSpecs.map((spec, index) => (
+              <UiRenderer key={String(index)} spec={spec} onAction={onAction} />
+            ))}
             {isEmpty && entry.streaming && (
               <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextTertiary }}>
                 <Icon icon={Bot} size={14} />

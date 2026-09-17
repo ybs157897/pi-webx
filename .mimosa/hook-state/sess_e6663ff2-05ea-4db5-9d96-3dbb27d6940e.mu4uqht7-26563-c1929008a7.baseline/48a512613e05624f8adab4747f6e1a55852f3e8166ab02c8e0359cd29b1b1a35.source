@@ -1,10 +1,8 @@
 import { Flexbox, Text } from '@lobehub/ui';
-import { App as AntApp, Segmented, theme } from 'antd';
-import { useMemo, useState } from 'react';
+import { App as AntApp } from 'antd';
+import { useMemo } from 'react';
 
-import { specToTokDsl } from '../../lib/tokui-dsl';
 import type { UiNode, UiSpec } from '../../shared/uikit';
-import { TokUIView } from '../tokui/TokUIView';
 import { UiRenderer } from './UiRenderer';
 
 const h = (v: string, level?: 1 | 2 | 3 | 4): UiNode => ({ t: 'title', v, ...(level ? { level } : {}) });
@@ -32,7 +30,9 @@ const dashboard: UiSpec = {
           kind: 'area',
           height: 200,
           labels: ['周一', '周二', '周三', '周四', '周五', '周六', '周日'],
-          series: [{ name: '营收（千元）', data: [32, 45, 38, 61, 55, 72, 68] }],
+          series: [
+            { name: '营收（千元）', data: [32, 45, 38, 61, 55, 72, 68] },
+          ],
         },
       ],
     },
@@ -180,19 +180,10 @@ const SECTIONS: { name: string; spec: UiSpec }[] = [
   { name: '排版与代码（title / text / md / code / list）', spec: textShowcase },
 ];
 
-type ViewMode = 'ours' | 'compare' | 'tokui';
-
-/** Gallery proving every component kind renders — with a TokUI side-by-side. */
-export function UiShowcase({
-  onAction,
-  themeMode = 'light',
-}: {
-  onAction?: (action: string) => void;
-  themeMode?: 'light' | 'dark';
-}) {
-  const { token } = theme.useToken();
+/** Gallery proving every component kind renders — the 组件库 tab. */
+export function UiShowcase({ onAction }: { onAction?: (action: string) => void }) {
   const { message } = AntApp.useApp();
-  const [mode, setMode] = useState<ViewMode>('compare');
+  const sections = useMemo(() => SECTIONS, []);
   const handled = useMemo(
     () => (action: string) => {
       void message.info('演示模式：真实会话里会发送给 pi');
@@ -203,56 +194,21 @@ export function UiShowcase({
 
   return (
     <Flexbox gap={20} style={{ padding: '20px 24px', overflowY: 'auto', height: '100%' }}>
-      <Flexbox horizontal align="flex-start" justify="space-between" gap={12} wrap="wrap">
-        <Flexbox gap={4} style={{ minWidth: 0 }}>
-          <Text fontSize={16} weight={600}>
-            组件库
-          </Text>
-          <Text fontSize={12} type="secondary">
-            同一份声明式规格，分别用我们的组件渲染器和 TokUI 渲染。共 {SECTIONS.length} 组示例。
-          </Text>
-        </Flexbox>
-        <Segmented<ViewMode>
-          size="small"
-          value={mode}
-          onChange={setMode}
-          options={[
-            { label: '自研渲染', value: 'ours' },
-            { label: '对比', value: 'compare' },
-            { label: 'TokUI', value: 'tokui' },
-          ]}
-        />
+      <Flexbox gap={4}>
+        <Text fontSize={16} weight={600}>
+          组件库
+        </Text>
+        <Text fontSize={12} type="secondary">
+          agent 通过 render_ui 工具输出声明式 JSON，这里全部渲染为真实组件。共{' '}
+          {SECTIONS.length} 组示例。
+        </Text>
       </Flexbox>
-
-      {SECTIONS.map((section) => (
+      {sections.map((section) => (
         <Flexbox key={section.name} gap={10}>
           <Text fontSize={12} weight={600} type="secondary">
             {section.name}
           </Text>
-          {mode === 'compare' ? (
-            <Flexbox gap={10} direction="vertical">
-              <Flexbox gap={8}>
-                <Text fontSize={11} weight={600} style={{ color: token.colorTextQuaternary }}>
-                  自研渲染
-                </Text>
-                <UiRenderer spec={section.spec} onAction={handled} />
-              </Flexbox>
-              <Flexbox gap={8}>
-                <Text fontSize={11} weight={600} style={{ color: token.colorTextQuaternary }}>
-                  TokUI
-                </Text>
-                <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
-                  <TokUIView dsl={specToTokDsl(section.spec)} theme={themeMode} onAction={handled} />
-                </div>
-              </Flexbox>
-            </Flexbox>
-          ) : mode === 'tokui' ? (
-            <div style={{ border: `1px solid ${token.colorBorderSecondary}`, borderRadius: token.borderRadiusLG, padding: 12 }}>
-              <TokUIView dsl={specToTokDsl(section.spec)} theme={themeMode} onAction={handled} />
-            </div>
-          ) : (
-            <UiRenderer spec={section.spec} onAction={handled} />
-          )}
+          <UiRenderer spec={section.spec} onAction={handled} />
         </Flexbox>
       ))}
     </Flexbox>

@@ -6,7 +6,6 @@ import { createRoot } from 'react-dom/client';
 import App from './App';
 // ThemeProvider's CDN font injection is disabled, so ship the math stylesheet locally.
 import 'katex/dist/katex.min.css';
-import '@jboltai/tokui/css';
 import './index.css';
 
 const container = document.getElementById('root');

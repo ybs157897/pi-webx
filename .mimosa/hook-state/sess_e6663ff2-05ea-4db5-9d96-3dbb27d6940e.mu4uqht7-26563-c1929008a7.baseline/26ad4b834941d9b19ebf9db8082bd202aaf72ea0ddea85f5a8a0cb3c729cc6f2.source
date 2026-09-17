@@ -34,20 +34,13 @@ import { UiShowcase } from './components/uikit/UiShowcase';
 import type { ServerConfigResponse, SessionSummary, StoredSession } from './shared/protocol';
 
 type ThemeMode = 'light' | 'dark';
-/** Which engine renders agent UI inline — ours, or TokUI. */
-type RenderStyle = 'ours' | 'tokui';
 
 const THEME_KEY = 'pi-webx-theme';
-const RENDER_STYLE_KEY = 'pi-webx-render-style';
 
 function readTheme(): ThemeMode {
   const stored = localStorage.getItem(THEME_KEY);
   if (stored === 'light' || stored === 'dark') return stored;
   return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function readRenderStyle(): RenderStyle {
-  return localStorage.getItem(RENDER_STYLE_KEY) === 'tokui' ? 'tokui' : 'ours';
 }
 
 const STATUS_LABEL: Record<ConnectionStatus, string> = {
@@ -59,17 +52,7 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   error: '连接失败',
 };
 
-function Shell({
-  themeMode,
-  renderStyle,
-  onToggleTheme,
-  onRenderStyleChange,
-}: {
-  themeMode: ThemeMode;
-  renderStyle: RenderStyle;
-  onToggleTheme: () => void;
-  onRenderStyleChange: (style: RenderStyle) => void;
-}) {
+function Shell({ themeMode, onToggleTheme }: { themeMode: ThemeMode; onToggleTheme: () => void }) {
   const { token } = theme.useToken();
   const boot = useMemo(() => loadPrefs(), []);
   const [config, setConfig] = useState<ServerConfigResponse | null>(null);
@@ -466,7 +449,7 @@ function Shell({
           {empty ? (
             <EmptyState onPick={setSeedText} />
           ) : (
-            <TranscriptView transcript={session.transcript} onAction={sendAction} renderStyle={renderStyle} />
+            <TranscriptView transcript={session.transcript} onAction={sendAction} />
           )}
         </Flexbox>
 
@@ -481,8 +464,6 @@ function Shell({
           contextPercent={contextPercent}
           seedText={seedText}
           onSeedConsumed={() => setSeedText(null)}
-          renderStyle={renderStyle}
-          onRenderStyleChange={onRenderStyleChange}
         />
         <Flexbox paddingInline={20} style={{ maxWidth: 940, margin: '0 auto', width: '100%' }}>
           <WidgetStrip widgets={session.widgets} placement="belowEditor" />
@@ -524,7 +505,7 @@ function Shell({
         width={760}
         destroyOnHidden
       >
-        <UiShowcase onAction={sendAction} themeMode={themeMode} />
+        <UiShowcase onAction={sendAction} />
       </Drawer>
 
       <ExtensionDialogs
@@ -542,24 +523,17 @@ function Shell({
 
 export default function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>(readTheme);
-  const [renderStyle, setRenderStyle] = useState<RenderStyle>(readRenderStyle);
 
   useEffect(() => {
     localStorage.setItem(THEME_KEY, themeMode);
     document.documentElement.style.colorScheme = themeMode;
   }, [themeMode]);
 
-  useEffect(() => {
-    localStorage.setItem(RENDER_STYLE_KEY, renderStyle);
-  }, [renderStyle]);
-
   return (
     <ThemeProvider themeMode={themeMode} enableCustomFonts={false}>
       <Shell
         themeMode={themeMode}
-        renderStyle={renderStyle}
         onToggleTheme={() => setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'))}
-        onRenderStyleChange={setRenderStyle}
       />
     </ThemeProvider>
   );

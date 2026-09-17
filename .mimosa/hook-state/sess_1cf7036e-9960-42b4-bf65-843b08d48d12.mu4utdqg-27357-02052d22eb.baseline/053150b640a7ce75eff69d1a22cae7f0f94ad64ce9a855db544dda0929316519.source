@@ -10,6 +10,8 @@
       "dependencies": {
         "@earendil-works/pi-ai": "^0.84.4",
         "@earendil-works/pi-coding-agent": "^0.84.4",
+        "@jboltai/tokui": "^0.2.6",
+        "@jboltai/tokui-react": "^0.2.6",
         "@lobehub/fluent-emoji": "^4.1.1",
         "@lobehub/icons": "^5.18.0",
         "@lobehub/ui": "^5.47.1",
@@ -3337,6 +3339,32 @@
       "peerDependenciesMeta": {
         "@modelcontextprotocol/sdk": {
           "optional": true
+        }
+      }
+    },
+    "node_modules/@jboltai/tokui": {
+      "version": "0.2.6",
+      "resolved": "https://registry.npmjs.org/@jboltai/tokui/-/tokui-0.2.6.tgz",
+      "integrity": "sha512-yKFXGiM919bZE8VCyLSQkvfVFlvkVqqYOCMiW+zFPn760L5tFvokbI+f0pn490cx3rNAFRtTAGgTVfslwNqZ5w==",
+      "license": "MIT",
+      "engines": {
+        "node": ">=20"
+      }
+    },
+    "node_modules/@jboltai/tokui-react": {
+      "version": "0.2.6",
+      "resolved": "https://registry.npmjs.org/@jboltai/tokui-react/-/tokui-react-0.2.6.tgz",
+      "integrity": "sha512-LqzBbuYcfF5rSbY1gPJKd641UMHis1iSG6cpOxrwX/1SXQaS56WNdoVEdf1KMaU7gmsaZ+2u9+EziLL9AChrXg==",
+      "license": "MIT",
+      "dependencies": {
+        "@jboltai/tokui": "^0.2.6"
+      },
+      "peerDependencies": {
+        "react": ">=16.8.0"
+      },
+      "peerDependenciesMeta": {
+        "react": {
+          "optional": false
         }
       }
     },
