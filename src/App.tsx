@@ -11,12 +11,12 @@ import {
   Settings2,
   Trash2,
 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api as bridge } from './lib/api';
 import { THINKING_LABELS } from './lib/format';
 import { loadPrefs, savePrefs } from './lib/storage';
-import { usePiSession, type ConnectionStatus } from './lib/usePiSession';
+import { usePiSession, type ConnectionStatus, type PiSessionApi } from './lib/usePiSession';
 import { Composer } from './components/Composer';
 import { DirectoryPicker } from './components/DirectoryPicker';
 import { EmptyState } from './components/EmptyState';
@@ -32,7 +32,13 @@ import { SidebarRoot } from './components/sidebar/SidebarRoot';
 import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
 import type { WorkspaceItem } from './components/sidebar/tree';
 import { ModelsSection, SettingsModal } from './components/settings';
-import type { ServerConfigResponse, SessionSummary, StoredSession } from './shared/protocol';
+import type {
+  PiCommandEnvelope,
+  PiRpcResponse,
+  ServerConfigResponse,
+  SessionSummary,
+  StoredSession,
+} from './shared/protocol';
 
 type ThemeMode = 'light' | 'dark';
 /** Which engine renders agent UI inline — ours, or TokUI. */
@@ -69,6 +75,18 @@ const STATUS_LABEL: Record<ConnectionStatus, string> = {
   exited: '已结束',
   error: '连接失败',
 };
+
+function errorText(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause);
+}
+
+/** pi's answer for a prompt that never made it onto the wire. */
+function failedPrompt(error: string): PiRpcResponse {
+  return { type: 'response', command: 'prompt', success: false, error };
+}
+
+/** Result of the lazy first-send session creation. */
+type CreateOutcome = { id: string } | { error: string };
 
 function Shell({
   themeMode,
@@ -136,30 +154,99 @@ function Shell({
     });
   }, []);
 
-  const startSession = useCallback(
-    async (target: string, sessionPath?: string) => {
+  /**
+   * Opens an existing pi session — the resume path from the sidebar, which has
+   * to run immediately because there is a transcript to show. Fresh sessions
+   * are *not* created here: they materialize on the first send (guardedPrompt),
+   * so merely launching the app leaves no empty transcript behind.
+   */
+  const openSession = useCallback(
+    async (target: string, sessionPath: string) => {
       try {
-        const result = await bridge.createSession({
-          cwd: target,
-          ...(sessionPath === undefined ? {} : { sessionPath }),
-          // A resumed session keeps its own model; only fresh ones get the default.
-          ...(sessionPath === undefined && defaultModel
-            ? { provider: defaultModel.provider, model: defaultModel.id }
-            : {}),
-        });
+        const result = await bridge.createSession({ cwd: target, sessionPath });
         setSessionId(result.session.id);
         setCwd(result.session.cwd);
         setBootError(null);
         savePrefs({ cwd: result.session.cwd });
         await refreshSessions();
       } catch (cause) {
-        setBootError(cause instanceof Error ? cause.message : String(cause));
+        setBootError(errorText(cause));
       }
     },
-    [defaultModel, refreshSessions],
+    [refreshSessions],
   );
 
-  /* Boot: discover defaults, then reopen the last workspace (or the default). */
+  /**
+   * In-flight lazy creation, shared by concurrent sends so a double-click
+   * cannot spawn two sessions. Only the promise is cached (not the id): it is
+   * dropped as soon as the shell re-renders with a session, and a failed
+   * attempt is dropped at once so the next send retries.
+   */
+  const pendingCreate = useRef<Promise<CreateOutcome> | null>(null);
+
+  useEffect(() => {
+    pendingCreate.current = null;
+  }, [sessionId]);
+
+  const ensureSession = useCallback((): Promise<CreateOutcome> => {
+    if (pendingCreate.current) return pendingCreate.current;
+    const pending = (async (): Promise<CreateOutcome> => {
+      try {
+        const result = await bridge.createSession({
+          // No cwd yet means the config never loaded; let the bridge default it.
+          ...(cwd.length > 0 ? { cwd } : {}),
+          ...(defaultModel ? { provider: defaultModel.provider, model: defaultModel.id } : {}),
+        });
+        setSessionId(result.session.id);
+        setCwd(result.session.cwd);
+        savePrefs({ cwd: result.session.cwd });
+        await refreshSessions();
+        return { id: result.session.id };
+      } catch (cause) {
+        pendingCreate.current = null;
+        return { error: errorText(cause) };
+      }
+    })();
+    pendingCreate.current = pending;
+    return pending;
+  }, [cwd, defaultModel, refreshSessions]);
+
+  /**
+   * Send path for the composer: with a session attached it is a plain prompt,
+   * otherwise the session is created first and the message goes straight to it
+   * via `sendTo` — `session.prompt` would still close over the old (null) id
+   * until the next render.
+   */
+  const guardedPrompt = useCallback<PiSessionApi['prompt']>(
+    async (text, options) => {
+      try {
+        if (sessionId !== null) return await session.prompt(text, options);
+
+        const created = await (pendingCreate.current ?? ensureSession());
+        if ('error' in created) return failedPrompt(created.error);
+
+        const body: PiCommandEnvelope = {
+          type: 'prompt',
+          message: text,
+          ...(options?.images && options.images.length > 0 ? { images: options.images } : {}),
+          ...(options?.behavior ? { streamingBehavior: options.behavior } : {}),
+        };
+        return await session.sendTo(created.id, body);
+      } catch (cause) {
+        return failedPrompt(errorText(cause));
+      }
+    },
+    [ensureSession, session, sessionId],
+  );
+
+  /** The composer talks to the same api, with sending swapped for the lazy path. */
+  const composerApi = useMemo<PiSessionApi>(
+    () => ({ ...session, prompt: guardedPrompt }),
+    [guardedPrompt, session],
+  );
+
+  /* Boot: discover defaults and remember the workspace. No session is created
+     here — sending the first message is what materializes one. */
   useEffect(() => {
     void (async () => {
       try {
@@ -167,12 +254,12 @@ function Shell({
         setConfig(loaded);
         const target = boot.cwd && boot.cwd.length > 0 ? boot.cwd : loaded.defaultCwd;
         setCwd(target);
-        await startSession(target);
+        savePrefs({ cwd: target });
       } catch (cause) {
-        setBootError(cause instanceof Error ? cause.message : String(cause));
+        setBootError(errorText(cause));
       }
     })();
-  }, [boot.cwd, startSession]);
+  }, [boot.cwd]);
 
   useEffect(() => {
     void refreshSessions();
@@ -213,15 +300,21 @@ function Shell({
     }));
   }, [allStored, boot.cwd, config?.home, config?.suggestedCwds, cwd, savedWorkspaces, sessions]);
 
-  const onNewSession = useCallback(async () => {
-    if (sessionId && session.status === 'live') {
-      // Reuse the running pi process; `new_session` resets the conversation.
-      await session.newSession();
-      await refreshSessions();
-      return;
-    }
-    await startSession(cwd);
-  }, [cwd, refreshSessions, session, sessionId, startSession]);
+  /**
+   * "New session" now just detaches to the empty state — the pi process is
+   * created by the first message, so clicking it costs nothing. A running
+   * session keeps going and stays reachable from the sidebar.
+   */
+  const onNewSession = useCallback(
+    (path?: string) => {
+      if (path !== undefined) {
+        pickWorkspace(path);
+        setCwd(path);
+      }
+      setSessionId(null);
+    },
+    [pickWorkspace],
+  );
 
   const onKillSession = useCallback(
     async (id: string) => {
@@ -277,7 +370,7 @@ function Shell({
     (key: string) => {
       switch (key) {
         case 'new':
-          void onNewSession();
+          onNewSession();
           break;
         case 'compact':
           void session.compact();
@@ -300,6 +393,20 @@ function Shell({
     [onKillSession, onNewSession, sessionId, session],
   );
 
+  /**
+   * Rendered-component actions (buttons/forms in agent UI) loop back to pi as a
+   * normal message. Steer when a run is already going.
+   */
+  const sendAction = useCallback(
+    (action: string) => {
+      const behavior = session.transcript.running ? ('steer' as const) : undefined;
+      void guardedPrompt(action, behavior ? { behavior } : {});
+    },
+    [guardedPrompt, session.transcript.running],
+  );
+
+  /* Every hook sits above this guard: the boot-error screen must not change
+     the hook order the shell renders with. */
   if (bootError !== null && sessionId === null) {
     return (
       <Flexbox align="center" justify="center" style={{ height: '100vh', padding: 24 }}>
@@ -312,14 +419,16 @@ function Shell({
           <button
             type="button"
             onClick={() => {
-              setBootError(null);
               void (async () => {
-                const loaded = await bridge.config().catch(() => null);
-                if (loaded) {
+                try {
+                  const loaded = await bridge.config();
                   setConfig(loaded);
-                  const target = boot.cwd || loaded.defaultCwd;
+                  const target = boot.cwd && boot.cwd.length > 0 ? boot.cwd : loaded.defaultCwd;
                   setCwd(target);
-                  await startSession(target);
+                  savePrefs({ cwd: target });
+                  setBootError(null);
+                } catch (cause) {
+                  setBootError(errorText(cause));
                 }
               })();
             }}
@@ -340,18 +449,6 @@ function Shell({
   }
 
   const empty = session.transcript.entries.length === 0;
-
-  /**
-   * Rendered-component actions (buttons/forms in agent UI) loop back to pi as a
-   * normal message. Steer when a run is already going.
-   */
-  const sendAction = useCallback(
-    (action: string) => {
-      const behavior = session.transcript.running ? ('steer' as const) : undefined;
-      void session.prompt(action, behavior ? { behavior } : {});
-    },
-    [session],
-  );
 
   return (
     <Flexbox
@@ -376,8 +473,11 @@ function Shell({
           onToggle={() => { setSidebarCollapsed((prev) => !prev); }}
           piVersion={config?.piVersion ?? null}
           themeMode={themeMode}
-          connected={session.status === 'live'}
-          onNewSession={() => { void onNewSession(); }}
+          /* With lazy sessions the shell starts detached on purpose: config is
+             loaded and the first message creates the pi session, so "no session
+             id" means ready-to-send, not offline. */
+          connected={session.status === 'live' || sessionId === null}
+          onNewSession={() => { onNewSession(); }}
           onToggleTheme={onToggleTheme}
           onOpenSettings={() => { setAppSettingsOpen(true); }}
           region={(wide, expandSidebar) => (
@@ -390,19 +490,17 @@ function Shell({
               stored={allStored}
               currentId={sessionId}
               onSwitch={setSessionId}
-              onNewSession={(path) => {
-                pickWorkspace(path);
-                void startSession(path);
-              }}
+              onNewSession={(path) => { onNewSession(path); }}
               onKill={(id) => { void onKillSession(id); }}
               onRename={(id, name) => { void onRenameSession(id, name); }}
-              onResume={(entry) => { void startSession(entry.cwd, entry.path); }}
+              onResume={(entry) => { void openSession(entry.cwd, entry.path); }}
               onDeleteStored={(entry) => {
                 void bridge.deleteStoredSession(entry.path).then(() => loadStored());
               }}
               onPickWorkspace={(path) => {
                 pickWorkspace(path);
-                void startSession(path);
+                setCwd(path);
+                setSessionId(null);
               }}
               onSetDefault={(path) => { savePrefs({ cwd: path }); }}
               onForgetWorkspace={forgetWorkspace}
@@ -507,8 +605,10 @@ function Shell({
         </Flexbox>
 
         <Composer
-          api={session}
-          disabled={sessionId === null}
+          api={composerApi}
+          /* Nothing to send to yet is not a reason to lock the composer: the
+             first send creates the session (see guardedPrompt). */
+          disabled={false}
           contextPercent={contextPercent}
           seedText={seedText}
           onSeedConsumed={() => setSeedText(null)}
@@ -528,7 +628,8 @@ function Shell({
         onSelect={(path) => {
           setPickerOpen(false);
           pickWorkspace(path);
-          void startSession(path);
+          setCwd(path);
+          setSessionId(null);
         }}
       />
 
