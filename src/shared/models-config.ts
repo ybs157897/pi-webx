@@ -68,9 +68,12 @@ export interface ModelUpsertRequest {
 }
 
 export interface ModelProviderUpsertRequest {
+  /** '' clears the field; omitted keeps the configured value. */
   name?: string;
+  /** '' clears the field; omitted keeps the configured value. */
   baseUrl?: string;
-  api?: PiApiKind;
+  /** '' clears the field; omitted keeps the configured value. */
+  api?: PiApiKind | '';
   authHeader?: boolean;
   /**
    * Omitted → keep the configured key. `{remove:true}` deletes the field.

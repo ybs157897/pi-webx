@@ -15,6 +15,7 @@ import {
   type ServerFrame,
 } from '../src/shared/protocol';
 import { buildServerConfig } from './config';
+import { ModelDiscoveryError, assertPublicHttpUrl, discoverModels } from './model-discovery';
 import {
   ModelConfigError,
   deleteModel as deleteModelEntry,
@@ -28,7 +29,7 @@ import {
   PiHost,
   type HostSubscriber,
 } from './pi/host';
-import { clampStoredLimit, deleteStoredSession, listStoredSessions, recentStoredCwds, StoredSessionError } from './stored-sessions';
+import { clampStoredLimit, deleteStoredSession, listStoredSessions, recentStoredCwds, sessionsRoot, StoredSessionError } from './stored-sessions';
 
 /** SSE keep-alive cadence. */
 const HEARTBEAT_MS = 15_000;
@@ -157,6 +158,14 @@ export function createApiRouter(manager: PiHost): Router {
 
   router.delete('/stored-sessions', async (req: Request, res: Response) => {
     const target = typeof req.query.path === 'string' ? req.query.path : '';
+    // Entry-visible containment — the callee re-runs its own checks; this
+    // keeps the trust boundary at the route for anything filesystem-bound.
+    if (target.trim().length === 0) {
+      return sendError(res, 400, 'path 不能为空');
+    }
+    if (!isInsideSessionsRoot(target)) {
+      return sendError(res, 400, '只能删除 pi 会话目录里的文件');
+    }
     try {
       // deleteStoredSession is async: without the await its guard errors would
       // surface as unhandled rejections after the 200 has already been sent.
@@ -174,6 +183,25 @@ export function createApiRouter(manager: PiHost): Router {
 
   router.get('/models-config', (_req: Request, res: Response) => {
     res.json(describeModelConfig());
+  });
+
+  router.post('/models-config/discover', async (req: Request, res: Response) => {
+    const body = isRecord(req.body) ? req.body : {};
+    try {
+      // The base URL is validated at the entry (protocol + literal host) before
+      // it flows anywhere; discovery re-validates and DNS-checks at fetch time.
+      const baseUrl = optionalString(body['baseUrl']);
+      const providerId = optionalString(body['providerId']);
+      const apiKey = apiKeyFormValue(body['apiKey']);
+      const models = await discoverModels({
+        ...(baseUrl === undefined ? {} : { baseUrl: assertPublicHttpBaseUrl(baseUrl) }),
+        ...(providerId === undefined ? {} : { providerId }),
+        ...(apiKey === undefined ? {} : { apiKey }),
+      });
+      res.json({ models });
+    } catch (error) {
+      sendModelDiscoveryError(res, error);
+    }
   });
 
   router.put('/models-config/providers/:id', async (req: Request, res: Response) => {
@@ -467,6 +495,50 @@ function sendModelConfigError(res: Response, error: unknown): void {
     return;
   }
   sendError(res, 500, errorMessage(error));
+}
+
+function sendModelDiscoveryError(res: Response, error: unknown): void {
+  if (error instanceof ModelDiscoveryError) {
+    sendError(res, error.status, error.message);
+    return;
+  }
+  sendModelConfigError(res, error);
+}
+
+/** Optional free-form string field: blank means "not supplied". */
+function optionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/** `body.apiKey` is the editor form's shape; a blank value falls back upstream. */
+function apiKeyFormValue(value: unknown): string | undefined {
+  if (!isRecord(value)) return undefined;
+  return optionalString(value['value']);
+}
+
+/**
+ * Entry-visible URL admission for discovery: protocol + literal-host checks
+ * (no DNS yet), returning the trailing-slash-normalized URL on success.
+ */
+function assertPublicHttpBaseUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  assertPublicHttpUrl(trimmed);
+  return trimmed;
+}
+
+/**
+ * Entry-visible containment for stored-session deletion: the candidate must
+ * resolve strictly inside pi's sessions directory. The callee re-runs its own
+ * (stricter, format-aware) checks; this keeps the boundary at the route.
+ */
+function isInsideSessionsRoot(candidate: string): boolean {
+  const resolved = path.resolve(candidate.trim());
+  const relative = path.relative(sessionsRoot(), resolved);
+  if (relative.length === 0) return false;
+  if (relative === '..' || relative.startsWith(`..${path.sep}`)) return false;
+  return !path.isAbsolute(relative);
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -252,6 +252,27 @@ export function describeModelConfig(): ModelConfigResponse {
   return { revision, path: CONFIG_PATH, providers };
 }
 
+/**
+ * Server-internal read of one provider's raw settings. Unlike
+ * `describeModelConfig` this may surface the *unresolved* `apiKey` (literal /
+ * `$ENV` / `!shell`), because callers such as model discovery have to talk to
+ * the provider themselves. The value must never cross the wire back to a client.
+ */
+export function readProviderCredentials(
+  id: string,
+): { baseUrl?: string; apiKey?: string } | undefined {
+  const providerId = cleanText(id, 120);
+  if (!providerId) return undefined;
+  const raw = readRaw().providers[providerId];
+  if (!raw) return undefined;
+  const baseUrl = cleanText(raw['baseUrl'], MAX_TEXT);
+  const apiKey = cleanText(raw['apiKey'], MAX_TEXT);
+  return {
+    ...(baseUrl ? { baseUrl } : {}),
+    ...(apiKey ? { apiKey } : {}),
+  };
+}
+
 export async function upsertProvider(
   id: string,
   body: ModelProviderUpsertRequest,
@@ -264,19 +285,32 @@ export async function upsertProvider(
   const existing = config.providers[providerId];
   const next: RawRecord = { ...(existing ?? {}) };
 
-  const baseUrl = cleanText(body['baseUrl'] as unknown, MAX_TEXT);
-  if (baseUrl !== undefined) next['baseUrl'] = assertHttpUrl(baseUrl, 'baseUrl');
-
-  const api = cleanText(body['api'] as unknown, 40);
-  if (api !== undefined) {
-    if (!(API_KINDS as readonly string[]).includes(api)) {
-      throw new ModelConfigError(400, `不支持的 api 类型：${api}`);
-    }
-    next['api'] = api;
+  // A string field sent as '' clears it (the editor form's honest "empty");
+  // omitted keeps whatever is configured, which is what makes saving a
+  // redacted view safe.
+  if (typeof body['baseUrl'] === 'string') {
+    const baseUrl = cleanText(body['baseUrl'], MAX_TEXT);
+    if (baseUrl === undefined) delete next['baseUrl'];
+    else next['baseUrl'] = assertHttpUrl(baseUrl, 'baseUrl');
   }
 
-  const name = cleanText(body['name'] as unknown, 200);
-  if (name !== undefined) next['name'] = name;
+  if (typeof body['api'] === 'string') {
+    const api = cleanText(body['api'], 40);
+    if (api === undefined) {
+      delete next['api'];
+    } else {
+      if (!(API_KINDS as readonly string[]).includes(api)) {
+        throw new ModelConfigError(400, `不支持的 api 类型：${api}`);
+      }
+      next['api'] = api;
+    }
+  }
+
+  if (typeof body['name'] === 'string') {
+    const name = cleanText(body['name'], 200);
+    if (name === undefined) delete next['name'];
+    else next['name'] = name;
+  }
   // Explicit boolean wins both ways, so a saved editor form can turn it off.
   if (typeof body['authHeader'] === 'boolean') {
     if (body['authHeader']) next['authHeader'] = true;
@@ -299,8 +333,8 @@ export async function upsertProvider(
   const models = normalizeModels(body['models']);
   if (models !== undefined) next['models'] = models;
 
-  if (!existing && !next['baseUrl'] && !next['api']) {
-    throw new ModelConfigError(400, '新 provider 至少需要 baseUrl 或 api');
+  if (!next['baseUrl'] && !next['api']) {
+    throw new ModelConfigError(400, 'provider 至少需要 baseUrl 或 api 之一');
   }
 
   config.providers[providerId] = next;
