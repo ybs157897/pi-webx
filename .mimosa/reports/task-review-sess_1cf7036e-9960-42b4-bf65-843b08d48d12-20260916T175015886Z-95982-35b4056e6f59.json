@@ -1,0 +1,797 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260916T175015886Z-95982-35b4056e6f59",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "baseline-read",
+      "target": "src/lib/modelsConfig.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/Field.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/ModelListEditor.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/ModelsDrawer.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/ProviderEditor.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/ProviderRow.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/models/providerDraft.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 42,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 10
+    },
+    "change_tracking": {
+      "touched_observed": 8,
+      "touched_retained": 8,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 17,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 17,
+      "selected_files": 17,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 17,
+      "scanned_files": 17,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "baseline_snapshot_unreadable": 7,
+      "project_check_failed": 7
+    },
+    "reasons": [
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/lib/modelsConfig.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/Field.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelListEditor.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelsDrawer.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderEditor.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderRow.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/providerDraft.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/lib/modelsConfig.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/Field.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelListEditor.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelsDrawer.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderEditor.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderRow.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/providerDraft.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-16T17:50:15.886Z",
+  "session_id": "sess_1cf7036e-9960-42b4-bf65-843b08d48d12",
+  "target": ".",
+  "revision": null,
+  "rules_version": "unavailable",
+  "diff_hash": "f63fc917fe95908612ef15731e66db8fdd26d3c18b47e15671a94dbc56fea707",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 17,
+    "changed_files": [
+      {
+        "file": "server/models-config.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 387
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "058e6bb2dd8c2dcc89aede95fa1c79b6dacef2ce9cde4cdb7bd604306e961041"
+      },
+      {
+        "file": "server/routes.ts",
+        "ranges": [
+          {
+            "start": 18,
+            "end": 25
+          },
+          {
+            "start": 32,
+            "end": 32
+          },
+          {
+            "start": 159,
+            "end": 213
+          },
+          {
+            "start": 468,
+            "end": 475
+          }
+        ],
+        "before_hash": "81eb4ec79bbe6c83f284b968dde41bdfedfae707b41454e67ab85aa5471b2fe5",
+        "after_hash": "f21812b3a2d4e58ca60a7c56fc59c4166e7403bc9d4d3f210b1597bed4795de6"
+      },
+      {
+        "file": "server/stored-sessions.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 1
+          },
+          {
+            "start": 51,
+            "end": 100
+          }
+        ],
+        "before_hash": "e55e7d91234ce9a80a764edc3f017a0a8c5803a88d2fc4d5ae9af16326a18dbc",
+        "after_hash": "6383f2231aa3d37342b4909275e7a50f1e10441a40e03b3fcb0ebe9b796ee9f6"
+      },
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 25,
+            "end": 25
+          },
+          {
+            "start": 69,
+            "end": 71
+          },
+          {
+            "start": 89,
+            "end": 89
+          },
+          {
+            "start": 92,
+            "end": 93
+          },
+          {
+            "start": 95,
+            "end": 95
+          },
+          {
+            "start": 101,
+            "end": 124
+          },
+          {
+            "start": 170,
+            "end": 171
+          },
+          {
+            "start": 174,
+            "end": 175
+          },
+          {
+            "start": 356,
+            "end": 356
+          },
+          {
+            "start": 366,
+            "end": 366
+          },
+          {
+            "start": 368,
+            "end": 371
+          },
+          {
+            "start": 374,
+            "end": 374
+          },
+          {
+            "start": 378,
+            "end": 380
+          },
+          {
+            "start": 382,
+            "end": 382
+          },
+          {
+            "start": 543,
+            "end": 543
+          },
+          {
+            "start": 548,
+            "end": 556
+          }
+        ],
+        "before_hash": "144e385c804218901a8f3ed1b7fc038edf91b11a8a481caf5e5fb4007f4eee2f",
+        "after_hash": "b249da5288d3ed0ff158a893331a0734d497cf92612a457ecd9c254ae6e9f341"
+      },
+      {
+        "file": "src/components/models/Field.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 53
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "a20a58ca23d65b9627e348a7a5d46e024bd5b3f8b8f81aa885ef4ff8eab9aa20"
+      },
+      {
+        "file": "src/components/models/ModelListEditor.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 169
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "45d34de1749df0fd29fb4d2ef69862caf1c8aa2e4d888f8998a85ecd78c17320"
+      },
+      {
+        "file": "src/components/models/ModelsDrawer.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 272
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "698b911c18995307b4fe3d16bb3a63b1cc86eee844bcc91b42c1783a9546c248"
+      },
+      {
+        "file": "src/components/models/providerDraft.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 264
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "986d5b367087b68b74022875b24d610f08d78008180818de8b658c64913b2c27"
+      },
+      {
+        "file": "src/components/models/ProviderEditor.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 282
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "5053d3afbc1da446a751fe33e460eb0401478189cb0140595bbf951772436ca1"
+      },
+      {
+        "file": "src/components/models/ProviderRow.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 159
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "ce2af8044c78ec10d31b9ac320e34e93c22f0c8252cf328523275fdf657bd9bf"
+      },
+      {
+        "file": "src/components/SessionList.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 4
+          },
+          {
+            "start": 14,
+            "end": 14
+          },
+          {
+            "start": 41,
+            "end": 73
+          },
+          {
+            "start": 152,
+            "end": 173
+          },
+          {
+            "start": 317,
+            "end": 317
+          },
+          {
+            "start": 321,
+            "end": 322
+          },
+          {
+            "start": 326,
+            "end": 326
+          },
+          {
+            "start": 332,
+            "end": 359
+          },
+          {
+            "start": 376,
+            "end": 376
+          },
+          {
+            "start": 382,
+            "end": 382
+          },
+          {
+            "start": 397,
+            "end": 409
+          },
+          {
+            "start": 431,
+            "end": 432
+          },
+          {
+            "start": 446,
+            "end": 446
+          },
+          {
+            "start": 493,
+            "end": 509
+          },
+          {
+            "start": 555,
+            "end": 570
+          },
+          {
+            "start": 636,
+            "end": 647
+          }
+        ],
+        "before_hash": "d663b4996f4e6e9e30cffd536522caae67153383e798f72f78529a453c7fa0a6",
+        "after_hash": "30bc23352193fba1bde4ed0e71bb1272434585ac98d7ed853b688c8ff871e80b"
+      },
+      {
+        "file": "src/components/SessionSidebar.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 3
+          },
+          {
+            "start": 14,
+            "end": 15
+          },
+          {
+            "start": 25,
+            "end": 25
+          },
+          {
+            "start": 30,
+            "end": 30
+          },
+          {
+            "start": 34,
+            "end": 34
+          },
+          {
+            "start": 47,
+            "end": 47
+          },
+          {
+            "start": 57,
+            "end": 57
+          },
+          {
+            "start": 62,
+            "end": 62
+          },
+          {
+            "start": 66,
+            "end": 66
+          },
+          {
+            "start": 95,
+            "end": 97
+          },
+          {
+            "start": 111,
+            "end": 111
+          },
+          {
+            "start": 117,
+            "end": 117
+          },
+          {
+            "start": 153,
+            "end": 153
+          }
+        ],
+        "before_hash": "4e6eb4439e498caee9c9131fee037c6c4d5003e7305b8e6fda1d60045f25e680",
+        "after_hash": "7f06b8df1a20dc2106bd6e9795842587f7e94635ca5fabcd96d555ed30440fbe"
+      },
+      {
+        "file": "src/components/WorkspaceSwitcher.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 4
+          },
+          {
+            "start": 18,
+            "end": 19
+          },
+          {
+            "start": 24,
+            "end": 31
+          },
+          {
+            "start": 43,
+            "end": 43
+          },
+          {
+            "start": 48,
+            "end": 48
+          },
+          {
+            "start": 54,
+            "end": 54
+          },
+          {
+            "start": 56,
+            "end": 119
+          },
+          {
+            "start": 122,
+            "end": 123
+          },
+          {
+            "start": 128,
+            "end": 128
+          },
+          {
+            "start": 130,
+            "end": 134
+          },
+          {
+            "start": 136,
+            "end": 136
+          },
+          {
+            "start": 139,
+            "end": 140
+          },
+          {
+            "start": 145,
+            "end": 145
+          },
+          {
+            "start": 148,
+            "end": 158
+          },
+          {
+            "start": 182,
+            "end": 194
+          }
+        ],
+        "before_hash": "7f7c6e3ca2990ec115df5d0b8a2a1324971fa42405025d583df5c9df1012c458",
+        "after_hash": "eeccc6f1ad761b7b01314c7e14b419adf67c62144df9519c8b4df85b770754b2"
+      },
+      {
+        "file": "src/lib/api.ts",
+        "ranges": [
+          {
+            "start": 114,
+            "end": 121
+          }
+        ],
+        "before_hash": "89aea9e93ec606d91afa0084251f26c5d8612747a8102ec03bb73de1e26295a6",
+        "after_hash": "ef0d97f3ee5f9d9729d8da082fa642a48ac8c53d09ea15681c8839f91f6a87bd"
+      },
+      {
+        "file": "src/lib/modelsConfig.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 266
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "f5a4be8239634dababe14bf8a4aed60b8e978a10b05ec8da447921ea2f855274"
+      },
+      {
+        "file": "src/lib/storage.ts",
+        "ranges": [
+          {
+            "start": 13,
+            "end": 14
+          },
+          {
+            "start": 34,
+            "end": 40
+          },
+          {
+            "start": 50,
+            "end": 51
+          }
+        ],
+        "before_hash": "d4036df7e5c221e32bef0fd6389b0c323a68b4c2f05a15c7b78eb38c3314f024",
+        "after_hash": "518e2b76a952433d086ea69c7766511a09f253c8140a149198beb7e5c414b8f3"
+      },
+      {
+        "file": "src/shared/models-config.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 81
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "7c73ad321521e0a3ee61b29086bdb0671477e75e26bec148e797574672b97c56"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-16T17:50:15.003Z",
+    "completed_at": "2026-09-16T17:50:15.886Z",
+    "duration_ms": 883,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 883,
+    "peakMemoryBytes": 228589568,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 17,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [
+    {
+      "finding_id": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "file": "server/models-config.ts",
+      "line": 99,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T17:23:14.898Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "file": "server/models-config.ts",
+      "line": 8,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T17:24:01.405Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "file": "server/models-config.ts",
+      "line": 7,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T17:24:35.244Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "file": "server/models-config.ts",
+      "line": 7,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T17:25:51.878Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "candidate_before_evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "post_change_evidence_hash_at_previous_location": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "file": "server/models-config.ts",
+      "line": 7,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T17:25:51.878Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "candidate_before_evidence_hash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "post_change_evidence_hash_at_previous_location": "684888c0ebb17f374298b65ee2807526c066094c701bcc7ebbe1c1095f494fc1",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    }
+  ],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T175015886Z-95982-35b4056e6f59.json",
+    "latest_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12.json",
+    "history_summary": ".mimosa/history/run-20260916T175015886Z-95982-35b4056e6f59.json"
+  }
+}

@@ -1,0 +1,682 @@
+/**
+ * Self-check harness for the transcript reducer (`src/lib/transcript.ts`).
+ *
+ * Plain `node:assert` + console output, no test framework:
+ *
+ *   npx tsx scripts/check-transcript.ts
+ *
+ * It covers the reducer's load-bearing semantics (snapshot reconstruction,
+ * streamed turns, cumulative vs delta output, immutability, unknown events)
+ * plus the event types whose semantics are easy to get wrong.
+ */
+
+import assert from 'node:assert/strict';
+
+import type { PiAgentMessage, PiEvent } from '../src/shared/protocol';
+import {
+  applyPiEvent,
+  applySnapshot,
+  createTranscript,
+} from '../src/lib/transcript';
+import type {
+  AssistantEntry,
+  BashEntry,
+  CompactionEntry,
+  NoticeEntry,
+  ToolResultEntry,
+  TranscriptState,
+  UserEntry,
+} from '../src/shared/transcript';
+
+let failures = 0;
+
+function check(name: string, fn: () => void): void {
+  try {
+    fn();
+    console.log(`ok   ${name}`);
+  } catch (error) {
+    failures += 1;
+    console.error(`FAIL ${name}`);
+    console.error(error instanceof Error ? error.message : String(error));
+  }
+}
+
+const ev = (event: unknown): PiEvent => event as PiEvent;
+
+function entriesOfKind<K extends TranscriptState['entries'][number]['kind']>(
+  state: TranscriptState,
+  kind: K,
+): Extract<TranscriptState['entries'][number], { kind: K }>[] {
+  return state.entries.filter((entry): entry is Extract<TranscriptState['entries'][number], { kind: K }> =>
+    entry.kind === kind,
+  );
+}
+
+function only<K extends TranscriptState['entries'][number]['kind']>(
+  state: TranscriptState,
+  kind: K,
+): Extract<TranscriptState['entries'][number], { kind: K }> {
+  const found = entriesOfKind(state, kind);
+  assert.equal(found.length, 1, `expected exactly 1 ${kind} entry, got ${found.length}`);
+  return found[0]!;
+}
+
+/* 1 ------------------------------------------------------------------------ */
+
+check('snapshot: [user, assistant(text+toolCall), toolResult] -> run is resolved', () => {
+  const messages: PiAgentMessage[] = [
+    { role: 'user', content: 'List the files', timestamp: 1000 },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'Let me look.' },
+        { type: 'toolCall', id: 'call_1', name: 'bash', arguments: { command: 'ls' } },
+      ],
+      model: 'claude-sonnet-4-20250514',
+      provider: 'anthropic',
+      usage: { input: 10, output: 5, cacheRead: 1, cacheWrite: 2, totalTokens: 15, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.25 } },
+      stopReason: 'toolUse',
+      timestamp: 2000,
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'call_1',
+      toolName: 'bash',
+      content: [{ type: 'text', text: 'file.txt' }],
+      details: { truncation: null },
+      isError: false,
+      timestamp: 3000,
+    },
+  ];
+
+  const state = applySnapshot(createTranscript(), messages);
+  assert.equal(state.entries.length, 2, 'toolResult must attach to its call, not add an entry');
+  const user = only(state, 'user') as UserEntry;
+  assert.equal(user.text, 'List the files');
+  assert.equal(user.imageCount, 0);
+
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.text, 'Let me look.');
+  assert.equal(assistant.streaming, false);
+  assert.equal(assistant.tools.length, 1);
+  const run = assistant.tools[0]!;
+  assert.equal(run.toolCallId, 'call_1');
+  assert.equal(run.toolName, 'bash');
+  assert.equal(run.status, 'success');
+  assert.equal(run.output, 'file.txt');
+  assert.deepEqual(run.args, { command: 'ls' });
+  assert.equal(run.restored, true);
+  assert.equal(run.startedAt, 2000);
+  assert.equal(run.endedAt, 3000);
+  assert.deepEqual(run.details, { truncation: null });
+  assert.equal(assistant.usage?.totalTokens, 15);
+  assert.equal(assistant.usage?.cost, 0.25);
+  assert.equal(assistant.stopReason, 'toolUse');
+  assert.equal(state.streamingEntryId, null);
+});
+
+/* 2 ------------------------------------------------------------------------ */
+
+check('stream: message_start -> text deltas -> message_end yields Hello / not streaming', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_start', contentIndex: 0 } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'Hel' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'lo' } }),
+  );
+  // text_end carries the finished block; it must not duplicate the deltas.
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: 'Hello' } }),
+  );
+  assert.equal((only(state, 'assistant') as AssistantEntry).text, 'Hello');
+
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Hello' }],
+        stopReason: 'stop',
+        timestamp: 4000,
+      },
+    }),
+  );
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.text, 'Hello');
+  assert.equal(assistant.streaming, false);
+  assert.equal(state.streamingEntryId, null);
+  assert.equal(assistant.stopReason, 'stop');
+});
+
+/* 3 ------------------------------------------------------------------------ */
+
+check('tool_execution_update: cumulative partialResult replaces output', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'call_9', toolName: 'bash' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'tool_execution_update',
+      toolCallId: 'call_9',
+      toolName: 'bash',
+      partialResult: { content: [{ type: 'text', text: 'line 1\n' }] },
+    }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'tool_execution_update',
+      toolCallId: 'call_9',
+      toolName: 'bash',
+      partialResult: { content: [{ type: 'text', text: 'line 1\nline 2\n' }] },
+    }),
+  );
+  const run = (only(state, 'assistant') as AssistantEntry).tools[0]!;
+  assert.equal(run.output, 'line 1\nline 2\n', 'output must be the second (cumulative) value only');
+  assert.equal(run.status, 'running');
+});
+
+/* 4 ------------------------------------------------------------------------ */
+
+check('unknown event type is ignored and does not throw', () => {
+  let state = applyPiEvent(createTranscript(), ev({ type: 'message_start', message: { role: 'user', content: 'hi' } }));
+  const before = structuredClone(state);
+  state = applyPiEvent(state, ev({ type: 'totally_unknown' }));
+  assert.deepStrictEqual(state, before);
+  state = applyPiEvent(state, ev({ type: 'response', command: 'get_state', success: true }));
+  assert.deepStrictEqual(state, before);
+  // Structural only: no entry, no throw.
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'turn_end', message: { role: 'assistant', content: [] } }));
+  assert.deepStrictEqual(state, before);
+});
+
+/* 5 ------------------------------------------------------------------------ */
+
+check('immutability: input state and its arrays are never mutated', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'hi' } }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'x' } }),
+  );
+  const snapshot = structuredClone(state);
+  const entriesRef = state.entries;
+
+  const next = applyPiEvent(
+    state,
+    ev({
+      type: 'message_update',
+      assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: 'y' },
+    }),
+  );
+
+  assert.deepStrictEqual(state, snapshot, 'original state must be untouched');
+  assert.strictEqual(state.entries, entriesRef, 'original entries array identity must be untouched');
+  assert.notStrictEqual(next.entries, state.entries, 'a change must produce a new entries array');
+  assert.notStrictEqual(next.entries[1], state.entries[1], 'the touched entry must be a new object');
+  assert.strictEqual(next.entries[0], state.entries[0], 'untouched entries are structurally shared');
+  assert.equal((next.entries[1] as AssistantEntry).text, 'xy');
+});
+
+/* 6 ------------------------------------------------------------------------ */
+
+check('thinking deltas do not pollute text', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'Let me ' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'check.' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_end', contentIndex: 0, content: 'Let me check.' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: 'Answer.' } }),
+  );
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.thinking, 'Let me check.');
+  assert.equal(assistant.text, 'Answer.');
+});
+
+/* ------------------------------------------------------------ extra coverage */
+
+check('agent_settled closes streaming entries and running tools', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'agent_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'call_a', toolName: 'read' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'auto_retry_start', attempt: 1, maxAttempts: 3, delayMs: 2000, errorMessage: 'overloaded' }),
+  );
+  assert.equal(state.running, true);
+  assert.equal(state.retrying?.attempt, 1);
+  assert.equal(state.retrying?.delayMs, 2000);
+  assert.equal(entriesOfKind(state, 'notice').length, 1);
+
+  state = applyPiEvent(state, ev({ type: 'agent_end', willRetry: true }));
+  assert.equal(state.running, true, 'a retry keeps the run alive');
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
+  assert.equal(state.running, false);
+  assert.equal(state.streamingEntryId, null);
+  assert.equal(state.retrying, null);
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.streaming, false);
+  assert.equal(assistant.tools[0]!.status, 'success');
+});
+
+check('toolcall delta fragments buffer into args, malformed JSON is preserved', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'call_j', toolName: 'bash' } }),
+  );
+  for (const fragment of ['{"comm', 'and":"ls ', '-la"}']) {
+    state = applyPiEvent(
+      state,
+      ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 0, delta: fragment } }),
+    );
+  }
+  let run = (only(state, 'assistant') as AssistantEntry).tools[0]!;
+  assert.deepEqual(run.args, { command: 'ls -la' });
+
+  // Malformed: keep {} but never lose the raw text.
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 1, id: 'call_bad', toolName: 'write' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 1, delta: '{"path":"x"' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 1 } }),
+  );
+  run = (only(state, 'assistant') as AssistantEntry).tools[1]!;
+  assert.deepEqual(run.args, {});
+  assert.deepEqual(run.details, { rawArgs: '{"path":"x"' });
+});
+
+check('tool_execution_end sets output/status/endedAt; message_end keeps finished runs', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'call_e', toolName: 'bash' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'tool_execution_end',
+      toolCallId: 'call_e',
+      toolName: 'bash',
+      result: { content: [{ type: 'text', text: 'done' }], details: { truncation: null } },
+      isError: false,
+    }),
+  );
+  let run = (only(state, 'assistant') as AssistantEntry).tools[0]!;
+  assert.equal(run.status, 'success');
+  assert.equal(run.output, 'done');
+  assert.equal(typeof run.endedAt, 'number');
+  const endedAt = run.endedAt;
+
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Ran it.' },
+          { type: 'toolCall', id: 'call_e', name: 'bash', arguments: { command: 'ls' } },
+        ],
+        stopReason: 'toolUse',
+        timestamp: 5000,
+      },
+    }),
+  );
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  run = assistant.tools[0]!;
+  assert.equal(run.status, 'success', 'a finished run must not be resurrected to running');
+  assert.equal(run.output, 'done');
+  assert.equal(run.endedAt, endedAt);
+  assert.deepEqual(run.args, { command: 'ls' });
+  assert.equal(assistant.text, 'Ran it.');
+});
+
+check('live toolResult attaches to its run; orphan becomes a standalone entry', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 0, id: 'call_m', toolName: 'bash' } }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'message_start',
+      message: { role: 'toolResult', toolCallId: 'call_m', toolName: 'bash', content: [{ type: 'text', text: 'out' }], isError: false },
+    }),
+  );
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'call_m', toolName: 'bash', content: [{ type: 'text', text: 'out' }], isError: false },
+    }),
+  );
+  assert.equal(entriesOfKind(state, 'toolResult').length, 0, 'no duplicate entry for a known call');
+  assert.equal((only(state, 'assistant') as AssistantEntry).tools[0]!.output, 'out');
+
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: 'call_orphan', toolName: 'read', content: [{ type: 'text', text: 'orphan' }], isError: true },
+    }),
+  );
+  const orphan = only(state, 'toolResult') as ToolResultEntry;
+  assert.equal(orphan.run.toolCallId, 'call_orphan');
+  assert.equal(orphan.run.status, 'error');
+  assert.equal(orphan.run.output, 'orphan');
+});
+
+check('bash_execution_update appends to the entry with the matching command id', () => {
+  const base: TranscriptState = {
+    ...createTranscript(),
+    entries: [
+      { kind: 'bash', id: 'req-1', at: 1, command: 'ls', output: '', exitCode: null, cancelled: false, truncated: false, streaming: true },
+    ],
+  };
+  let state = applyPiEvent(base, ev({ type: 'bash_execution_update', id: 'req-1', delta: 'total 48\n' }));
+  state = applyPiEvent(state, ev({ type: 'bash_execution_update', id: 'req-1', delta: 'a.txt\n' }));
+  assert.equal((only(state, 'bash') as BashEntry).output, 'total 48\na.txt\n');
+
+  const ignored = applyPiEvent(state, ev({ type: 'bash_execution_update', id: 'nope', delta: 'x' }));
+  assert.deepStrictEqual(ignored, state, 'no matching entry: state unchanged');
+});
+
+check('compaction start/end flags and payloads', () => {
+  let state = applyPiEvent(createTranscript(), ev({ type: 'compaction_start', reason: 'threshold' }));
+  assert.equal(state.compacting, true);
+  const start = only(state, 'compaction') as CompactionEntry;
+  assert.equal(start.phase, 'start');
+
+  // Real pi payloads nest the result; the shared type also allows top-level fields.
+  state = applyPiEvent(
+    state,
+    ev({
+      type: 'compaction_end',
+      reason: 'threshold',
+      result: { summary: 'So far...', tokensBefore: 150000, estimatedTokensAfter: 32000 },
+      aborted: false,
+    }),
+  );
+  assert.equal(state.compacting, false);
+  const all = entriesOfKind(state, 'compaction') as CompactionEntry[];
+  assert.equal(all.length, 2);
+  assert.equal(all[0]!.phase, 'start');
+  assert.equal(all[0]!.summary, undefined, 'the start entry is not rewritten');
+  assert.equal(all[1]!.phase, 'end');
+  assert.equal(all[1]!.summary, 'So far...');
+  assert.equal(all[1]!.tokensBefore, 150000);
+  assert.equal(all[1]!.tokensAfter, 32000);
+  assert.equal(all[1]!.aborted, false);
+});
+
+check('retries surface notices; final failure clears retrying', () => {
+  let state = applyPiEvent(createTranscript(), ev({ type: 'auto_retry_start', attempt: 2, maxAttempts: 3, delayMs: 500, errorMessage: 'rate limited' }));
+  assert.deepEqual(state.retrying, { attempt: 2, maxAttempts: 3, delayMs: 500, error: 'rate limited' });
+  let notice = only(state, 'notice') as NoticeEntry;
+  assert.equal(notice.level, 'warning');
+  assert.match(notice.text, /attempt 2\/3/);
+  assert.equal(notice.detail, 'rate limited');
+
+  state = applyPiEvent(state, ev({ type: 'auto_retry_end', success: false, attempt: 3, finalError: 'still overloaded' }));
+  assert.equal(state.retrying, null);
+  const notices = entriesOfKind(state, 'notice') as NoticeEntry[];
+  assert.equal(notices.length, 2);
+  assert.equal(notices[1]!.level, 'error');
+  assert.equal(notices[1]!.detail, 'still overloaded');
+
+  state = applyPiEvent(state, ev({ type: 'summarization_retry_scheduled', attempt: 1, maxAttempts: 2, delayMs: 1000 }));
+  assert.equal(state.retrying?.attempt, 1);
+  state = applyPiEvent(state, ev({ type: 'summarization_retry_finished' }));
+  assert.equal(state.retrying, null);
+});
+
+check('queue_update replaces both queues', () => {
+  const state = applyPiEvent(
+    createTranscript(),
+    ev({ type: 'queue_update', steering: ['focus'], followUp: ['then summarise'] }),
+  );
+  assert.deepEqual(state.queued, { steering: ['focus'], followUp: ['then summarise'] });
+  const cleared = applyPiEvent(state, ev({ type: 'queue_update' }));
+  assert.deepEqual(cleared.queued, { steering: [], followUp: [] });
+});
+
+check('extension setTitle updates the title, other methods are ignored', () => {
+  let state = applyPiEvent(
+    createTranscript(),
+    ev({ type: 'extension_ui_request', id: 'u1', method: 'setTitle', title: 'pi - my project' }),
+  );
+  assert.equal(state.title, 'pi - my project');
+  const after = applyPiEvent(
+    state,
+    ev({ type: 'extension_ui_request', id: 'u2', method: 'notify', message: 'hi', notifyType: 'info' }),
+  );
+  assert.deepStrictEqual(after, state);
+});
+
+check('extension_error becomes an error notice with context', () => {
+  const state = applyPiEvent(
+    createTranscript(),
+    ev({ type: 'extension_error', extensionPath: '/tmp/ext.ts', event: 'tool_call', error: 'boom' }),
+  );
+  const notice = only(state, 'notice') as NoticeEntry;
+  assert.equal(notice.level, 'error');
+  assert.equal(notice.text, 'boom');
+  assert.match(notice.detail ?? '', /\/tmp\/ext\.ts/);
+  assert.match(notice.detail ?? '', /tool_call/);
+});
+
+check('snapshot is deterministic and preserves title/live flags', () => {
+  const messages: PiAgentMessage[] = [
+    { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', data: 'x', mimeType: 'image/png' }] },
+    { role: 'bashExecution', command: 'ls', output: 'a.txt\n', exitCode: 0, cancelled: false, truncated: false, fullOutputPath: null },
+    // Unknown role from a newer pi version: ignored, not fatal.
+    { role: 'custom', customType: 'note', content: 'hi' } as unknown as PiAgentMessage,
+    // Orphaned tool result: keeps its own entry.
+    { role: 'toolResult', toolCallId: 'gone', toolName: 'read', content: [{ type: 'text', text: 'stale' }], isError: false, timestamp: 42 },
+  ];
+  const seeded: TranscriptState = {
+    ...createTranscript(),
+    title: 'kept',
+    running: true,
+    retrying: { attempt: 1 },
+    queued: { steering: ['a'], followUp: [] },
+  };
+
+  const first = applySnapshot(seeded, messages);
+  const second = applySnapshot(seeded, messages);
+  assert.deepStrictEqual(first, second, 'snapshot ids/entries must be deterministic');
+
+  assert.equal(first.title, 'kept');
+  assert.equal(first.running, true, 'live flags are not derivable from history');
+  assert.deepEqual(first.retrying, { attempt: 1 });
+  assert.deepEqual(first.queued, { steering: ['a'], followUp: [] });
+
+  const user = only(first, 'user') as UserEntry;
+  assert.equal(user.text, 'look');
+  assert.equal(user.imageCount, 1);
+  assert.equal(user.id, 'snap-0');
+  assert.equal((only(first, 'bash') as BashEntry).id, 'snap-1');
+  const orphan = only(first, 'toolResult') as ToolResultEntry;
+  assert.equal(orphan.id, 'snap-3');
+  assert.equal(orphan.run.restored, true);
+  assert.equal(orphan.at, 42, 'uses the message timestamp');
+
+  const errored = applySnapshot(createTranscript(), [
+    { role: 'assistant', content: [{ type: 'text', text: '' }], stopReason: 'error', errorMessage: 'quota', timestamp: 7 },
+  ]);
+  assert.equal(errored.lastError, 'quota');
+});
+
+check('snapshot: assistant tool calls keep their order and fall back to the previous timestamp', () => {
+  const state = applySnapshot(createTranscript(), [
+    { role: 'user', content: 'go', timestamp: 111 },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'hmm' },
+        { type: 'toolCall', id: 'call_1', name: 'read' },
+        { type: 'toolCall', id: 'call_2', name: 'bash', arguments: { command: 'ls' } },
+      ],
+    },
+  ]);
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.at, 111, 'falls back to the previous entry timestamp');
+  assert.deepEqual(assistant.tools.map((run) => run.toolName), ['read', 'bash']);
+  assert.deepEqual(assistant.tools[0]!.args, {});
+  assert.equal(assistant.thinking, 'hmm');
+  assert.equal(assistant.text, '');
+  assert.equal(assistant.tools[0]!.startedAt, 111);
+});
+
+check('empty and malformed input never throws', () => {
+  const state = createTranscript();
+  const weird: unknown[] = [
+    undefined,
+    null,
+    42,
+    'nope',
+    {},
+    { type: 'message_start' },
+    { type: 'message_start', message: null },
+    { type: 'message_update' },
+    { type: 'message_update', assistantMessageEvent: {} },
+    { type: 'message_start', message: { role: 'wat' } },
+    { type: 'message_end', message: { role: 'wat' } },
+    { type: 'tool_execution_start' },
+    { type: 'tool_execution_update', toolCallId: 'x' },
+    { type: 'tool_execution_end' },
+    { type: 'bash_execution_update' },
+    { type: 'extension_ui_request', id: 'x', method: 'setTitle' },
+  ];
+  for (const payload of weird) {
+    const next = applyPiEvent(state, payload as PiEvent);
+    assert.equal(next.entries.length, 0, `unexpected entry for ${JSON.stringify(payload)}`);
+  }
+  assert.equal(applySnapshot(state, [] as PiAgentMessage[]).entries.length, 0);
+
+  // A content-less assistant message still opens an entry (pi may open a stream
+  // before any block arrives); it must not throw on the missing content array.
+  const bare = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant' } }));
+  const assistant = only(bare, 'assistant') as AssistantEntry;
+  assert.equal(assistant.text, '');
+  assert.equal(assistant.thinking, '');
+  assert.equal(assistant.streaming, true);
+
+  // ...and an assistant `message_end` with a junk `content` value still closes a
+  // turn cleanly (empty text) instead of throwing on a non-array.
+  const closed = applyPiEvent(
+    state,
+    ev({ type: 'message_end', message: { role: 'assistant', content: 42 } }),
+  );
+  const closedAssistant = only(closed, 'assistant') as AssistantEntry;
+  assert.equal(closedAssistant.text, '');
+  assert.equal(closedAssistant.streaming, false);
+  assert.equal(closed.streamingEntryId, null);
+});
+
+check('end-to-end turn: prompt -> thinking/text/tool stream -> result -> settle', () => {
+  let state = createTranscript();
+  for (const event of [
+    { type: 'agent_start' },
+    { type: 'turn_start' },
+    // pi echoes the prompt back before the assistant answers.
+    { type: 'message_start', message: { role: 'user', content: 'What is in this repo?', timestamp: 10 } },
+    { type: 'message_end', message: { role: 'user', content: 'What is in this repo?', timestamp: 10 } },
+    { type: 'message_start', message: { role: 'assistant', content: [] } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'Need to list files.' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'thinking_end', contentIndex: 0, content: 'Need to list files.' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 1, delta: 'Listing now.' } },
+    { type: 'message_update', usage: { input: 120, output: 8, totalTokens: 128, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0.01 } }, assistantMessageEvent: { type: 'toolcall_start', contentIndex: 2, id: 'call_x', toolName: 'bash' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_delta', contentIndex: 2, delta: '{"command":"ls"}' } },
+    { type: 'message_update', assistantMessageEvent: { type: 'toolcall_end', contentIndex: 2, toolCall: { type: 'toolCall', id: 'call_x', name: 'bash', arguments: { command: 'ls' } } } },
+    { type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Need to list files.' }, { type: 'text', text: 'Listing now.' }, { type: 'toolCall', id: 'call_x', name: 'bash', arguments: { command: 'ls' } }], stopReason: 'toolUse', timestamp: 20 } },
+    { type: 'turn_end' },
+    { type: 'tool_execution_start', toolCallId: 'call_x', toolName: 'bash', args: { command: 'ls' } },
+    { type: 'tool_execution_update', toolCallId: 'call_x', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'a.txt\n' }] } },
+    { type: 'tool_execution_end', toolCallId: 'call_x', toolName: 'bash', result: { content: [{ type: 'text', text: 'a.txt\nb.txt\n' }] }, isError: false },
+    { type: 'message_start', message: { role: 'toolResult', toolCallId: 'call_x', toolName: 'bash', content: [{ type: 'text', text: 'a.txt\nb.txt\n' }], isError: false, timestamp: 30 } },
+    { type: 'message_end', message: { role: 'toolResult', toolCallId: 'call_x', toolName: 'bash', content: [{ type: 'text', text: 'a.txt\nb.txt\n' }], isError: false, timestamp: 30 } },
+    { type: 'agent_end', messages: [], willRetry: false },
+    { type: 'agent_settled' },
+  ]) {
+    state = applyPiEvent(state, ev(event));
+  }
+
+  assert.equal(state.entries.length, 2, 'one user entry + one assistant entry');
+  assert.equal(state.running, false);
+  assert.equal(state.streamingEntryId, null);
+  assert.equal(state.lastError, null);
+
+  const user = only(state, 'user') as UserEntry;
+  assert.equal(user.text, 'What is in this repo?');
+
+  const assistant = only(state, 'assistant') as AssistantEntry;
+  assert.equal(assistant.text, 'Listing now.');
+  assert.equal(assistant.thinking, 'Need to list files.');
+  assert.equal(assistant.streaming, false);
+  assert.equal(assistant.stopReason, 'toolUse');
+  assert.equal(assistant.usage?.totalTokens, 128);
+  assert.equal(assistant.tools.length, 1);
+  const run = assistant.tools[0]!;
+  assert.equal(run.toolCallId, 'call_x');
+  assert.equal(run.status, 'success');
+  assert.equal(run.output, 'a.txt\nb.txt\n');
+  assert.deepEqual(run.args, { command: 'ls' });
+  assert.equal(entriesOfKind(state, 'toolResult').length, 0, 'no orphan entry for the tool result');
+});
+
+/* ------------------------------------------------------------------------ */
+
+if (failures > 0) {
+  console.error(`\n${failures} CHECK(S) FAILED`);
+  process.exitCode = 1;
+} else {
+  console.log('\nALL CHECKS PASSED');
+}

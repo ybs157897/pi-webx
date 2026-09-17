@@ -1,0 +1,123 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260916T171449684Z-89791-0ef0d4c56dce",
+  "runId": "20260916T171449684Z-89791-0ef0d4c56dce",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline_partial: baseline capture had enumeration or snapshot errors",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": null,
+  "diffHash": "3050e8a9148e13781c7f345f383cb4286cecb3a4e7a32ee65e960fd52557d499",
+  "rulesVersion": "unavailable",
+  "sessionHash": "667533ff5a02463bc30b9e5290e7b39dea74a0f90585190c92823da6da98d7f2",
+  "reportRef": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T171449684Z-89791-0ef0d4c56dce.json",
+  "events": [
+    {
+      "eventId": "hook-8a98f4858ff5d7152f9d68e25eed5c8a",
+      "findingId": "mimosa-a472cfdf7a27ca5b41b7c4a7",
+      "type": "finding_blocked",
+      "at": "2026-09-16T16:43:32.826Z",
+      "identity": {
+        "projectRelativeFile": "src/shared/uikit.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 496,
+      "endLine": 496,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3"
+      },
+      "sequence": 0
+    },
+    {
+      "eventId": "hook-5d8bf25f604481651062c4be81ca0099",
+      "findingId": "mimosa-a472cfdf7a27ca5b41b7c4a7",
+      "type": "static_fix_verified",
+      "at": "2026-09-16T16:44:39.992Z",
+      "identity": {
+        "projectRelativeFile": "src/shared/uikit.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 496,
+      "endLine": 496,
+      "reasonCode": "static_rescan_passed",
+      "reportedToAgent": false,
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "evidenceHash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3"
+      },
+      "sequence": 1
+    }
+  ],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/shared/uikit.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/uikit/UiRenderer.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/format.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "extensions/pi-webx-ui.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/usePiSession.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/uikit/UiShowcase.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/App.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-16T17:14:49.916Z"
+}

@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "pretooluse-09c12a49b01f44b3c4363af40f17903a",
+  "runId": null,
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "PreToolUse"
+  },
+  "revision": null,
+  "diffHash": null,
+  "rulesVersion": null,
+  "sessionHash": "667533ff5a02463bc30b9e5290e7b39dea74a0f90585190c92823da6da98d7f2",
+  "reportRef": null,
+  "events": [
+    {
+      "eventId": "hook-086618d5fca5e3d674cfa20a9bd5f61d",
+      "findingId": "mimosa-ae04e548909a03615aa567a2",
+      "type": "finding_blocked",
+      "at": "2026-09-16T15:30:44.311Z",
+      "identity": {
+        "projectRelativeFile": "scripts/e2e-bridge.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "3ad32562fdb5ee8e277bac9a188d06468dd480fe46a61e63b3d70b649c9d158c",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 25,
+      "endLine": 25,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "3ad32562fdb5ee8e277bac9a188d06468dd480fe46a61e63b3d70b649c9d158c"
+      },
+      "sequence": 0
+    },
+    {
+      "eventId": "hook-2fbdd1336beb50181e0f756881eb0fa4",
+      "findingId": "mimosa-d68b465ea7b9b146db63c19e",
+      "type": "finding_blocked",
+      "at": "2026-09-16T15:30:44.311Z",
+      "identity": {
+        "projectRelativeFile": "scripts/e2e-bridge.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "58f8becb54323fa8ed8827bafbfb49f54173ea2e423f5a79d6a56818e6544b85",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 74,
+      "endLine": 74,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "58f8becb54323fa8ed8827bafbfb49f54173ea2e423f5a79d6a56818e6544b85"
+      },
+      "sequence": 1
+    },
+    {
+      "eventId": "hook-bcc8c0609a7d74499c086470f826fdd4",
+      "findingId": "mimosa-9c80e9119f038f63312e969f",
+      "type": "finding_blocked",
+      "at": "2026-09-16T15:30:44.311Z",
+      "identity": {
+        "projectRelativeFile": "scripts/e2e-bridge.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "8653666f981a4214bfe4cc271f3ceb8dee5d3c8e55d57747a4bf9f6a26234d10",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 157,
+      "endLine": 157,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "8653666f981a4214bfe4cc271f3ceb8dee5d3c8e55d57747a4bf9f6a26234d10"
+      },
+      "sequence": 2
+    }
+  ],
+  "observedFindingIds": [],
+  "verifiedFiles": [],
+  "recordedAt": "2026-09-16T15:30:44.529Z"
+}

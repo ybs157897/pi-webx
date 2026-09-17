@@ -1,0 +1,616 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260916T162714516Z-85147-a5a09732efef",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "baseline-read",
+      "target": "src/components/ModelDrawer.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/ModelPicker.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/SessionList.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 32,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 9
+    },
+    "change_tracking": {
+      "touched_observed": 9,
+      "touched_retained": 9,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 12,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 12,
+      "selected_files": 12,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 12,
+      "scanned_files": 12,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "baseline_snapshot_unreadable": 3,
+      "project_check_failed": 3
+    },
+    "reasons": [
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/ModelDrawer.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/ModelPicker.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/SessionList.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/ModelDrawer.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/ModelPicker.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/SessionList.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-16T16:27:14.516Z",
+  "session_id": "sess_1cf7036e-9960-42b4-bf65-843b08d48d12",
+  "target": ".",
+  "revision": null,
+  "rules_version": "unavailable",
+  "diff_hash": "7548c8cb4cdbc1841404eea7724e8bd54a1a36432a7ecc5983c942a8135646b2",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 12,
+    "changed_files": [
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 13
+          },
+          {
+            "start": 18,
+            "end": 19
+          },
+          {
+            "start": 22,
+            "end": 22
+          },
+          {
+            "start": 24,
+            "end": 24
+          },
+          {
+            "start": 26,
+            "end": 26
+          },
+          {
+            "start": 42,
+            "end": 42
+          },
+          {
+            "start": 53,
+            "end": 53
+          },
+          {
+            "start": 55,
+            "end": 55
+          },
+          {
+            "start": 61,
+            "end": 63
+          },
+          {
+            "start": 68,
+            "end": 72
+          },
+          {
+            "start": 75,
+            "end": 75
+          },
+          {
+            "start": 85,
+            "end": 85
+          },
+          {
+            "start": 99,
+            "end": 102
+          },
+          {
+            "start": 107,
+            "end": 107
+          },
+          {
+            "start": 113,
+            "end": 113
+          },
+          {
+            "start": 116,
+            "end": 116
+          },
+          {
+            "start": 122,
+            "end": 124
+          },
+          {
+            "start": 129,
+            "end": 129
+          },
+          {
+            "start": 141,
+            "end": 145
+          },
+          {
+            "start": 168,
+            "end": 171
+          },
+          {
+            "start": 173,
+            "end": 178
+          },
+          {
+            "start": 182,
+            "end": 182
+          },
+          {
+            "start": 185,
+            "end": 231
+          },
+          {
+            "start": 237,
+            "end": 237
+          },
+          {
+            "start": 239,
+            "end": 239
+          },
+          {
+            "start": 250,
+            "end": 252
+          },
+          {
+            "start": 272,
+            "end": 273
+          },
+          {
+            "start": 275,
+            "end": 278
+          },
+          {
+            "start": 280,
+            "end": 283
+          },
+          {
+            "start": 289,
+            "end": 289
+          },
+          {
+            "start": 291,
+            "end": 291
+          },
+          {
+            "start": 293,
+            "end": 295
+          },
+          {
+            "start": 298,
+            "end": 299
+          },
+          {
+            "start": 305,
+            "end": 317
+          },
+          {
+            "start": 332,
+            "end": 332
+          },
+          {
+            "start": 342,
+            "end": 343
+          },
+          {
+            "start": 347,
+            "end": 354
+          },
+          {
+            "start": 358,
+            "end": 372
+          },
+          {
+            "start": 384,
+            "end": 384
+          },
+          {
+            "start": 386,
+            "end": 386
+          },
+          {
+            "start": 391,
+            "end": 398
+          },
+          {
+            "start": 415,
+            "end": 441
+          },
+          {
+            "start": 464,
+            "end": 464
+          }
+        ],
+        "before_hash": "352e9c7fff557a601bd1370739a058cbd424a4ffa22e021924cf3e9424203b7a",
+        "after_hash": "2938d7257a9ed149322c9ab56e8072a19934acb0cfb1df5caeff6c7462b1e3de"
+      },
+      {
+        "file": "src/components/Composer.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 3
+          },
+          {
+            "start": 9,
+            "end": 9
+          },
+          {
+            "start": 11,
+            "end": 12
+          },
+          {
+            "start": 32,
+            "end": 37
+          },
+          {
+            "start": 40,
+            "end": 47
+          },
+          {
+            "start": 72,
+            "end": 79
+          },
+          {
+            "start": 120,
+            "end": 123
+          },
+          {
+            "start": 186,
+            "end": 198
+          },
+          {
+            "start": 207,
+            "end": 219
+          },
+          {
+            "start": 221,
+            "end": 225
+          }
+        ],
+        "before_hash": "85c7ff484cf0a38071cb89793bd12fef3649b34c49533eb45674b6eb1305bbe6",
+        "after_hash": "b119005250b1c6f982e9aeb3787e2f29e6d7a669cd92a51f443df6cef29dbdd5"
+      },
+      {
+        "file": "src/components/EmptyState.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 81
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "9d51cb28b85427e5f3adc1a18d9e9a7032f51c8eae8c370ad3e5fac6e9da2482"
+      },
+      {
+        "file": "src/components/ModelDrawer.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 315
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "732f85ce5c4102eb6050670ffb211e660d0de610497a059aa808e88fbbdd7703"
+      },
+      {
+        "file": "src/components/ModelPicker.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 240
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "29eddf1f6b342fd1995f58c791cdfc8c6a6b1fa89a787bec75495ef765f35927"
+      },
+      {
+        "file": "src/components/SessionList.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 540
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d663b4996f4e6e9e30cffd536522caae67153383e798f72f78529a453c7fa0a6"
+      },
+      {
+        "file": "src/components/SessionSettings.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 219
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "f05b30b39d5c49dc505087f61d672c04b6a91c25d202d64960a7efe6f2989fe6"
+      },
+      {
+        "file": "src/components/SessionSidebar.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 1
+          },
+          {
+            "start": 3,
+            "end": 3
+          },
+          {
+            "start": 6,
+            "end": 7
+          },
+          {
+            "start": 10,
+            "end": 14
+          },
+          {
+            "start": 20,
+            "end": 20
+          },
+          {
+            "start": 22,
+            "end": 22
+          },
+          {
+            "start": 24,
+            "end": 26
+          },
+          {
+            "start": 30,
+            "end": 30
+          },
+          {
+            "start": 34,
+            "end": 37
+          },
+          {
+            "start": 39,
+            "end": 42
+          },
+          {
+            "start": 48,
+            "end": 48
+          },
+          {
+            "start": 50,
+            "end": 50
+          },
+          {
+            "start": 52,
+            "end": 54
+          },
+          {
+            "start": 58,
+            "end": 58
+          },
+          {
+            "start": 67,
+            "end": 67
+          },
+          {
+            "start": 85,
+            "end": 92
+          },
+          {
+            "start": 95,
+            "end": 105
+          },
+          {
+            "start": 124,
+            "end": 124
+          },
+          {
+            "start": 129,
+            "end": 141
+          },
+          {
+            "start": 152,
+            "end": 165
+          }
+        ],
+        "before_hash": "ef342a40bac5105e50ec791defd1b7f7d4c89fe97d3179d33bda06b0246e3fb1",
+        "after_hash": "4e6eb4439e498caee9c9131fee037c6c4d5003e7305b8e6fda1d60045f25e680"
+      },
+      {
+        "file": "src/components/WorkspaceSwitcher.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 137
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "7f7c6e3ca2990ec115df5d0b8a2a1324971fa42405025d583df5c9df1012c458"
+      },
+      {
+        "file": "src/lib/storage.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 48
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d4036df7e5c221e32bef0fd6389b0c323a68b4c2f05a15c7b78eb38c3314f024"
+      },
+      {
+        "file": "src/lib/usePiSession.ts",
+        "ranges": [
+          {
+            "start": 80,
+            "end": 85
+          },
+          {
+            "start": 87,
+            "end": 88
+          },
+          {
+            "start": 178,
+            "end": 183
+          },
+          {
+            "start": 243,
+            "end": 295
+          },
+          {
+            "start": 551,
+            "end": 556
+          },
+          {
+            "start": 558,
+            "end": 558
+          },
+          {
+            "start": 588,
+            "end": 593
+          },
+          {
+            "start": 595,
+            "end": 595
+          }
+        ],
+        "before_hash": "6d09b7cc0f71564c548de6a112998ca4e99d78f39a2945a496af53d085adea36",
+        "after_hash": "f8d929681d1501bf3c775d7028c95ba56f1c435d48d6e7f77c6d12b8dffcf2f4"
+      },
+      {
+        "file": "src/shared/protocol.ts",
+        "ranges": [
+          {
+            "start": 322,
+            "end": 325
+          }
+        ],
+        "before_hash": "e4abf44bf50662a5e4bb9c6dfa065b2adcba3b41dc4744a199366a75129a2cd6",
+        "after_hash": "b1f4a58309bc650cd5969fc5fc1ec7977ae9309784a396179b30ea3202d39b73"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-16T16:27:13.513Z",
+    "completed_at": "2026-09-16T16:27:14.516Z",
+    "duration_ms": 1003,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 1003,
+    "peakMemoryBytes": 221626368,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 12,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T162714516Z-85147-a5a09732efef.json",
+    "latest_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12.json",
+    "history_summary": ".mimosa/history/run-20260916T162714516Z-85147-a5a09732efef.json"
+  }
+}

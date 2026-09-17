@@ -1,0 +1,305 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260916T175015886Z-95982-35b4056e6f59",
+  "runId": "20260916T175015886Z-95982-35b4056e6f59",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/lib/modelsConfig.ts",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/Field.tsx",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelListEditor.tsx",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelsDrawer.tsx",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderEditor.tsx",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderRow.tsx",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/models/providerDraft.ts",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/lib/modelsConfig.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/Field.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelListEditor.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ModelsDrawer.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderEditor.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/ProviderRow.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/models/providerDraft.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": null,
+  "diffHash": "f63fc917fe95908612ef15731e66db8fdd26d3c18b47e15671a94dbc56fea707",
+  "rulesVersion": "unavailable",
+  "sessionHash": "667533ff5a02463bc30b9e5290e7b39dea74a0f90585190c92823da6da98d7f2",
+  "reportRef": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T175015886Z-95982-35b4056e6f59.json",
+  "events": [
+    {
+      "eventId": "hook-a002373e9efee0141b9abefb034d7be1",
+      "findingId": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "type": "finding_blocked",
+      "at": "2026-09-16T17:23:14.898Z",
+      "identity": {
+        "projectRelativeFile": "server/models-config.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 99,
+      "endLine": 99,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473"
+      },
+      "sequence": 0
+    },
+    {
+      "eventId": "hook-acdac5e58395737e8cfd9c00a9ba1f18",
+      "findingId": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "type": "finding_blocked",
+      "at": "2026-09-16T17:24:01.405Z",
+      "identity": {
+        "projectRelativeFile": "server/models-config.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 8,
+      "endLine": 8,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473"
+      },
+      "sequence": 1
+    },
+    {
+      "eventId": "hook-7f7a43d33a2ba2bbcba135f7bac6a1db",
+      "findingId": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "type": "finding_blocked",
+      "at": "2026-09-16T17:24:35.244Z",
+      "identity": {
+        "projectRelativeFile": "server/models-config.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 7,
+      "endLine": 7,
+      "reasonCode": "deny",
+      "reportedToAgent": true,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473"
+      },
+      "sequence": 2
+    },
+    {
+      "eventId": "hook-52718c4836a41ff9de9ae10ed1a31146",
+      "findingId": "mimosa-1ec7dcab501204a4fb77cb6f",
+      "type": "static_fix_verified",
+      "at": "2026-09-16T17:25:51.878Z",
+      "identity": {
+        "projectRelativeFile": "server/models-config.ts",
+        "ruleId": "security",
+        "codeEvidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 7,
+      "endLine": 7,
+      "reasonCode": "static_rescan_passed",
+      "reportedToAgent": false,
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "evidenceHash": "e331cc2dc1f37f14ada2dc4f7a0faa6bc3b412b1e1f20cd57938d52f196d0473"
+      },
+      "sequence": 3
+    }
+  ],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/shared/models-config.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/models-config.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/routes.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/stored-sessions.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/api.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/storage.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/SessionSidebar.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/App.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/modelsConfig.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/SessionList.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/WorkspaceSwitcher.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/Field.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/ModelListEditor.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/ModelsDrawer.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/ProviderEditor.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/ProviderRow.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/models/providerDraft.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-16T17:50:16.118Z"
+}

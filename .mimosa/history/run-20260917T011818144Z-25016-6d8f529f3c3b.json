@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260917T011818144Z-25016-6d8f529f3c3b",
+  "runStatus": "inconclusive",
+  "errors": [
+    "baseline-read:src/components/ModelSelectV3.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/WorkspaceTree.tsx: baseline_snapshot_unreadable: file is missing from task baseline"
+  ],
+  "target": ".",
+  "revision": null,
+  "diffHash": "c42c16b0a0626bc5dd7e7925b3f5d3928d7a2e9afc0cbdb21197c8bda517e7e3",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-09-17T01:18:18.144Z",
+  "timing": {
+    "startedAt": "2026-09-17T01:18:17.304Z",
+    "completedAt": "2026-09-17T01:18:18.144Z",
+    "durationMs": 840
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 0,
+    "bySeverity": {},
+    "byStatus": {}
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "baseline_snapshot_unreadable": 2,
+      "project_check_failed": 2
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260917T011818144Z-25016-6d8f529f3c3b.json"
+}

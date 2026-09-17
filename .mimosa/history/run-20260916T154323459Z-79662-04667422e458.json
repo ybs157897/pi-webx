@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "mimosa-finding-history/v1",
+  "runId": "20260916T154323459Z-79662-04667422e458",
+  "runStatus": "inconclusive",
+  "errors": [
+    "candidate-select:src/components/TranscriptView.tsx: candidate_limit_exceeded: 8 changed reviewable file(s) were not scanned because the limit is 20",
+    "baseline-read:package-lock.json: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/shared/transcript.ts: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/lib/transcript.ts: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/Dialogs.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/DirectoryPicker.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/MessageItem.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/NotificationStack.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/SessionSidebar.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/StatusStrip.tsx: baseline_snapshot_unreadable: file is missing from task baseline",
+    "baseline-read:src/components/ToolCard.tsx: baseline_snapshot_unreadable: file is missing from task baseline"
+  ],
+  "target": ".",
+  "revision": null,
+  "diffHash": "7372ecc61f1f63ad8bebcb3acda7d31c4a5332502d80d84d595c7602a85cdbf9",
+  "rulesVersion": "unavailable",
+  "recordedAt": "2026-09-16T15:43:23.459Z",
+  "timing": {
+    "startedAt": "2026-09-16T15:43:22.256Z",
+    "completedAt": "2026-09-16T15:43:23.459Z",
+    "durationMs": 1203
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "modelCalls": 0,
+    "measurement": "known-zero"
+  },
+  "findings": {
+    "total": 24,
+    "bySeverity": {
+      "high": 3,
+      "low": 21
+    },
+    "byStatus": {
+      "blocked": 3,
+      "candidate": 21
+    }
+  },
+  "coverage": {
+    "status": "partial",
+    "reasonCounts": {
+      "candidate_limit_exceeded": 1,
+      "baseline_snapshot_unreadable": 10,
+      "project_check_failed": 11
+    }
+  },
+  "evidenceBoundary": "static_only",
+  "immutableReport": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T154323459Z-79662-04667422e458.json"
+}

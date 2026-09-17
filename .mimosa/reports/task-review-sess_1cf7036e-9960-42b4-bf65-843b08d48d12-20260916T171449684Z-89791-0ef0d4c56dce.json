@@ -1,0 +1,347 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260916T171449684Z-89791-0ef0d4c56dce",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "baseline",
+      "target": ".",
+      "reason": "baseline_partial: baseline capture had enumeration or snapshot errors"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": false,
+      "captured_files": 39,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 2,
+      "compensated_target_count": 7
+    },
+    "change_tracking": {
+      "touched_observed": 7,
+      "touched_retained": 7,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 7,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 7,
+      "selected_files": 7,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 7,
+      "scanned_files": 7,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "baseline_partial": 1,
+      "project_check_failed": 1
+    },
+    "reasons": [
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline_partial: baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-16T17:14:49.684Z",
+  "session_id": "sess_1cf7036e-9960-42b4-bf65-843b08d48d12",
+  "target": ".",
+  "revision": null,
+  "rules_version": "unavailable",
+  "diff_hash": "3050e8a9148e13781c7f345f383cb4286cecb3a4e7a32ee65e960fd52557d499",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 7,
+    "changed_files": [
+      {
+        "file": "extensions/pi-webx-ui.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 113
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "df3585c6d8b5652565a8f363315412f95f38b9dc2015b704d725cd6212ee6b01"
+      },
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 3,
+            "end": 3
+          },
+          {
+            "start": 30,
+            "end": 31
+          },
+          {
+            "start": 35,
+            "end": 35
+          },
+          {
+            "start": 67,
+            "end": 68
+          },
+          {
+            "start": 279,
+            "end": 319
+          },
+          {
+            "start": 430,
+            "end": 480
+          }
+        ],
+        "before_hash": "2938d7257a9ed149322c9ab56e8072a19934acb0cfb1df5caeff6c7462b1e3de",
+        "after_hash": "144e385c804218901a8f3ed1b7fc038edf91b11a8a481caf5e5fb4007f4eee2f"
+      },
+      {
+        "file": "src/components/uikit/UiRenderer.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 530
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "1379e8345e3400784ff3f866ac33ad41589746aee7c3c971404c75308b1563f7"
+      },
+      {
+        "file": "src/components/uikit/UiShowcase.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 216
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "17e22f370ffeda4f37a2802bedfa234a0ba6565186deb396169f446bf9a0d6a1"
+      },
+      {
+        "file": "src/lib/format.ts",
+        "ranges": [
+          {
+            "start": 70,
+            "end": 78
+          }
+        ],
+        "before_hash": "a7d9ed49862f51cd8d5455cdd6ecc6ebdb1a6fcb33f68e40d4da0e6d9a24db89",
+        "after_hash": "400c75318160f32931ebce9ba02ebd4b1020be448d1a66a53ad9e79905faf6d1"
+      },
+      {
+        "file": "src/lib/usePiSession.ts",
+        "ranges": [
+          {
+            "start": 24,
+            "end": 24
+          },
+          {
+            "start": 29,
+            "end": 29
+          },
+          {
+            "start": 34,
+            "end": 106
+          },
+          {
+            "start": 145,
+            "end": 146
+          },
+          {
+            "start": 188,
+            "end": 188
+          },
+          {
+            "start": 209,
+            "end": 209
+          },
+          {
+            "start": 399,
+            "end": 399
+          },
+          {
+            "start": 478,
+            "end": 513
+          },
+          {
+            "start": 585,
+            "end": 585
+          },
+          {
+            "start": 656,
+            "end": 656
+          },
+          {
+            "start": 694,
+            "end": 694
+          }
+        ],
+        "before_hash": "f8d929681d1501bf3c775d7028c95ba56f1c435d48d6e7f77c6d12b8dffcf2f4",
+        "after_hash": "032642401c70787855f26a3512f33d183c9fd9fe075a11d89c739e94f38ba3cd"
+      },
+      {
+        "file": "src/shared/uikit.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 530
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "5e4f99d83d47ef9047f4749bb2f46ee842de7189801c5fbbd1dd11805fb40c83"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-16T17:14:48.983Z",
+    "completed_at": "2026-09-16T17:14:49.684Z",
+    "duration_ms": 701,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 701,
+    "peakMemoryBytes": 226017280,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 7,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [
+    {
+      "finding_id": "mimosa-a472cfdf7a27ca5b41b7c4a7",
+      "file": "src/shared/uikit.ts",
+      "line": 496,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T16:43:32.826Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-a472cfdf7a27ca5b41b7c4a7",
+      "file": "src/shared/uikit.ts",
+      "line": 496,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "fixed_candidate",
+      "decision": "repair_observed",
+      "at": "2026-09-16T16:44:39.992Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "candidate_before_evidence_hash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "post_change_evidence_hash_at_previous_location": "8d64a30d9de151b649006a1d9871037ac5649ab6162ea5d7fd77c54fed07b155",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    },
+    {
+      "finding_id": "mimosa-a472cfdf7a27ca5b41b7c4a7",
+      "file": "src/shared/uikit.ts",
+      "line": 496,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "命令注入",
+      "status": "static_verified",
+      "decision": "static_rescan_passed",
+      "at": "2026-09-16T16:44:39.992Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "observed",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "candidate_before_evidence_hash": "7ef152f4032496428c2196bd6c7409e1c1841cf9da8c97a8d0dc2e2fe02b99d3",
+        "post_change_evidence_hash_at_previous_location": "8d64a30d9de151b649006a1d9871037ac5649ab6162ea5d7fd77c54fed07b155",
+        "runtime_oracle": false,
+        "verification": {
+          "method": "mimosa-posttool-static-rescan",
+          "finding_absent": true,
+          "runtime_oracle": false
+        }
+      }
+    }
+  ],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T171449684Z-89791-0ef0d4c56dce.json",
+    "latest_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12.json",
+    "history_summary": ".mimosa/history/run-20260916T171449684Z-89791-0ef0d4c56dce.json"
+  }
+}

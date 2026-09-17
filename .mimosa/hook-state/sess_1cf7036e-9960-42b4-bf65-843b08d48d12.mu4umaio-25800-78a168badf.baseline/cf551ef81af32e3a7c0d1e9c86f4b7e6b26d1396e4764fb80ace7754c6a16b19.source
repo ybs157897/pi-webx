@@ -1,0 +1,240 @@
+import { ActionIcon, Flexbox, Icon, Markdown, Text, Tooltip } from '@lobehub/ui';
+import { ChatItem } from '@lobehub/ui/chat';
+import { theme } from 'antd';
+import { Bot, Brain, ChevronDown, ChevronRight, CircleAlert, Copy, User } from 'lucide-react';
+import { useCallback, useMemo, useState } from 'react';
+
+import { formatCost, formatTokens } from '../lib/format';
+import type { AssistantEntry, TranscriptUsage, UserEntry } from '../shared/transcript';
+import {
+  extractA2uiBlocks,
+  parseA2uiBlock,
+  specFromToolRun,
+  stripA2uiBlocks,
+  type UiSpec,
+} from '../shared/uikit';
+import { ToolCard } from './ToolCard';
+import { UiRenderer } from './uikit/UiRenderer';
+
+/** Fired when a rendered component's button/form sends an action back to pi. */
+export type UiActionHandler = (action: string) => void;
+
+/** Collapsible chain-of-thought panel shown above an assistant message. */
+function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: boolean }) {
+  const { token } = theme.useToken();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${token.colorBorderSecondary}`,
+        borderRadius: token.borderRadiusLG,
+        background: token.colorFillQuaternary,
+        overflow: 'hidden',
+      }}
+    >
+      <Flexbox
+        horizontal
+        align="center"
+        gap={8}
+        paddingInline={10}
+        paddingBlock={6}
+        style={{ cursor: 'pointer' }}
+        onClick={() => setOpen((prev) => !prev)}
+      >
+        <Icon icon={open ? ChevronDown : ChevronRight} size={14} style={{ color: token.colorTextTertiary }} />
+        <Icon icon={Brain} size={14} style={{ color: token.colorTextTertiary }} />
+        <Text fontSize={12} type="secondary">
+          {streaming ? '思考中…' : '思考过程'}
+        </Text>
+        {!open && (
+          <Text fontSize={11} type="secondary" ellipsis style={{ flex: 1, minWidth: 0, opacity: 0.75 }}>
+            {thinking.replace(/\s+/g, ' ').slice(0, 120)}
+          </Text>
+        )}
+      </Flexbox>
+      {open && (
+        <div
+          style={{
+            padding: '0 10px 10px',
+            maxHeight: 360,
+            overflow: 'auto',
+            fontSize: 12.5,
+            lineHeight: 1.65,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            color: token.colorTextSecondary,
+            borderTop: `1px solid ${token.colorBorderSecondary}`,
+            paddingTop: 8,
+          }}
+        >
+          {thinking}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UsageLine({ usage, model }: { usage: TranscriptUsage; model?: string | undefined }) {
+  const { token } = theme.useToken();
+  return (
+    <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextQuaternary }} wrap="wrap">
+      {model && (
+        <Text fontSize={11} type="secondary">
+          {model}
+        </Text>
+      )}
+      <Text fontSize={11} type="secondary">
+        ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
+        {usage.cacheRead > 0 ? ` · cache ${formatTokens(usage.cacheRead)}` : ''}
+      </Text>
+      {usage.cost > 0 && (
+        <Text fontSize={11} type="secondary">
+          {formatCost(usage.cost)}
+        </Text>
+      )}
+    </Flexbox>
+  );
+}
+
+export function UserMessageItem({ entry }: { entry: UserEntry }) {
+  return (
+    <ChatItem
+      avatar={{ title: '你', avatar: <User size={18} /> }}
+      placement="right"
+      variant="bubble"
+      showTitle={false}
+      time={entry.at}
+      message={entry.text || undefined}
+      renderMessage={() => (
+        <Markdown variant="chat" fontSize={14}>
+          {entry.text}
+        </Markdown>
+      )}
+      belowMessage={
+        entry.imageCount > 0 ? (
+          <Text fontSize={11} type="secondary">
+            {entry.imageCount} 张图片
+          </Text>
+        ) : undefined
+      }
+    />
+  );
+}
+
+export function AssistantMessageItem({
+  entry,
+  onAction,
+}: {
+  entry: AssistantEntry;
+  onAction?: UiActionHandler | undefined;
+}) {
+  const { token } = theme.useToken();
+  const [copied, setCopied] = useState(false);
+
+  const onCopy = useCallback(() => {
+    void navigator.clipboard.writeText(entry.text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1_500);
+  }, [entry.text]);
+
+  // Auto-render agent UI in place: from the render_ui tool, and from ```a2ui
+  // fenced blocks in the message text (blocks are stripped so the JSON is not
+  // shown twice).
+  const { displayText, uiSpecs, toolCards } = useMemo(() => {
+    const specs: UiSpec[] = [];
+    for (const body of extractA2uiBlocks(entry.text)) {
+      const spec = parseA2uiBlock(body);
+      if (spec) specs.push(spec);
+    }
+    const cards: AssistantEntry['tools'] = [];
+    for (const run of entry.tools) {
+      if (run.toolName === 'render_ui') {
+        const spec = specFromToolRun(run);
+        if (spec) {
+          specs.push(spec);
+          continue;
+        }
+      }
+      cards.push(run);
+    }
+    return { displayText: stripA2uiBlocks(entry.text), uiSpecs: specs, toolCards: cards };
+  }, [entry.text, entry.tools]);
+
+  const isEmpty = displayText.trim().length === 0;
+
+  return (
+    <ChatItem
+      avatar={{ title: 'pi', avatar: <Bot size={18} /> }}
+      placement="left"
+      variant="docs"
+      showTitle={false}
+      time={entry.at}
+      message={displayText || undefined}
+      renderMessage={() =>
+        displayText ? (
+          <Markdown variant="chat" fontSize={14} enableStream fullFeaturedCodeBlock>
+            {displayText}
+          </Markdown>
+        ) : undefined
+      }
+      aboveMessage={
+        entry.thinking.trim().length > 0 ? (
+          <ThinkingBlock thinking={entry.thinking} streaming={entry.streaming} />
+        ) : undefined
+      }
+      error={
+        entry.error
+          ? { type: 'error', message: entry.error, variant: 'borderless' }
+          : entry.stopReason === 'aborted'
+            ? { type: 'warning', message: '已中断', variant: 'borderless' }
+            : undefined
+      }
+      messageExtra={
+        entry.usage ? (
+          <UsageLine usage={entry.usage} model={entry.model} />
+        ) : entry.model ? (
+          <Text fontSize={11} type="secondary">
+            {entry.model}
+          </Text>
+        ) : undefined
+      }
+      belowMessage={
+        toolCards.length > 0 || uiSpecs.length > 0 || (isEmpty && entry.streaming) || displayText.length > 0 ? (
+          <Flexbox gap={8} width="100%">
+            {toolCards.length > 0 && (
+              <Flexbox gap={8}>
+                {toolCards.map((run) => (
+                  <ToolCard key={run.toolCallId} run={run} />
+                ))}
+              </Flexbox>
+            )}
+            {uiSpecs.map((spec, index) => (
+              <UiRenderer key={String(index)} spec={spec} onAction={onAction} />
+            ))}
+            {isEmpty && entry.streaming && (
+              <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextTertiary }}>
+                <Icon icon={Bot} size={14} />
+                <Text fontSize={12} type="secondary">
+                  正在生成…
+                </Text>
+              </Flexbox>
+            )}
+            {displayText.length > 0 && (
+              <Flexbox horizontal align="center" gap={4}>
+                <Tooltip title={copied ? '已复制' : '复制'}>
+                  <ActionIcon icon={Copy} size="small" onClick={onCopy} />
+                </Tooltip>
+                {entry.stopReason === 'length' && (
+                  <Tooltip title="达到输出长度上限">
+                    <Icon icon={CircleAlert} size={14} style={{ color: token.colorWarning }} />
+                  </Tooltip>
+                )}
+              </Flexbox>
+            )}
+          </Flexbox>
+        ) : undefined
+      }
+    />
+  );
+}

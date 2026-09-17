@@ -1,0 +1,1598 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260916T154323459Z-79662-04667422e458",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "candidate-select",
+      "target": "src/components/TranscriptView.tsx",
+      "reason": "candidate_limit_exceeded: 8 changed reviewable file(s) were not scanned because the limit is 20"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "package-lock.json",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/shared/transcript.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/lib/transcript.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/Dialogs.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/DirectoryPicker.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/MessageItem.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/NotificationStack.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/SessionSidebar.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/StatusStrip.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "src/components/ToolCard.tsx",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 11,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 10
+    },
+    "change_tracking": {
+      "touched_observed": 10,
+      "touched_retained": 10,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 28,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 28,
+      "selected_files": 20,
+      "limit": 20,
+      "truncated": true
+    },
+    "scanning": {
+      "required_files": 18,
+      "scanned_files": 18,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 1,
+      "project_checks_completed": 1
+    },
+    "notification": {
+      "eligible_findings": 21,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": true
+    },
+    "reason_counts": {
+      "candidate_limit_exceeded": 1,
+      "baseline_snapshot_unreadable": 10,
+      "project_check_failed": 11
+    },
+    "reasons": [
+      {
+        "code": "candidate_limit_exceeded",
+        "stage": "candidate-select",
+        "target": "src/components/TranscriptView.tsx",
+        "detail": "8 changed reviewable file(s) were not scanned because the limit is 20",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "package-lock.json",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/shared/transcript.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/lib/transcript.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/Dialogs.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/DirectoryPicker.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/MessageItem.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/NotificationStack.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/SessionSidebar.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/StatusStrip.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "src/components/ToolCard.tsx",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "candidate-select",
+        "target": "src/components/TranscriptView.tsx",
+        "detail": "candidate_limit_exceeded: 8 changed reviewable file(s) were not scanned because the limit is 20",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "package-lock.json",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/shared/transcript.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/lib/transcript.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/Dialogs.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/DirectoryPicker.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/MessageItem.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/NotificationStack.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/SessionSidebar.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/StatusStrip.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "src/components/ToolCard.tsx",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-16T15:43:23.459Z",
+  "session_id": "sess_1cf7036e-9960-42b4-bf65-843b08d48d12",
+  "target": ".",
+  "revision": null,
+  "rules_version": "unavailable",
+  "diff_hash": "7372ecc61f1f63ad8bebcb3acda7d31c4a5332502d80d84d595c7602a85cdbf9",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 20,
+    "changed_files": [
+      {
+        "file": "package-lock.json",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 9251
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "f101b598c9ac6da550f0310cc895ad60fe379f0fd3cd1d428f864c46670a0fb5"
+      },
+      {
+        "file": "package.json",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 40
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d589482ef4a4a58a347fe7f1feaf1960b199818491f66bbb83c277ffebcf9d72"
+      },
+      {
+        "file": "server/routes.ts",
+        "ranges": [
+          {
+            "start": 31,
+            "end": 38
+          },
+          {
+            "start": 334,
+            "end": 336
+          }
+        ],
+        "before_hash": "468ecce7280405d398df636489e8faf1e7ffaa5cddef5c28a56052f8eda04d4a",
+        "after_hash": "81eb4ec79bbe6c83f284b968dde41bdfedfae707b41454e67ab85aa5471b2fe5"
+      },
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 361
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "352e9c7fff557a601bd1370739a058cbd424a4ffa22e021924cf3e9424203b7a"
+      },
+      {
+        "file": "src/components/Composer.tsx",
+        "ranges": [
+          {
+            "start": 9,
+            "end": 9
+          },
+          {
+            "start": 52,
+            "end": 52
+          },
+          {
+            "start": 61,
+            "end": 63
+          },
+          {
+            "start": 65,
+            "end": 65
+          },
+          {
+            "start": 234,
+            "end": 234
+          },
+          {
+            "start": 247,
+            "end": 247
+          }
+        ],
+        "before_hash": "e8853eaee8c93fc1b904dd4d11b21f912a68da23be0b9799e50929bcd6d6d20c",
+        "after_hash": "85c7ff484cf0a38071cb89793bd12fef3649b34c49533eb45674b6eb1305bbe6"
+      },
+      {
+        "file": "src/components/Dialogs.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 164
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "3137750aaf8d2b5912a88f4e3bdaeb2181e11ba1a1442b2ab621ce71bc730173"
+      },
+      {
+        "file": "src/components/DirectoryPicker.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 151
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "2eb2c48bcf4e96689c537b1dd1674be32d10d9d255fe1c0b2882f392e64b6d5a"
+      },
+      {
+        "file": "src/components/MessageItem.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 195
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "53b4557379f2d6299de0fe7ab8eb6ab3440896d2b108a25c860da34c02089689"
+      },
+      {
+        "file": "src/components/NotificationStack.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 47
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d0b74f2d2b7f4e33bcf81aa2b6a61c43ed499ac3b78ab488f46de94bfeb4ece9"
+      },
+      {
+        "file": "src/components/SessionSidebar.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 315
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "ef342a40bac5105e50ec791defd1b7f7d4c89fe97d3179d33bda06b0246e3fb1"
+      },
+      {
+        "file": "src/components/StatusStrip.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 118
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "552cf5348661f423bfdc249636b01fe1e0c63ad2fb652ec81d8188b43ef6678d"
+      },
+      {
+        "file": "src/components/ToolCard.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 241
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "7155986a4f225d207615980634660ba611f8ad0dd8ec3a70a64dcaa849aca991"
+      },
+      {
+        "file": "src/lib/api.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 118
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "89aea9e93ec606d91afa0084251f26c5d8612747a8102ec03bb73de1e26295a6"
+      },
+      {
+        "file": "src/lib/format.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 179
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "a7d9ed49862f51cd8d5455cdd6ecc6ebdb1a6fcb33f68e40d4da0e6d9a24db89"
+      },
+      {
+        "file": "src/lib/transcript.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 1110
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "4d42c0e9669eac22416d687aa71fc3fa9483ddf0f8407dca5a93a87d8feeaf40"
+      },
+      {
+        "file": "src/lib/usePiSession.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 524
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "6d09b7cc0f71564c548de6a112998ca4e99d78f39a2945a496af53d085adea36"
+      },
+      {
+        "file": "src/main.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 20
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "d9ff6cb0d23ecfc9d8dd5579cbde19f25b79b2f7884e0fb1d29bf3d75d96f994"
+      },
+      {
+        "file": "src/shared/protocol.ts",
+        "ranges": [
+          {
+            "start": 371,
+            "end": 378
+          }
+        ],
+        "before_hash": "2253749fe67f0e58e31d361b16e859647e5f6817ce4e663c687e2e6b0f4f03d6",
+        "after_hash": "e4abf44bf50662a5e4bb9c6dfa065b2adcba3b41dc4744a199366a75129a2cd6"
+      },
+      {
+        "file": "src/shared/transcript.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 177
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "e881c02f1db59828508a7ed358fa4500da41239d7aacb9ff57e63fff89a7a677"
+      },
+      {
+        "file": "vite.config.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 32
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "78786a9118beab6d1034a11bc106e1bff509b6a04a695a79a5fbaf7d833fd1d4"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-16T15:43:22.256Z",
+    "completed_at": "2026-09-16T15:43:23.459Z",
+    "duration_ms": 1203,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 1203,
+    "peakMemoryBytes": 231882752,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 18,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 21,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [
+    {
+      "finding_id": "mimosa-ae04e548909a03615aa567a2",
+      "file": "scripts/e2e-bridge.ts",
+      "line": 25,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "SSRF 服务端请求伪造",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T15:30:44.311Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "3ad32562fdb5ee8e277bac9a188d06468dd480fe46a61e63b3d70b649c9d158c",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-d68b465ea7b9b146db63c19e",
+      "file": "scripts/e2e-bridge.ts",
+      "line": 74,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "SSRF 服务端请求伪造",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T15:30:44.311Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "58f8becb54323fa8ed8827bafbfb49f54173ea2e423f5a79d6a56818e6544b85",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-9c80e9119f038f63312e969f",
+      "file": "scripts/e2e-bridge.ts",
+      "line": 157,
+      "rule_id": "security",
+      "severity": "high",
+      "category": "SSRF 服务端请求伪造",
+      "status": "blocked",
+      "decision": "deny",
+      "at": "2026-09-16T15:30:44.311Z",
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "8653666f981a4214bfe4cc271f3ceb8dee5d3c8e55d57747a4bf9f6a26234d10",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-c3fb36359ef5ca5f14f83a12",
+      "file": "package.json",
+      "line": 16,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "6900dce76c55d46e427315114a67c033ed28683677e0526cadc3a33e6d7beed3",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-50d6290007bcdbdb3ad46cb9",
+      "file": "package.json",
+      "line": 17,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "ebd58aad6c415996b431e03990dbd954ff3dd07e1c80fc535fa968a36530320f",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-276d025eb280ba4b4f0b264c",
+      "file": "package.json",
+      "line": 18,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "69238e5ef9cc89509b28722f45c50414107f6c963cf5c5590b50a5fa1bf89173",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-219e70fb85553dfe62d3b910",
+      "file": "package.json",
+      "line": 19,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "5c0c874382a45dab6686b72e2a2755a442b7ed2cdd93408ab5e60f2e82ad1d01",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-fbdc1ca972e4b46e7fbc1069",
+      "file": "package.json",
+      "line": 20,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "973a460e5cd01cc42114c8379600156c76a6eb86f847612c5e310e83fd9c256b",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-28310355c368f87c7da725e0",
+      "file": "package.json",
+      "line": 21,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "3e2856242601bc2091c4927b3a884bf8d41a869b1138ded44bbc09abdda807ad",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-9104a9419f7600b0198aa6fa",
+      "file": "package.json",
+      "line": 22,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "f2c52b1f379baa8d0c3cd9f5ac33f5c4bb05d87b28e9247370953ec61bba73ec",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-cbd77b4247c685f1e4264c62",
+      "file": "package.json",
+      "line": 23,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "5ef9598742ea7f9b36dea6ccc50636d8759adbcee6cf75c4117818c0d18762c8",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-6bdea6324bd7603da43ffab7",
+      "file": "package.json",
+      "line": 24,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "6aada63c7abaf0a18740616a4931dd23d3a50e22b5ab311b2b1c32fd45bf86d3",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-09930e6fc8fcd56d0038ae70",
+      "file": "package.json",
+      "line": 25,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "f39edef9a052636f276bbcb049e2f7f1648a3dfdb2b8ae87f6d692a1d0bd5c25",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-ace47a3aa8ce325f2373f4bb",
+      "file": "package.json",
+      "line": 26,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "55282d38d0ffb96b29a7fe5e3d535660b855318f4f8e50b56fef4a79f6bcd846",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-5999283bd107c5ce22a32150",
+      "file": "package.json",
+      "line": 27,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "b4b4520e8ea256e8192169b3416760a38e80b8b8a02f062ca2dca7b091bc0e82",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-7443de615e7a6c4a1267c01f",
+      "file": "package.json",
+      "line": 28,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "f18936bfc470ea405c83dd1968f872ef0f52470f2e28a2a5695b8bb1a5b35607",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-0dab282a264c4cb6395eb370",
+      "file": "package.json",
+      "line": 31,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "22845a05e47028630cdc4a339556f93a7243ed7752995b9c2a862435839c98e2",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-5d4de1d5532c8063bb0dda83",
+      "file": "package.json",
+      "line": 32,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "d1b10dd75d45b416fc68f4675655c6419c6b30b45a0a491ea0be71b5907dd676",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-d9241c4a3ada8eec37c3abdc",
+      "file": "package.json",
+      "line": 33,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "d0c8ece9e34eaec7373a09d81853c11b8cb51196e75ab71f6488b0bb12f69c88",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-142b293f6362edcd5e965330",
+      "file": "package.json",
+      "line": 34,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "1cb624b3316865bd2fb763e863c770a88a26e2354a1fc5544c33e8ec6856300b",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-24e359b32c638540a8f38334",
+      "file": "package.json",
+      "line": 35,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "6c137f2779a9ad6e61369144c82a57bc869b3a92608dc70846cd66d71e3d1f42",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-c02085f1cc7266b6af09f157",
+      "file": "package.json",
+      "line": 36,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "ca2b266d3bccc5ef2c3de3a64b28a154c13a1125baa58b083b043b5d47a5ab4c",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-236f14131c174a603771c35b",
+      "file": "package.json",
+      "line": 37,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "5dc38ada9517fc0ca477ce71a5718f3ed7834c46dff1f38e8333a647e2b97082",
+        "runtime_oracle": false
+      }
+    },
+    {
+      "finding_id": "mimosa-2b322b99bf90dc0d9970f71e",
+      "file": "package.json",
+      "line": 10,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "status": "candidate",
+      "decision": "observe",
+      "at": "2026-09-16T15:43:23.459Z",
+      "evidence": {
+        "kind": "static_scan",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "source": "semgrep",
+        "evidence_hash": "c722d8e1c085ca260543cb9a4a355239cba6d54bdc68661e4a27ee9a4bd6474e",
+        "runtime_oracle": false
+      }
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "mimosa-c3fb36359ef5ca5f14f83a12",
+      "file": "package.json",
+      "line": 16,
+      "end_line": 16,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 16,
+          "evidence_hash": "6900dce76c55d46e427315114a67c033ed28683677e0526cadc3a33e6d7beed3",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-50d6290007bcdbdb3ad46cb9",
+      "file": "package.json",
+      "line": 17,
+      "end_line": 17,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 17,
+          "evidence_hash": "ebd58aad6c415996b431e03990dbd954ff3dd07e1c80fc535fa968a36530320f",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-276d025eb280ba4b4f0b264c",
+      "file": "package.json",
+      "line": 18,
+      "end_line": 18,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 18,
+          "evidence_hash": "69238e5ef9cc89509b28722f45c50414107f6c963cf5c5590b50a5fa1bf89173",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-219e70fb85553dfe62d3b910",
+      "file": "package.json",
+      "line": 19,
+      "end_line": 19,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 19,
+          "evidence_hash": "5c0c874382a45dab6686b72e2a2755a442b7ed2cdd93408ab5e60f2e82ad1d01",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-fbdc1ca972e4b46e7fbc1069",
+      "file": "package.json",
+      "line": 20,
+      "end_line": 20,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 20,
+          "evidence_hash": "973a460e5cd01cc42114c8379600156c76a6eb86f847612c5e310e83fd9c256b",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-28310355c368f87c7da725e0",
+      "file": "package.json",
+      "line": 21,
+      "end_line": 21,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 21,
+          "evidence_hash": "3e2856242601bc2091c4927b3a884bf8d41a869b1138ded44bbc09abdda807ad",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-9104a9419f7600b0198aa6fa",
+      "file": "package.json",
+      "line": 22,
+      "end_line": 22,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 22,
+          "evidence_hash": "f2c52b1f379baa8d0c3cd9f5ac33f5c4bb05d87b28e9247370953ec61bba73ec",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-cbd77b4247c685f1e4264c62",
+      "file": "package.json",
+      "line": 23,
+      "end_line": 23,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 23,
+          "evidence_hash": "5ef9598742ea7f9b36dea6ccc50636d8759adbcee6cf75c4117818c0d18762c8",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-6bdea6324bd7603da43ffab7",
+      "file": "package.json",
+      "line": 24,
+      "end_line": 24,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 24,
+          "evidence_hash": "6aada63c7abaf0a18740616a4931dd23d3a50e22b5ab311b2b1c32fd45bf86d3",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-09930e6fc8fcd56d0038ae70",
+      "file": "package.json",
+      "line": 25,
+      "end_line": 25,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 25,
+          "evidence_hash": "f39edef9a052636f276bbcb049e2f7f1648a3dfdb2b8ae87f6d692a1d0bd5c25",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-ace47a3aa8ce325f2373f4bb",
+      "file": "package.json",
+      "line": 26,
+      "end_line": 26,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 26,
+          "evidence_hash": "55282d38d0ffb96b29a7fe5e3d535660b855318f4f8e50b56fef4a79f6bcd846",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-5999283bd107c5ce22a32150",
+      "file": "package.json",
+      "line": 27,
+      "end_line": 27,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 27,
+          "evidence_hash": "b4b4520e8ea256e8192169b3416760a38e80b8b8a02f062ca2dca7b091bc0e82",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-7443de615e7a6c4a1267c01f",
+      "file": "package.json",
+      "line": 28,
+      "end_line": 28,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 28,
+          "evidence_hash": "f18936bfc470ea405c83dd1968f872ef0f52470f2e28a2a5695b8bb1a5b35607",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-0dab282a264c4cb6395eb370",
+      "file": "package.json",
+      "line": 31,
+      "end_line": 31,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 31,
+          "evidence_hash": "22845a05e47028630cdc4a339556f93a7243ed7752995b9c2a862435839c98e2",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-5d4de1d5532c8063bb0dda83",
+      "file": "package.json",
+      "line": 32,
+      "end_line": 32,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 32,
+          "evidence_hash": "d1b10dd75d45b416fc68f4675655c6419c6b30b45a0a491ea0be71b5907dd676",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-d9241c4a3ada8eec37c3abdc",
+      "file": "package.json",
+      "line": 33,
+      "end_line": 33,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 33,
+          "evidence_hash": "d0c8ece9e34eaec7373a09d81853c11b8cb51196e75ab71f6488b0bb12f69c88",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-142b293f6362edcd5e965330",
+      "file": "package.json",
+      "line": 34,
+      "end_line": 34,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 34,
+          "evidence_hash": "1cb624b3316865bd2fb763e863c770a88a26e2354a1fc5544c33e8ec6856300b",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-24e359b32c638540a8f38334",
+      "file": "package.json",
+      "line": 35,
+      "end_line": 35,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 35,
+          "evidence_hash": "6c137f2779a9ad6e61369144c82a57bc869b3a92608dc70846cd66d71e3d1f42",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-c02085f1cc7266b6af09f157",
+      "file": "package.json",
+      "line": 36,
+      "end_line": 36,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 36,
+          "evidence_hash": "ca2b266d3bccc5ef2c3de3a64b28a154c13a1125baa58b083b043b5d47a5ab4c",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-236f14131c174a603771c35b",
+      "file": "package.json",
+      "line": 37,
+      "end_line": 37,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 37,
+          "evidence_hash": "5dc38ada9517fc0ca477ce71a5718f3ed7834c46dff1f38e8333a647e2b97082",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    },
+    {
+      "finding_id": "mimosa-2b322b99bf90dc0d9970f71e",
+      "file": "package.json",
+      "line": 10,
+      "end_line": 10,
+      "rule_id": "mimosa.supply.version-range",
+      "severity": "low",
+      "category": "manifest",
+      "kind": "semgrep",
+      "advisory": false,
+      "status": "candidate",
+      "evidence_boundary": "candidate",
+      "evidence": [
+        {
+          "kind": "static_scan",
+          "boundary": "candidate",
+          "producer": "deterministic",
+          "source": "semgrep",
+          "file": "package.json",
+          "line": 10,
+          "evidence_hash": "c722d8e1c085ca260543cb9a4a355239cba6d54bdc68661e4a27ee9a4bd6474e",
+          "runtime_oracle": false
+        }
+      ],
+      "already_reported_to_agent": false,
+      "selected_for_rewake": false
+    }
+  ],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260916T154323459Z-79662-04667422e458.json",
+    "latest_report": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12.json",
+    "history_summary": ".mimosa/history/run-20260916T154323459Z-79662-04667422e458.json"
+  }
+}
