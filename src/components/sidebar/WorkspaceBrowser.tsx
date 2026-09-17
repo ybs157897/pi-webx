@@ -28,6 +28,7 @@ import {
 import type { SessionNode, WorkspaceItem } from './tree.ts'
 import {
   FLAT_SESSION_ORDER_KEY,
+  dateBucketOf,
   deriveFlat,
   deriveGroups,
   deriveSearchResults,
@@ -169,31 +170,74 @@ interface TreeBodyProps {
   orderBy: 'manual' | 'updated'
   groupExpansion: Readonly<Record<string, boolean>>
   sessionOrderByAccount: Readonly<Record<string, readonly string[]>>
+  /** Pinned row ids; rows arrive pre-ordered pinned-first from the derivation. */
+  pinnedSessions: readonly string[]
   revealSessionId: string | undefined
   onSessionRevealed: (id: string) => void
-  openNode: (node: SessionNode) => void
+  openNode: (node: SessionNode | { id: string; kind: 'live' | 'stored' }) => void
   onSessionRename: (id: string, currentTitle: string) => void
   onSessionKill: (id: string, title: string) => void
   onStoredResume: (node: SessionNode) => void
   onStoredDelete: (node: SessionNode) => void
+  onTogglePinned: (id: string) => void
   onWorkspacePick: (path: string) => void
   onWorkspaceDefault: (path: string) => void
   onWorkspaceForget: (path: string) => void
   onNewSession: (cwd: string) => void
 }
 
+/** One labeled run of session rows inside a list. */
+interface RowSection {
+  label?: string
+  rows: SessionNode[]
+}
+
+/**
+ * Split one pre-ordered row list into render sections: the pinned run first
+ * (rows arrive pinned-first from the derivation), then — in recency order —
+ * calendar-day buckets. Manual order renders one unlabeled run. The section
+ * split never reorders rows, so the drag math keeps reading the flat list.
+ */
+function rowSections(
+  rows: readonly SessionNode[],
+  pinned: ReadonlySet<string>,
+  orderBy: 'manual' | 'updated',
+  now: number,
+): RowSection[] {
+  const sections: RowSection[] = []
+  const pinnedRows = rows.filter(row => pinned.has(row.id))
+  if (pinnedRows.length > 0) sections.push({ label: '置顶', rows: pinnedRows })
+  const rest = rows.filter(row => !pinned.has(row.id))
+  if (orderBy === 'updated') {
+    let bucket: string | undefined
+    for (const row of rest) {
+      const label = dateBucketOf(row.updatedAt, now)
+      if (label !== bucket) {
+        bucket = label
+        sections.push({ label, rows: [] })
+      }
+      const current = sections[sections.length - 1]
+      if (current !== undefined) current.rows.push(row)
+    }
+  } else if (rest.length > 0) {
+    sections.push({ rows: rest })
+  }
+  return sections
+}
+
 /** The scrolling session tree; manual drag order persists into the view store. */
 function SessionTree(props: TreeBodyProps) {
   const {
     workspaces, live, stored, currentId, home, orderBy, groupExpansion, sessionOrderByAccount,
-    revealSessionId, onSessionRevealed, openNode,
-    onSessionRename, onSessionKill, onStoredResume, onStoredDelete,
+    pinnedSessions, revealSessionId, onSessionRevealed, openNode,
+    onSessionRename, onSessionKill, onStoredResume, onStoredDelete, onTogglePinned,
     onWorkspacePick, onWorkspaceDefault, onWorkspaceForget, onNewSession,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
+  const pinnedSet = useMemo(() => new Set(pinnedSessions), [pinnedSessions])
   const groups = useMemo(
-    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts, home),
-    [workspaces, live, stored, currentId, groupExpansion, orderAccounts, home],
+    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts, pinnedSessions, home),
+    [workspaces, live, stored, currentId, groupExpansion, orderAccounts, pinnedSessions, home],
   )
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<string[]>([])
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -358,46 +402,64 @@ function SessionTree(props: TreeBodyProps) {
                   forget: () => { onWorkspaceForget(group.key) },
                 }}
               />
-              {(sessionsExpanded ? group.sessions : collapsed.rows).map((node) => {
-                const sameGroupDrag = drag !== null && drag.accountKey === group.key
-                const dragProps = orderBy !== 'manual' ? undefined : {
-                  start: () => {
-                    sessionDropCommitted.current = false
-                    setDrag({ accountKey: group.key, sessionId: node.id, over: null })
-                  },
-                  active: sameGroupDrag,
-                  marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
-                  hover: (half: 'before' | 'after') => {
-                    setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
-                  },
-                  drop: (half: 'before' | 'after') => {
-                    if (drag === null) return
-                    commitSessionDrag(drag, { id: node.id, half })
-                  },
-                  end: () => {
-                    if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
-                    else setDrag(null)
-                    sessionDropCommitted.current = false
-                  },
-                }
-                return (
-                  <SessionNodeItem
-                    key={node.id}
-                    node={node}
-                    currentId={currentId ?? undefined}
-                    now={now}
-                    onOpen={openNode}
-                    onRename={onSessionRename}
-                    onKill={onSessionKill}
-                    onResume={onStoredResume}
-                    onDeleteStored={onStoredDelete}
-                    onReveal={node.id === revealSessionId && group.key === revealGroup
-                      ? () => { onSessionRevealed(node.id) }
-                      : undefined}
-                    drag={dragProps}
-                  />
-                )
-              })}
+              {(sessionsExpanded ? group.sessions : collapsed.rows).length > 0
+                && rowSections(sessionsExpanded ? group.sessions : collapsed.rows, pinnedSet, orderBy, now)
+                  .flatMap(section => [
+                    ...(section.label === undefined ? [] : [
+                      <div
+                        key={`${group.key}:section:${section.label}`}
+                        className={css.rowGroupLabel}
+                        aria-hidden="true"
+                      >
+                        {section.label}
+                      </div>,
+                    ]),
+                    ...section.rows.map((node) => {
+                      const isPinned = pinnedSet.has(node.id)
+                      const sameGroupDrag = drag !== null && drag.accountKey === group.key
+                      // Pinned rows float above the manual order; dragging one
+                      // would promise an order its pin immediately overrides.
+                      const dragProps = orderBy !== 'manual' || isPinned ? undefined : {
+                        start: () => {
+                          sessionDropCommitted.current = false
+                          setDrag({ accountKey: group.key, sessionId: node.id, over: null })
+                        },
+                        active: sameGroupDrag,
+                        marker: sameGroupDrag && drag.over?.id === node.id ? drag.over.half : null,
+                        hover: (half: 'before' | 'after') => {
+                          setDrag(d => (d === null ? d : { ...d, over: { id: node.id, half } }))
+                        },
+                        drop: (half: 'before' | 'after') => {
+                          if (drag === null) return
+                          commitSessionDrag(drag, { id: node.id, half })
+                        },
+                        end: () => {
+                          if (drag?.over !== null && drag?.over !== undefined) commitSessionDrag(drag, drag.over)
+                          else setDrag(null)
+                          sessionDropCommitted.current = false
+                        },
+                      }
+                      return (
+                        <SessionNodeItem
+                          key={node.id}
+                          node={node}
+                          currentId={currentId ?? undefined}
+                          now={now}
+                          onOpen={openNode}
+                          onRename={onSessionRename}
+                          onKill={onSessionKill}
+                          onResume={onStoredResume}
+                          onDeleteStored={onStoredDelete}
+                          onReveal={node.id === revealSessionId && group.key === revealGroup
+                            ? () => { onSessionRevealed(node.id) }
+                            : undefined}
+                          pinned={isPinned}
+                          onTogglePinned={() => { onTogglePinned(node.id) }}
+                          drag={dragProps}
+                        />
+                      )
+                    }),
+                  ])}
               {collapsed.hiddenCount > 0 && (
                 <button
                   type="button"
@@ -421,13 +483,14 @@ function SessionTree(props: TreeBodyProps) {
 function FlatList(props: TreeBodyProps) {
   const {
     live, stored, currentId, home, orderBy, sessionOrderByAccount,
-    revealSessionId, onSessionRevealed, openNode,
-    onSessionRename, onSessionKill, onStoredResume, onStoredDelete,
+    pinnedSessions, revealSessionId, onSessionRevealed, openNode,
+    onSessionRename, onSessionKill, onStoredResume, onStoredDelete, onTogglePinned,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
+  const pinnedSet = useMemo(() => new Set(pinnedSessions), [pinnedSessions])
   const rows = useMemo(
-    () => deriveFlat(live, stored, orderAccounts, home),
-    [live, stored, orderAccounts, home],
+    () => deriveFlat(live, stored, orderAccounts, pinnedSessions, home),
+    [live, stored, orderAccounts, pinnedSessions, home],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -457,45 +520,60 @@ function FlatList(props: TreeBodyProps) {
         {rows.length === 0 && (
           <div className={css.empty}>暂无会话</div>
         )}
-        {rows.map((node) => {
-          const active = drag !== null
-          return (
-            <SessionNodeItem
-              key={node.id}
-              node={node}
-              currentId={currentId ?? undefined}
-              now={now}
-              onOpen={openNode}
-              onRename={onSessionRename}
-              onKill={onSessionKill}
-              onResume={onStoredResume}
-              onDeleteStored={onStoredDelete}
-              onReveal={node.id === revealSessionId
-                ? () => { onSessionRevealed(node.id) }
-                : undefined}
-              flat
-              drag={orderBy !== 'manual' ? undefined : {
-                start: () => {
-                  dropCommitted.current = false
-                  setDrag({ accountKey: FLAT_SESSION_ORDER_KEY, sessionId: node.id, over: null })
-                },
-                active,
-                marker: active && drag.over?.id === node.id ? drag.over.half : null,
-                hover: (half) => {
-                  setDrag(current => current === null ? current : { ...current, over: { id: node.id, half } })
-                },
-                drop: (half) => {
-                  if (drag !== null) commitDrag(drag, { id: node.id, half })
-                },
-                end: () => {
-                  if (drag?.over !== null && drag?.over !== undefined) commitDrag(drag, drag.over)
-                  else setDrag(null)
-                  dropCommitted.current = false
-                },
-              }}
-            />
-          )
-        })}
+        {rows.length > 0 && rowSections(rows, pinnedSet, orderBy, now)
+          .flatMap(section => [
+            ...(section.label === undefined ? [] : [
+              <div
+                key={`section:${section.label}`}
+                className={css.rowGroupLabel}
+                aria-hidden="true"
+              >
+                {section.label}
+              </div>,
+            ]),
+            ...section.rows.map((node) => {
+              const isPinned = pinnedSet.has(node.id)
+              const active = drag !== null
+              return (
+                <SessionNodeItem
+                  key={node.id}
+                  node={node}
+                  currentId={currentId ?? undefined}
+                  now={now}
+                  onOpen={openNode}
+                  onRename={onSessionRename}
+                  onKill={onSessionKill}
+                  onResume={onStoredResume}
+                  onDeleteStored={onStoredDelete}
+                  onReveal={node.id === revealSessionId
+                    ? () => { onSessionRevealed(node.id) }
+                    : undefined}
+                  pinned={isPinned}
+                  onTogglePinned={() => { onTogglePinned(node.id) }}
+                  flat
+                  drag={orderBy !== 'manual' || isPinned ? undefined : {
+                    start: () => {
+                      dropCommitted.current = false
+                      setDrag({ accountKey: FLAT_SESSION_ORDER_KEY, sessionId: node.id, over: null })
+                    },
+                    active,
+                    marker: active && drag.over?.id === node.id ? drag.over.half : null,
+                    hover: (half) => {
+                      setDrag(current => current === null ? current : { ...current, over: { id: node.id, half } })
+                    },
+                    drop: (half) => {
+                      if (drag !== null) commitDrag(drag, { id: node.id, half })
+                    },
+                    end: () => {
+                      if (drag?.over !== null && drag?.over !== undefined) commitDrag(drag, drag.over)
+                      else setDrag(null)
+                      dropCommitted.current = false
+                    },
+                  }}
+                />
+              )
+            }),
+          ])}
       </div>
       <span className={css.fade} />
     </div>
@@ -588,6 +666,7 @@ export function WorkspaceBrowser({
   const groupExpansion = useWorkspaceView(s => s.groupExpansion)
   const sessionOrderByAccount = useWorkspaceView(s => s.sessionOrderByAccount)
   const workspaceOrder = useWorkspaceView(s => s.workspaceOrder)
+  const pinnedSessions = useWorkspaceView(s => s.pinnedSessions)
 
   // Manual workspace order (drag) reconciled with the owner's list: stored
   // order leads, workspaces the store does not know yet append in arrival order.
@@ -723,6 +802,7 @@ export function WorkspaceBrowser({
     orderBy,
     groupExpansion,
     sessionOrderByAccount,
+    pinnedSessions,
     revealSessionId,
     onSessionRevealed: acknowledgeSessionReveal,
     openNode,
@@ -730,6 +810,7 @@ export function WorkspaceBrowser({
     onSessionKill,
     onStoredResume: openNode,
     onStoredDelete: setDeleteStoredTarget,
+    onTogglePinned: viewActions.togglePinnedSession,
     onWorkspacePick: onPickWorkspace,
     onWorkspaceDefault: onSetDefault,
     onWorkspaceForget: onForgetWorkspace,

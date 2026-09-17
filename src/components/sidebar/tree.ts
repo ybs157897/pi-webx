@@ -82,6 +82,38 @@ function byRecency(a: SessionNode, b: SessionNode): number {
   return a.id < b.id ? -1 : 1
 }
 
+/**
+ * Stable pinned-first partition: pinned rows float to the top in their
+ * underlying order (manual or recency); unpinned rows keep theirs. A pin is
+ * naturally workspace-scoped — a row id only ever appears in one group — so a
+ * flat id list needs no per-workspace keying.
+ */
+function pinnedFirst(
+  rows: readonly SessionNode[],
+  pinned: ReadonlySet<string>,
+): SessionNode[] {
+  const top = rows.filter(row => pinned.has(row.id))
+  if (top.length === 0) return [...rows]
+  return [...top, ...rows.filter(row => !pinned.has(row.id))]
+}
+
+/** Calendar-day bucket for the recency-order section labels. */
+export type DateBucket = '今天' | '昨天' | '更早'
+
+/** Local-midnight start of the day containing `at` (DST-safe via Date). */
+function startOfDay(at: number): number {
+  const date = new Date(at)
+  date.setHours(0, 0, 0, 0)
+  return date.getTime()
+}
+
+export function dateBucketOf(updatedAt: number, now: number): DateBucket {
+  const today = startOfDay(now)
+  if (startOfDay(updatedAt) >= today) return '今天'
+  if (startOfDay(updatedAt) >= startOfDay(now - 86_400_000)) return '昨天'
+  return '更早'
+}
+
 /** Live session → row node. Its display title is the name pi echoes, else its directory. */
 export function liveNode(session: SessionSummary, home: string | undefined): SessionNode {
   return {
@@ -157,8 +189,10 @@ export function deriveGroups(
   currentId: string | null,
   expansion: Readonly<Record<string, boolean>>,
   orderByAccount: Readonly<Record<string, readonly string[]>>,
+  pinned: readonly string[],
   home: string | undefined,
 ): GroupNode[] {
+  const pinnedSet = new Set(pinned)
   const currentWorkspace = currentId === null
     ? undefined
     : live.find(session => session.id === currentId)?.cwd
@@ -167,7 +201,7 @@ export function deriveGroups(
       ...live.filter(session => session.cwd === workspace.key).map(session => liveNode(session, home)),
       ...stored.filter(session => session.cwd === workspace.key).map(session => storedNode(session)),
     ]
-    const ordered = reconciledOrder(rows, orderByAccount[workspace.key])
+    const ordered = pinnedFirst(reconciledOrder(rows, orderByAccount[workspace.key]), pinnedSet)
     const expanded = expansion[workspace.key] ?? workspace.isCurrent
     return {
       key: workspace.key,
@@ -183,18 +217,19 @@ export function deriveGroups(
   })
 }
 
-/** Derive the flat session list ("In one list" mode): every session, newest first. */
+/** Derive the flat session list ("In one list" mode): pinned first, else newest first. */
 export function deriveFlat(
   live: readonly SessionSummary[],
   stored: readonly StoredSession[],
   orderByAccount: Readonly<Record<string, readonly string[]>>,
+  pinned: readonly string[],
   home: string | undefined,
 ): SessionNode[] {
   const rows: SessionNode[] = [
     ...live.map(session => liveNode(session, home)),
     ...stored.map(session => storedNode(session)),
   ]
-  return reconciledOrder(rows, orderByAccount[FLAT_SESSION_ORDER_KEY])
+  return pinnedFirst(reconciledOrder(rows, orderByAccount[FLAT_SESSION_ORDER_KEY]), new Set(pinned))
 }
 
 /**

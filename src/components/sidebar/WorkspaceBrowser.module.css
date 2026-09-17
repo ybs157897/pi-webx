@@ -490,6 +490,16 @@
   color: var(--dsw-alias-label-secondary);
 }
 
+/* pi-webx addition: label row for the pinned section and the recency-order
+   calendar buckets (置顶 / 今天 / 昨天 / 更早). Not part of the dsh sheet. */
+.rowGroupLabel {
+  flex: none;
+  padding: 10px 12px 2px 28px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .wide {
     animation: none;

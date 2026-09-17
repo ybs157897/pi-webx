@@ -215,6 +215,20 @@ function IconCheckMarker() {
   )
 }
 
+/** Pushpin glyph (kept inline: the vendored icon set has no pin). */
+function IconPinMarker({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
+      <path
+        d="M9.8 1.8l4.4 4.4-2 .8-2.2 2.2.5 3.2-1.3 1.3-2.7-2.7-3.2 3.2-.9-.9 3.2-3.2-2.7-2.7L4.6 6l3.2.5 2.2-2.2.8-2z"
+        stroke="currentColor"
+        strokeWidth="1.2"
+        strokeLinejoin="round"
+      />
+    </svg>
+  )
+}
+
 /* ------------------------------------------------------------- session row */
 
 interface SessionStatus {
@@ -264,7 +278,8 @@ function SessionHoverContent({ node, now }: { node: SessionNode; now: number }) 
  * transcript, marked with a clock glyph) offer resume/delete.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onKill, onResume, onDeleteStored, onReveal, drag, flat = false,
+  node, currentId, now, onOpen, onRename, onKill, onResume, onDeleteStored, onReveal,
+  pinned = false, onTogglePinned, drag, flat = false,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -280,6 +295,10 @@ export function SessionNodeItem({
   onDeleteStored: (node: SessionNode) => void
   /** Scroll this row into view after search navigation, then acknowledge it. */
   onReveal?: (() => void) | undefined
+  /** The row is pinned and floats at the top of its list. */
+  pinned?: boolean | undefined
+  /** Toggle the pin (row menu action); absent rows hide the entry. */
+  onTogglePinned?: (() => void) | undefined
   /** Present only on draggable rows (grouped sessions outside search). */
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
@@ -296,15 +315,22 @@ export function SessionNodeItem({
     rowRef.current?.scrollIntoView({ block: 'nearest' })
     onReveal()
   }, [onReveal])
-  const sessionMenuItems = node.kind === 'live'
-    ? [
-      { id: 'rename', label: '重命名', icon: <IconEditOutline16 /> },
-      { id: 'kill', label: '结束会话', icon: <IconTrashOutline16 />, danger: true },
-    ]
-    : [
-      { id: 'resume', label: '恢复会话', icon: <IconRefreshOutline16 /> },
-      { id: 'delete', label: '从磁盘删除', icon: <IconTrashOutline16 />, danger: true },
-    ]
+  const sessionMenuItems = [
+    ...(onTogglePinned === undefined ? [] : [{
+      id: 'pin',
+      label: pinned ? '取消置顶' : '置顶',
+      icon: <IconPinMarker size={16} />,
+    }]),
+    ...(node.kind === 'live'
+      ? [
+        { id: 'rename', label: '重命名', icon: <IconEditOutline16 /> },
+        { id: 'kill', label: '结束会话', icon: <IconTrashOutline16 />, danger: true },
+      ]
+      : [
+        { id: 'resume', label: '恢复会话', icon: <IconRefreshOutline16 /> },
+        { id: 'delete', label: '从磁盘删除', icon: <IconTrashOutline16 />, danger: true },
+      ]),
+  ]
   const ownRow = (
     <div
       ref={rowRef}
@@ -347,7 +373,17 @@ export function SessionNodeItem({
           ? <IconClockOutline16 />
           : showStatus && <StateDot state={statuses[0]?.state ?? 'idle'} />}
       </span>
-      <span className={css.title}>{node.title}</span>
+      <span className={css.title}>
+        {node.title}
+        {pinned && (
+          <span
+            aria-label="已置顶"
+            style={{ display: 'inline-flex', flex: 'none', marginLeft: 6, color: 'var(--dsw-alias-label-tertiary)' }}
+          >
+            <IconPinMarker />
+          </span>
+        )}
+      </span>
       <span className={css.time}>{timeLabel(row.updatedAt, now)}</span>
       <span className={css.rowActions}>
         <Menu
@@ -356,7 +392,8 @@ export function SessionNodeItem({
           items={sessionMenuItems}
           onSelect={(id) => {
             setMenuOpen(false)
-            if (id === 'rename') onRename(node.id, node.title)
+            if (id === 'pin') onTogglePinned?.()
+            else if (id === 'rename') onRename(node.id, node.title)
             else if (id === 'kill') onKill(node.id, node.title)
             else if (id === 'resume') onResume(node)
             else if (id === 'delete') onDeleteStored(node)
