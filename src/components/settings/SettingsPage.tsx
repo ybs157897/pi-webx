@@ -83,7 +83,12 @@ export function SettingsPage({ open, onClose, sections }: SettingsPageProps): Re
     if (!open) return
     setActiveId(undefined)
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') closeRef.current()
+      if (e.key !== 'Escape') return
+      /* A dialog opened over the page owns Escape: it closes itself, and both
+         handlers listen on the document, so without this the page would close
+         underneath it and take the section with it. */
+      if (document.querySelector('[role="dialog"]') !== null) return
+      closeRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     return () => { document.removeEventListener('keydown', onKeyDown) }

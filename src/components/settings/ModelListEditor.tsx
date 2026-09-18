@@ -18,9 +18,11 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Button,
+  IconCopyOutline16,
+  IconEditOutline16,
   IconPlusOutline16,
-  IconTrashOutline16,
   Modal,
+  writeClipboard,
 } from '../../ui/primitives/index.ts'
 import { badgeCapacity } from './capacity.ts'
 import type { ModelDraft } from './capacity.ts'
@@ -188,78 +190,87 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   return (
     <section className={styles['modelCatalog']} aria-label={t('models')}>
       <div className={styles['modelListHead']}>
-        <div className={styles['modelCatalogHeading']}>
-          <span className={styles['modelCatalogTitle']}>{t('models')}</span>
-        </div>
-        <button
-          type="button"
-          className={styles['linkButton']}
-          disabled={disabled || busy || !askable || props.probeBlocked !== undefined}
-          title={props.probeBlocked ?? (askable ? undefined : t('fetchNeedsBaseUrl'))}
-          onClick={() => { void fetchCandidates() }}
-        >
-          {busy ? t('fetching') : t('fetchModels')}
-        </button>
+        <span className={styles['modelCatalogTitle']}>{t('models')}</span>
+        <span className={styles['modelListActions']}>
+          <button
+            type="button"
+            className={styles['linkButton']}
+            disabled={disabled || busy || !askable || props.probeBlocked !== undefined}
+            title={props.probeBlocked ?? (askable ? undefined : t('fetchNeedsBaseUrl'))}
+            onClick={() => { void fetchCandidates() }}
+          >
+            {busy ? t('fetching') : t('fetchModels')}
+          </button>
+          <button
+            type="button"
+            className={styles['secondaryButton']}
+            disabled={disabled}
+            onClick={() => { setEditing('new') }}
+          >
+            <IconPlusOutline16 size={14} />
+            {t('addModel')}
+          </button>
+        </span>
       </div>
       {models.length === 0 ? <p className={styles['modelEmpty']}>{t('modelsEmpty')}</p> : null}
-      {models.map((model, index) => {
-        const badges = badgesOf(model)
-        const enabled = isEnabled(model)
-        return (
-          <div key={`${textOf(model, 'id')}-${String(index)}`} className={styles['modelEntry']}>
-            <div className={styles['modelRow']}>
-              <label className={styles['modelRowToggle']} title={enabled ? t('modelEnabled') : t('modelDisabled')}>
-                <input
-                  type="checkbox"
-                  role="switch"
-                  checked={enabled}
-                  aria-label={`${t('modelEnabled')} ${index + 1}`}
-                  disabled={disabled}
-                  onChange={(event) => { toggleEnabled(index, event.target.checked) }}
-                />
-              </label>
-              <span className={styles['modelRowId']} title={textOf(model, 'id')}>
-                {textOf(model, 'id') || t('modelId')}
-              </span>
-              <span className={styles['modelBadges']}>
-                {badges.map(badge => (
-                  <span key={badge} className={styles['badge']}>{badge}</span>
-                ))}
-              </span>
-              <span className={styles['modelRowActions']}>
-                <button
-                  type="button"
-                  className={styles['secondaryButton']}
-                  aria-label={`${t('editModel')} ${index + 1}`}
-                  disabled={disabled}
-                  onClick={() => { setEditing(index) }}
-                >
-                  {t('edit')}
-                </button>
-                <button
-                  type="button"
-                  className={`${styles['iconButton']} ${styles['iconButtonDanger']}`}
-                  aria-label={`${t('removeModel')} ${index + 1}`}
-                  title={t('removeModel')}
-                  disabled={disabled}
-                  onClick={() => { onChange(models.filter((_model, at) => at !== index)) }}
-                >
-                  <IconTrashOutline16 size={14} />
-                </button>
-              </span>
-            </div>
-          </div>
-        )
-      })}
-      <button
-        type="button"
-        className={styles['addModelButton']}
-        disabled={disabled}
-        onClick={() => { setEditing('new') }}
-      >
-        <IconPlusOutline16 size={14} />
-        {t('addModel')}
-      </button>
+      {models.length === 0
+        ? null
+        : (
+          <ul className={styles['modelList']}>
+            {models.map((model, index) => {
+              const badges = badgesOf(model)
+              const enabled = isEnabled(model)
+              const id = textOf(model, 'id')
+              return (
+                <li key={`${id}-${String(index)}`} className={styles['modelRow']}>
+                  <span className={styles['modelRowId']} title={id}>
+                    {id || t('modelId')}
+                  </span>
+                  <span className={styles['modelBadges']}>
+                    {badges.map(badge => (
+                      <span key={badge} className={styles['badge']}>{badge}</span>
+                    ))}
+                  </span>
+                  <span className={styles['modelRowActions']}>
+                    <button
+                      type="button"
+                      className={styles['iconButton']}
+                      aria-label={`${t('copyModelId')} ${index + 1}`}
+                      title={t('copyModelId')}
+                      disabled={disabled || id.length === 0}
+                      onClick={() => { void writeClipboard(id) }}
+                    >
+                      <IconCopyOutline16 size={14} />
+                    </button>
+                    <button
+                      type="button"
+                      className={styles['iconButton']}
+                      aria-label={`${t('editModel')} ${index + 1}`}
+                      title={t('editModel')}
+                      disabled={disabled}
+                      onClick={() => { setEditing(index) }}
+                    >
+                      <IconEditOutline16 size={14} />
+                    </button>
+                    <label
+                      className={styles['modelRowToggle']}
+                      title={enabled ? t('modelEnabled') : t('modelDisabled')}
+                    >
+                      <input
+                        type="checkbox"
+                        role="switch"
+                        checked={enabled}
+                        aria-label={`${t('modelEnabled')} ${index + 1}`}
+                        disabled={disabled}
+                        onChange={(event) => { toggleEnabled(index, event.target.checked) }}
+                      />
+                    </label>
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        )}
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
 
       {editing === undefined
@@ -276,6 +287,12 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
               else replaceRow(editing, draft)
               setEditing(undefined)
             }}
+            onDelete={typeof editing === 'number'
+              ? () => {
+                onChange(models.filter((_model, at) => at !== editing))
+                setEditing(undefined)
+              }
+              : undefined}
           />
         )}
 

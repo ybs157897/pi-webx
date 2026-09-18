@@ -34,12 +34,6 @@
   color: var(--pi-settings-fg-subtle);
 }
 
-.notice {
-  margin: 0;
-  font-size: 12px;
-  line-height: 18px;
-  color: var(--dsw-alias-state-warn-label);
-}
 
 .savedNotice {
   margin: 0;
@@ -199,8 +193,7 @@
 .primaryButton:disabled,
 .secondaryButton:disabled,
 .dangerButton:disabled,
-.linkButton:disabled,
-.addModelButton:disabled {
+.linkButton:disabled {
   opacity: 0.4;
   cursor: default;
 }
@@ -209,9 +202,33 @@
 .secondaryButton:focus-visible,
 .dangerButton:focus-visible,
 .linkButton:focus-visible,
-.addModelButton:focus-visible,
-.iconButton:focus-visible,
-.customizedSummary:focus-visible {
+/* Square, label-free affordances: the row's own inputs carry the meaning, so
+   the actions stay glyphs and announce themselves through aria-label. */
+.iconButton {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--pi-settings-fg-subtle);
+  cursor: pointer;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--pi-settings-hover);
+  color: var(--pi-settings-fg);
+}
+
+.iconButton:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.iconButton:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px var(--dsw-alias-border-l3);
 }
@@ -226,15 +243,42 @@
 
 .editorHeader {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  min-height: 32px;
 }
 
+/* The title is the rename control (the reference renames from its header, not
+   from a field): a 16px medium label that takes a hover fill. */
 .editorTitle {
-  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 6px;
+  margin-left: -6px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
   line-height: 22px;
   font-weight: 500;
-  color: var(--dsw-alias-label-primary);
+  color: var(--pi-settings-fg);
+  text-align: left;
+  cursor: text;
+}
+
+.editorTitle:hover:not(:disabled) {
+  background: var(--pi-settings-hover);
+}
+
+/* Two classes: the shared `.input` sets width 100%, and the rename field must
+   stay narrow enough to leave the header's own controls in place. */
+.editorHeader .editorTitleInput {
+  flex: none;
+  width: 220px;
+  height: 28px;
+  font-size: 14px;
 }
 
 .editorRoute {
@@ -294,225 +338,111 @@
 
 /* The add flows render in the same detail column as an editor, so they carry
    no chrome of their own. */
-.addCard,
-.setupCard {
+.addCard {
   display: flex;
   flex-direction: column;
   gap: 16px;
   list-style: none;
 }
 
-.customized {
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-  padding-top: 10px;
-}
 
-/* Native disclosure marker replaced by a rotating chevron: the built-in
-   triangle differs per engine and cannot take the label color. */
-.customizedSummary {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: fit-content;
-  padding: 2px 4px;
-  margin-left: -4px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
-  list-style: none;
-}
-
-.customizedSummary::-webkit-details-marker {
-  display: none;
-}
-
-.customizedSummary::before {
-  content: '';
-  width: 5px;
-  height: 5px;
-  border-right: 1.5px solid currentcolor;
-  border-bottom: 1.5px solid currentcolor;
-  transform: rotate(-45deg) translate(-1px, -1px);
-  transition: transform 120ms ease;
-}
-
-.customized[open] > .customizedSummary::before {
-  transform: rotate(45deg) translate(-1px, -1px);
-}
-
-.customizedSummary:hover {
-  color: var(--dsw-alias-label-primary);
-}
-
-.customizedBody {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  padding-top: 12px;
-}
-
-/* Model catalog: a table, not a stack of cards. The column captions are
-   written once above the rows, so a row is one line of fields plus its
-   delete control; each field still carries the indexed `aria-label` that
-   names it, and the caption strip is hidden from assistive tech to keep
-   that name from being announced twice. */
+/* Model list (figma .Setting-model-list): a 14px caption row whose trailing
+   edge carries the fetch and add actions, then the rows in one bordered shell
+   with hairlines between them — a row is the id, its derived badges, and the
+   row's own controls. */
 .modelCatalog {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-top: 12px;
-  border-top: 0.5px solid var(--dsw-alias-border-l2);
-}
-
-.modelCatalogHeading {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.modelCatalogTitle {
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
-}
-
-.modelCatalogMeta,
-.modelEmpty {
-  margin: 0;
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
-}
-
-/* Model list, shared with the pi-ai provider form: one bordered
-   entry per model, id and display name on the row, capacities behind the
-   row's own disclosure. The rules use this stylesheet's token vocabulary —
-   `--dsw-alias-border-subtle`, `--dsw-alias-text-tertiary`, and
-   `--dsw-alias-text-primary` are undefined here and would resolve to their
-   light-mode literals. */
-.modelList {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  gap: 12px;
 }
 
 .modelListHead {
   display: flex;
-  align-items: flex-start;
+  flex-wrap: wrap;
+  align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
 
-.modelEntry {
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 10px;
-  padding: 6px;
+.modelCatalogTitle {
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--pi-settings-fg-subtle);
+}
+
+.modelListActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modelList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--pi-settings-border);
+  border-radius: 8px;
+  overflow: clip;
 }
 
 .modelRow {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto auto;
-  align-items: center;
-  gap: 6px;
-}
-
-/* Square, label-free affordances: the row's own inputs carry the meaning, so
-   the actions stay glyphs and announce themselves through aria-label. */
-.iconButton {
-  box-sizing: border-box;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  border: none;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--dsw-alias-label-tertiary);
-  cursor: pointer;
-}
-
-.iconButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
-}
-
-.iconButton:disabled {
-  cursor: default;
-  opacity: 0.4;
-}
-
-/* The delete glyph keeps the danger tint the rest of the section uses. */
-.iconButtonDanger:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-danger);
-  color: var(--dsw-alias-state-error-primary);
-}
-
-.modelAdvanced {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
-  padding: 8px 4px 2px;
-}
-
-.modelField {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 6px 12px;
+}
+
+.modelRow + .modelRow {
+  border-top: 1px solid var(--pi-settings-border);
+}
+
+.modelRowId {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--pi-settings-fg);
+}
+
+.modelBadges {
+  flex: none;
+  display: flex;
+  align-items: center;
   gap: 4px;
 }
 
-.modelFieldLabel {
-  color: var(--dsw-alias-label-tertiary);
+.badge {
+  padding: 2px 6px;
+  border: 1px solid var(--pi-settings-border);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--pi-settings-fg) 3%, transparent);
   font-size: 12px;
-  line-height: 18px;
+  line-height: 16px;
+  color: var(--pi-settings-fg-subtle);
 }
 
-/* A boolean inside the advanced grid: same field label, control row beneath, so
-   the checkbox lines up with the text inputs beside it. */
-.modelToggle {
+.modelRowActions {
+  flex: none;
   display: flex;
   align-items: center;
-  gap: 6px;
-  height: 28px;
+  gap: 4px;
 }
 
-.modelToggleHint {
-  color: var(--dsw-alias-label-tertiary);
-  font-size: 12px;
-  line-height: 18px;
+.modelRowToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
 }
 
 .modelEmpty {
-  padding: 12px;
-  border: 1px dashed var(--dsw-alias-border-l3);
-  border-radius: 8px;
-  text-align: center;
-}
-
-.addModelButton {
-  box-sizing: border-box;
-  align-self: flex-start;
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 28px;
-  padding: 0 10px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  border-radius: 14px;
-  background: transparent;
-  color: var(--dsw-alias-label-primary);
-  font: inherit;
-  font-size: 12px;
-  line-height: 18px;
-  cursor: pointer;
-}
-
-.addModelButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+  margin: 0;
+  padding: 24px 0;
+  font-size: 14px;
+  color: var(--pi-settings-fg-subtlest);
 }
 
 .input {
@@ -584,19 +514,8 @@ select.input {
   background: var(--dsw-alias-interactive-bg-hover-danger);
 }
 
-/* Icon-button label seat: named for assistive tech and for the tests that
-   query these controls by their text. */
-.hiddenLabel {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
 
 @media (prefers-reduced-motion: reduce) {
-  .customizedSummary::before,
   .switchThumb {
     transition: none;
   }
@@ -764,46 +683,47 @@ select.input {
   color: var(--pi-settings-fg-subtlest);
 }
 
-/* ---------------------------------------------------- model rows (reference) */
-
-.modelRowId {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--dsw-alias-label-primary);
-}
-
-.modelBadges {
-  flex: none;
+/* Write-only secret field: the input keeps room for the reveal control, which
+   sits inside the field's trailing edge as in the reference. */
+.secretField {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
 }
 
-.badge {
-  padding: 1px 6px;
-  border-radius: 4px;
-  background: var(--dsw-alias-bg-module-platform);
-  border: 0.5px solid var(--dsw-alias-border-l3);
-  font-size: 11px;
-  line-height: 16px;
-  color: var(--dsw-alias-label-secondary);
+.secretInput {
+  padding-right: 40px;
 }
 
-.modelRowActions {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.modelRowToggle {
-  flex: none;
+.secretToggle {
+  position: absolute;
+  right: 4px;
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--pi-settings-fg-subtle);
+  cursor: pointer;
+}
+
+.secretToggle:hover:not(:disabled) {
+  background: var(--pi-settings-hover);
+  color: var(--pi-settings-fg);
+}
+
+.secretToggle:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Modal footers: the destructive action sits opposite the paired controls. */
+.footerSpacer {
+  flex: 1;
 }
 
 /* ---------------------------------------------------- editor header extras */

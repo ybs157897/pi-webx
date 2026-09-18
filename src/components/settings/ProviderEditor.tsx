@@ -1,11 +1,16 @@
 /**
- * One provider's editor card, ported from dsh's `ui-settings-models`
- * ProviderEditor (pi-ai family): the primary field is a single write-only
- * **API key** input — a blank key keeps whatever is configured, which is what
- * makes saving a redacted view safe — and the collapsed 自定义设置 area carries
- * the display name, Base URL, wire protocol, auth-header mode, and the model
- * catalog. The whole form is the desired state: a field sent as '' clears it,
- * and the model list is written as one array.
+ * One provider's editor pane, ported from dsh's `ui-settings-models`
+ * ProviderEditor (pi-ai family) and laid out as the reference's detail column:
+ * every field is on the pane at once — route, protocol, key — with the model
+ * list last, rather than folded behind a disclosure. The whole form is the
+ * desired state: a field sent as '' clears it, and the model list is written as
+ * one array.
+ *
+ * The key field is write-only: a blank key keeps whatever is configured, which
+ * is what makes saving a redacted view safe, and the eye reveals what is typed
+ * without ever reading the stored secret back. The display name is edited on
+ * the title itself (the reference renames through its header, not a field).
+ *
  *
  * Reasoning effort is deliberately absent: it is a per-MODEL capability, and
  * the models under one provider disagree about it, so a provider-scoped
@@ -27,6 +32,7 @@ import {
   httpUrlError,
   modelsConfigApi,
 } from '../../lib/modelsConfig'
+import { IconEyeOffOutline16, IconEyeOutline16 } from '../../ui/primitives/index.ts'
 import { modelDrafts, validateModels } from './capacity.ts'
 import type { ModelDraft } from './capacity.ts'
 import { apiKeyFailure, t } from './copy.ts'
@@ -63,6 +69,8 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const [authHeaderDraft, setAuthHeaderDraft] = useState(provider.authHeader === true)
   const [enabled, setEnabled] = useState(provider.piWebx?.enabled !== false)
   const [keyDraft, setKeyDraft] = useState('')
+  const [keyVisible, setKeyVisible] = useState(false)
+  const [renaming, setRenaming] = useState(false)
   const [removeKey, setRemoveKey] = useState(false)
   const [models, setModels] = useState<readonly ModelDraft[]>(() => modelDrafts(provider.models))
   const [busy, setBusy] = useState(false)
@@ -112,7 +120,34 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         ? null
         : (
           <div className={styles['editorHeader']}>
-            <span className={styles['editorTitle']}>{provider.name ?? provider.id}</span>
+            {renaming
+              ? (
+                <input
+                  className={`${styles['input']} ${styles['editorTitleInput']}`}
+                  type="text"
+                  autoFocus
+                  value={nameDraft}
+                  placeholder={provider.id}
+                  aria-label={t('customDisplayName')}
+                  disabled={disabled}
+                  onChange={(event) => { setNameDraft(event.target.value) }}
+                  onBlur={() => { setRenaming(false) }}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === 'Escape') setRenaming(false)
+                  }}
+                />
+              )
+              : (
+                <button
+                  type="button"
+                  className={styles['editorTitle']}
+                  title={t('renameProvider')}
+                  disabled={disabled}
+                  onClick={() => { setRenaming(true) }}
+                >
+                  {nameDraft.trim().length > 0 ? nameDraft : provider.id}
+                </button>
+              )}
             {provider.name !== undefined && provider.name !== provider.id
               ? <span className={styles['editorRoute']}>{provider.id}</span>
               : null}
@@ -146,18 +181,77 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
           </div>
         )}
       <div className={styles['field']}>
-        <span className={styles['fieldLabel']}>{t('keyInput')}</span>
+        <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
         <input
           className={styles['input']}
-          type="password"
-          autoComplete="off"
-          value={keyDraft}
-          placeholder={keyPlaceholder}
-          aria-label={t('keyInput')}
-          aria-invalid={keyFailure !== undefined}
+          type="text"
+          value={baseUrlDraft}
+          placeholder={provider.baseUrl ?? t('baseUrlDefault')}
+          aria-label={t('baseUrl')}
+          aria-invalid={baseUrlFailure !== undefined}
           disabled={disabled}
-          onChange={(event) => { setKeyDraft(event.target.value) }}
+          onChange={(event) => { setBaseUrlDraft(event.target.value) }}
         />
+        {baseUrlFailure === undefined ? null : <p className={styles['error']}>{baseUrlFailure}</p>}
+      </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('customApi')}</span>
+        <select
+          className={`${styles['input']} ${styles['selectInput']}`}
+          value={apiDraft}
+          aria-label={t('customApi')}
+          disabled={disabled}
+          onChange={(event) => { setApiDraft(event.target.value as PiApiKind | '') }}
+        >
+          {/* A profile naming no protocol — hand-written into models.json with
+              no model to need one — selects nothing rather than reading as if
+              it had picked the first choice. Clearing back to it is offered
+              only when nothing was stored. */}
+          {apiDraft === '' && provider.api === undefined
+            ? <option value="">{t('customApiUnset')}</option>
+            : null}
+          {PI_API_KINDS.map(kind => <option key={kind} value={kind}>{PI_API_KIND_LABELS[kind]}</option>)}
+        </select>
+      </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('authHeader')}</span>
+        <select
+          className={`${styles['input']} ${styles['selectInput']}`}
+          value={authHeaderDraft ? 'force' : 'default'}
+          aria-label={t('authHeader')}
+          disabled={disabled}
+          onChange={(event) => { setAuthHeaderDraft(event.target.value === 'force') }}
+        >
+          <option value="default">{t('authHeaderDefault')}</option>
+          <option value="force">{t('authHeaderForce')}</option>
+        </select>
+      </div>
+      <div className={styles['field']}>
+        <span className={styles['fieldLabel']}>{t('keyInput')}</span>
+        <div className={styles['secretField']}>
+          <input
+            className={`${styles['input']} ${styles['secretInput']}`}
+            type={keyVisible ? 'text' : 'password'}
+            autoComplete="off"
+            value={keyDraft}
+            placeholder={keyPlaceholder}
+            aria-label={t('keyInput')}
+            aria-invalid={keyFailure !== undefined}
+            disabled={disabled}
+            onChange={(event) => { setKeyDraft(event.target.value) }}
+          />
+          <button
+            type="button"
+            className={styles['secretToggle']}
+            aria-label={t(keyVisible ? 'hideKey' : 'showKey')}
+            title={t(keyVisible ? 'hideKey' : 'showKey')}
+            aria-pressed={keyVisible}
+            disabled={disabled}
+            onClick={() => { setKeyVisible(current => !current) }}
+          >
+            {keyVisible ? <IconEyeOffOutline16 size={16} /> : <IconEyeOutline16 size={16} />}
+          </button>
+        </div>
         {keyFailure === undefined ? null : <p className={styles['error']}>{t(keyFailure)}</p>}
         {provider.apiKey.source === 'literal'
           ? (
@@ -188,82 +282,19 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
           )
           : null}
       </div>
-      <details className={styles['customized']}>
-        <summary className={styles['customizedSummary']}>{t('customized')}</summary>
-        <div className={styles['customizedBody']}>
-          <div className={styles['field']}>
-            <span className={styles['fieldLabel']}>{t('customDisplayName')}</span>
-            <input
-              className={styles['input']}
-              type="text"
-              value={nameDraft}
-              placeholder={provider.id}
-              aria-label={t('customDisplayName')}
-              disabled={disabled}
-              onChange={(event) => { setNameDraft(event.target.value) }}
-            />
-          </div>
-          <div className={styles['field']}>
-            <span className={styles['fieldLabel']}>{t('baseUrl')}</span>
-            <input
-              className={styles['input']}
-              type="text"
-              value={baseUrlDraft}
-              placeholder={provider.baseUrl ?? t('baseUrlDefault')}
-              aria-label={t('baseUrl')}
-              aria-invalid={baseUrlFailure !== undefined}
-              disabled={disabled}
-              onChange={(event) => { setBaseUrlDraft(event.target.value) }}
-            />
-            {baseUrlFailure === undefined ? null : <p className={styles['error']}>{baseUrlFailure}</p>}
-          </div>
-          <div className={styles['field']}>
-            <span className={styles['fieldLabel']}>{t('customApi')}</span>
-            <select
-              className={`${styles['input']} ${styles['selectInput']}`}
-              value={apiDraft}
-              aria-label={t('customApi')}
-              disabled={disabled}
-              onChange={(event) => { setApiDraft(event.target.value as PiApiKind | '') }}
-            >
-              {/* A profile naming no protocol — hand-written into models.json
-                  with no model to need one — selects nothing rather than
-                  reading as if it had picked the first choice. Clearing back
-                  to it is offered only when nothing was stored. */}
-              {apiDraft === '' && provider.api === undefined
-                ? <option value="">{t('customApiUnset')}</option>
-                : null}
-              {PI_API_KINDS.map(kind => <option key={kind} value={kind}>{PI_API_KIND_LABELS[kind]}</option>)}
-            </select>
-          </div>
-          <div className={styles['field']}>
-            <span className={styles['fieldLabel']}>{t('authHeader')}</span>
-            <select
-              className={`${styles['input']} ${styles['selectInput']}`}
-              value={authHeaderDraft ? 'force' : 'default'}
-              aria-label={t('authHeader')}
-              disabled={disabled}
-              onChange={(event) => { setAuthHeaderDraft(event.target.value === 'force') }}
-            >
-              <option value="default">{t('authHeaderDefault')}</option>
-              <option value="force">{t('authHeaderForce')}</option>
-            </select>
-          </div>
-          <ModelListEditor
-            models={models}
-            onChange={setModels}
-            probe={{
-              providerId: provider.id,
-              ...(baseUrlDraft.trim().length > 0 ? { baseUrl: baseUrlDraft.trim() } : {}),
-              ...(keyValue.length > 0 ? { apiKey: keyValue } : {}),
-            }}
-            probeBlocked={keyFailure !== undefined
-              ? t(keyFailure)
-              : baseUrlFailure}
-            disabled={disabled}
-          />
-        </div>
-      </details>
+      <ModelListEditor
+        models={models}
+        onChange={setModels}
+        probe={{
+          providerId: provider.id,
+          ...(baseUrlDraft.trim().length > 0 ? { baseUrl: baseUrlDraft.trim() } : {}),
+          ...(keyValue.length > 0 ? { apiKey: keyValue } : {}),
+        }}
+        probeBlocked={keyFailure !== undefined
+          ? t(keyFailure)
+          : baseUrlFailure}
+        disabled={disabled}
+      />
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
       {modelFailure === undefined
         ? null

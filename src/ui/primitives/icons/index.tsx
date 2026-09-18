@@ -990,3 +990,39 @@ export const IconShieldOutline16 = ({ size = 16, className }: IconProps) => (
     <path d={SHIELD_OUTLINE_PATH} stroke="currentColor" strokeWidth={SHIELD_OUTLINE_STROKE} strokeLinejoin="round" />
   </svg>
 )
+
+/** Eye — reveals a write-only secret field (hand-authored product glyph). */
+export const IconEyeOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M8 3.15c3.09 0 5.68 2.24 6.71 4.34.19.38.19.64 0 1.02-1.03 2.1-3.62 4.34-6.71 4.34S2.32 10.61 1.29 8.51c-.19-.38-.19-.64 0-1.02C2.32 5.39 4.91 3.15 8 3.15Zm0 1.3c-2.35 0-4.42 1.7-5.32 3.55.9 1.85 2.97 3.55 5.32 3.55s4.42-1.7 5.32-3.55C12.42 6.15 10.35 4.45 8 4.45Z"
+      fill="currentColor"
+    />
+    <path
+      d="M8 5.95a2.05 2.05 0 1 1 0 4.1 2.05 2.05 0 0 1 0-4.1Z"
+      fill="currentColor"
+    />
+  </svg>
+)
+
+/** Eye with a slash — hides a revealed secret (hand-authored product glyph). */
+export const IconEyeOffOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      fillRule="evenodd"
+      clipRule="evenodd"
+      d="M8 3.15c3.09 0 5.68 2.24 6.71 4.34.19.38.19.64 0 1.02a9.26 9.26 0 0 1-1.6 2.31l-.92-.92c.5-.5.93-1.05 1.25-1.6-.9-1.85-2.97-3.55-5.32-3.55-.5 0-.98.08-1.43.21l-1-1c.73-.5 1.58-.81 2.31-.81Z"
+      fill="currentColor"
+    />
+    <path
+      d="M12.03 12.03a9.2 9.2 0 0 1-4.03 1.32c-3.09 0-5.68-2.24-6.71-4.34-.19-.38-.19-.64 0-1.02a9.6 9.6 0 0 1 2.4-3.02l1.6 1.6a2.05 2.05 0 0 0 2.72 2.72l1.32 1.32a2.05 2.05 0 0 1-2.44-.4l-.83-.84c-.4-.4-.66-.94-.66-1.54 0-.27.05-.53.15-.76L2.9 4.42A8.3 8.3 0 0 0 1.29 7.49c.9 1.85 2.97 3.55 5.32 3.55 1.2 0 2.3-.44 3.2-1.08l.92.92c-.63.5-1.36.88-2.16 1.1Z"
+      fill="currentColor"
+    />
+    <path
+      d="M2.16 1.28l12.6 12.6-.92.92-12.6-12.6.92-.92Z"
+      fill="currentColor"
+    />
+  </svg>
+)

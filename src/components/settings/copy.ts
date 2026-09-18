@@ -141,6 +141,10 @@ export const copy = {
   modelEnabled: '启用该模型',
   modelDisabled: '已停用',
   editModel: '编辑模型',
+  copyModelId: '复制模型 ID',
+  renameProvider: '重命名供应商',
+  showKey: '显示密钥',
+  hideKey: '隐藏密钥',
 } as const
 
 export type CopyKey = keyof typeof copy

@@ -35,6 +35,11 @@ export interface ModelEditModalProps {
   onClose: () => void
   /** Called with the finished draft; the caller owns the write. */
   onSubmit: (draft: ModelDraft) => void
+  /**
+   * Drop this model from the provider. Absent while creating one, and owned by
+   * the caller like {@link onSubmit}: the list is the caller's draft.
+   */
+  onDelete?: (() => void) | undefined
 }
 
 /** Chinese labels for the thinking-level chips, in pi's low→high order. */
@@ -240,6 +245,14 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       contentClassName={styles['modelModalBody'] as string}
       footer={(
         <>
+          {props.onDelete === undefined
+            ? null
+            : (
+              <button type="button" className={styles['dangerButton']} onClick={props.onDelete}>
+                {t('removeModel')}
+              </button>
+            )}
+          <span className={styles['footerSpacer']} />
           <Button variant="outline" onClick={props.onClose}>{t('cancel')}</Button>
           <Button variant="outline" onClick={submit}>{t('save')}</Button>
         </>
