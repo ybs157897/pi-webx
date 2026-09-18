@@ -1,0 +1,318 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260917T103735918Z-84153-ad9f6faeb513",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "baseline",
+      "target": ".",
+      "reason": "baseline_partial: baseline capture had enumeration or snapshot errors"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": false,
+      "captured_files": 83,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 1,
+      "compensated_target_count": 8
+    },
+    "change_tracking": {
+      "touched_observed": 7,
+      "touched_retained": 7,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 8,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 8,
+      "selected_files": 8,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 8,
+      "scanned_files": 8,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "baseline_partial": 1,
+      "project_check_failed": 1
+    },
+    "reasons": [
+      {
+        "code": "baseline_partial",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline",
+        "target": ".",
+        "detail": "baseline_partial: baseline capture had enumeration or snapshot errors",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-17T10:37:35.918Z",
+  "session_id": "sess_4fcbac27-217b-4b10-bb3a-307a901280a9",
+  "target": ".",
+  "revision": "f9ddcb067a0aa4c8bd2208ec1ba7c747c203381a",
+  "rules_version": "unavailable",
+  "diff_hash": "e9d7f2862c3c663e69f78f4f606a6caf06d46e2d1c31201e59c45765b5cb750d",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 8,
+    "changed_files": [
+      {
+        "file": "server/pi/host.ts",
+        "ranges": [
+          {
+            "start": 21,
+            "end": 24
+          },
+          {
+            "start": 34,
+            "end": 35
+          },
+          {
+            "start": 71,
+            "end": 83
+          },
+          {
+            "start": 165,
+            "end": 165
+          },
+          {
+            "start": 186,
+            "end": 187
+          },
+          {
+            "start": 194,
+            "end": 194
+          },
+          {
+            "start": 226,
+            "end": 226
+          },
+          {
+            "start": 243,
+            "end": 244
+          },
+          {
+            "start": 251,
+            "end": 251
+          },
+          {
+            "start": 256,
+            "end": 477
+          },
+          {
+            "start": 540,
+            "end": 545
+          },
+          {
+            "start": 662,
+            "end": 683
+          },
+          {
+            "start": 698,
+            "end": 723
+          },
+          {
+            "start": 814,
+            "end": 814
+          },
+          {
+            "start": 825,
+            "end": 825
+          },
+          {
+            "start": 829,
+            "end": 829
+          }
+        ],
+        "before_hash": "27d76b206c633132c92ff48cdfc16c3e8341329f8608c4d155f8e0d854cb7ad6",
+        "after_hash": "7e2bcf1bf6efeb9f422dee685a8595a15f2c75f87ecacda2f78839b82a14b7f3"
+      },
+      {
+        "file": "server/routes.ts",
+        "ranges": [
+          {
+            "start": 20,
+            "end": 20
+          },
+          {
+            "start": 351,
+            "end": 374
+          }
+        ],
+        "before_hash": "9985d64c1bd92855e7dd33c1a5b67e4c88c7effc5adbde0d2229fb2ebeca0170",
+        "after_hash": "c3ebaefad7bb3d54dee0bb203d9f07b2e937dee0e219c3cb1b3d7a2c18f51bb3"
+      },
+      {
+        "file": "src/components/Composer.tsx",
+        "ranges": [
+          {
+            "start": 21,
+            "end": 21
+          },
+          {
+            "start": 23,
+            "end": 24
+          },
+          {
+            "start": 76,
+            "end": 93
+          },
+          {
+            "start": 125,
+            "end": 125
+          },
+          {
+            "start": 258,
+            "end": 259
+          },
+          {
+            "start": 268,
+            "end": 268
+          }
+        ],
+        "before_hash": "ce7b70d970eb6e7e071ee54a7ea29c07c6aa6725ae6d0957ebd7cac6445c89e4",
+        "after_hash": "6010595fc30656a4550ab663930af40b0a73126449b4a9bb3be50479b582d09e"
+      },
+      {
+        "file": "src/components/PermissionModeSelect.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 129
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "302345d9820f7167afb196cecd764361a55f3d406b178764f2ffd6292a00cbb0"
+      },
+      {
+        "file": "src/components/SlashCommandMenu.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 167
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "b3a797f03f96b190efc8615cb39328c1bcdf3ca42f540a0423894c028aa95b92"
+      },
+      {
+        "file": "src/lib/api.ts",
+        "ranges": [
+          {
+            "start": 18,
+            "end": 18
+          },
+          {
+            "start": 118,
+            "end": 131
+          }
+        ],
+        "before_hash": "91cc8c92ec400a4750c9aeba32383d9ed20da5404767f4956271a257e8dc405d",
+        "after_hash": "1fc9656a9bd83e747bd1b5be19f1a37b562bd0a31845ea8d3956ea0a39c9d0c6"
+      },
+      {
+        "file": "src/shared/permission.ts",
+        "ranges": [
+          {
+            "start": 39,
+            "end": 46
+          },
+          {
+            "start": 48,
+            "end": 48
+          }
+        ],
+        "before_hash": "70f6e9b85929ed3ad88ae5cd1aa5200514f37797eebd95de5863754fe23e0589",
+        "after_hash": "8dfea4bfcf19bca1c34fd945fbe0391a5dd412658c5094073fabe52c3e3fc49d"
+      },
+      {
+        "file": "src/shared/protocol.ts",
+        "ranges": [
+          {
+            "start": 265,
+            "end": 277
+          }
+        ],
+        "before_hash": "10fa70128dccf91f3a2d4f1a71d6f41ccf278047fdf87b966819545ed677c200",
+        "after_hash": "c73865eafae01ee1d0ffbbd09fb53c309929ca1872456a4fc9d83209d3c3b6ac"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-17T10:37:35.102Z",
+    "completed_at": "2026-09-17T10:37:35.918Z",
+    "duration_ms": 816,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 816,
+    "peakMemoryBytes": 224657408,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 8,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9-20260917T103735918Z-84153-ad9f6faeb513.json",
+    "latest_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9.json",
+    "history_summary": ".mimosa/history/run-20260917T103735918Z-84153-ad9f6faeb513.json"
+  }
+}

@@ -1,0 +1,64 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260917T121040529Z-8453-dad2c3370e1d",
+  "runId": "20260917T121040529Z-8453-dad2c3370e1d",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "f9ddcb067a0aa4c8bd2208ec1ba7c747c203381a",
+  "diffHash": "baf838c9c861e6f73f585e67925037b58a191c4475349a2922950f83d8a0031d",
+  "rulesVersion": "unavailable",
+  "sessionHash": "956f73bb7d9a5de93bc16d5ce1e2fea522df9cd35ac2f54e9a79969d71a4998c",
+  "reportRef": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9-20260917T121040529Z-8453-dad2c3370e1d.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/shared/git.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/git.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/routes.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/api.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/BranchSelect.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/Composer.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/App.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/WorkspaceSwitcher.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-17T12:10:40.816Z"
+}

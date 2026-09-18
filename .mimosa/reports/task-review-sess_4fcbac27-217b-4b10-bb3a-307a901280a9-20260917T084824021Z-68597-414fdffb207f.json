@@ -1,0 +1,532 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260917T084824021Z-68597-414fdffb207f",
+  "run_status": "inconclusive",
+  "errors": [
+    {
+      "stage": "baseline-read",
+      "target": "server/model-catalog.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    },
+    {
+      "stage": "baseline-read",
+      "target": "server/providers.ts",
+      "reason": "baseline_snapshot_unreadable: file is missing from task baseline"
+    }
+  ],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "partial",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 77,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 15
+    },
+    "change_tracking": {
+      "touched_observed": 15,
+      "touched_retained": 15,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 17,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 17,
+      "selected_files": 17,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 17,
+      "scanned_files": 17,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {
+      "baseline_snapshot_unreadable": 2,
+      "project_check_failed": 2
+    },
+    "reasons": [
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "server/model-catalog.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "server/providers.ts",
+        "detail": "file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "server/model-catalog.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "server/providers.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affects_completion": true
+      }
+    ],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-17T08:48:24.021Z",
+  "session_id": "sess_4fcbac27-217b-4b10-bb3a-307a901280a9",
+  "target": ".",
+  "revision": "f9ddcb067a0aa4c8bd2208ec1ba7c747c203381a",
+  "rules_version": "unavailable",
+  "diff_hash": "96c8c70ad5aec7744ffd6d5d614b5d82dcafc5ab3ba2c4ae4f44797e504d1112",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 17,
+    "changed_files": [
+      {
+        "file": "server/model-catalog.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 249
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "1fbdbb9fc1dd2a528fc2e6439954a4e4089ffaaea068e3d4be7834ccd35307d9"
+      },
+      {
+        "file": "server/pi/host.ts",
+        "ranges": [
+          {
+            "start": 110,
+            "end": 120
+          }
+        ],
+        "before_hash": "b19f23b9a4d48af3f77983d4e7967be8b270f6696a4677243b0a0ab2b25daaeb",
+        "after_hash": "c0d2f560a787e1c82cf31b1ca51e77c663ce06583ef395be4733d29e6b5e7b95"
+      },
+      {
+        "file": "server/providers.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 292
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "b1c4e576f028103c7d7688e236ade1557a6f23b54cb2c7c5d1dec459cd8e96f1"
+      },
+      {
+        "file": "server/routes.ts",
+        "ranges": [
+          {
+            "start": 18,
+            "end": 18
+          },
+          {
+            "start": 33,
+            "end": 39
+          },
+          {
+            "start": 249,
+            "end": 347
+          },
+          {
+            "start": 615,
+            "end": 643
+          }
+        ],
+        "before_hash": "8f8a2ecb56aec23798a69482c5d39e5f0ce1678e62f024e7a21e34bdc48f802d",
+        "after_hash": "ffb790ba943f69a8ef1ead061fc508bfde9a1788fbc8af34276bb3ba8c158b21"
+      },
+      {
+        "file": "server/stored-sessions.ts",
+        "ranges": [
+          {
+            "start": 44,
+            "end": 88
+          },
+          {
+            "start": 144,
+            "end": 144
+          },
+          {
+            "start": 159,
+            "end": 159
+          },
+          {
+            "start": 161,
+            "end": 161
+          },
+          {
+            "start": 163,
+            "end": 166
+          },
+          {
+            "start": 169,
+            "end": 169
+          },
+          {
+            "start": 173,
+            "end": 173
+          },
+          {
+            "start": 180,
+            "end": 180
+          },
+          {
+            "start": 186,
+            "end": 225
+          },
+          {
+            "start": 236,
+            "end": 238
+          }
+        ],
+        "before_hash": "6383f2231aa3d37342b4909275e7a50f1e10441a40e03b3fcb0ebe9b796ee9f6",
+        "after_hash": "c64f6a68a1fe7ecf6454cda17a0e4815d74a1a5efcf81efb350d4e947824dd4b"
+      },
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 18,
+            "end": 18
+          },
+          {
+            "start": 36,
+            "end": 36
+          },
+          {
+            "start": 40,
+            "end": 40
+          },
+          {
+            "start": 119,
+            "end": 131
+          },
+          {
+            "start": 135,
+            "end": 140
+          },
+          {
+            "start": 142,
+            "end": 143
+          },
+          {
+            "start": 146,
+            "end": 160
+          },
+          {
+            "start": 172,
+            "end": 174
+          },
+          {
+            "start": 254,
+            "end": 328
+          },
+          {
+            "start": 357,
+            "end": 359
+          },
+          {
+            "start": 361,
+            "end": 367
+          },
+          {
+            "start": 392,
+            "end": 405
+          },
+          {
+            "start": 408,
+            "end": 409
+          },
+          {
+            "start": 747,
+            "end": 747
+          },
+          {
+            "start": 786,
+            "end": 787
+          },
+          {
+            "start": 789,
+            "end": 789
+          }
+        ],
+        "before_hash": "33b43d7a33074e97457966a9c21fba833b3e3342ee3fa7f5a50d57206e4ec124",
+        "after_hash": "86a46f12bfb6f4e385aa98230f57c4849492909c6eddd64ac0af587b0823cf9d"
+      },
+      {
+        "file": "src/components/Composer.tsx",
+        "ranges": [
+          {
+            "start": 10,
+            "end": 15
+          },
+          {
+            "start": 17,
+            "end": 17
+          },
+          {
+            "start": 39,
+            "end": 44
+          },
+          {
+            "start": 59,
+            "end": 59
+          },
+          {
+            "start": 138,
+            "end": 147
+          },
+          {
+            "start": 149,
+            "end": 170
+          },
+          {
+            "start": 234,
+            "end": 234
+          },
+          {
+            "start": 236,
+            "end": 238
+          }
+        ],
+        "before_hash": "f4a39ae57b4a2005c352fbc4b941743b52f562bb63cca51b7b0b08dd6c0db8b1",
+        "after_hash": "a60ed9ef4f4a0c736ea015a025b3ad812dc8fb04a1691aac1cea9ab5567e9cb0"
+      },
+      {
+        "file": "src/components/ModelSelectV3.tsx",
+        "ranges": [
+          {
+            "start": 36,
+            "end": 42
+          },
+          {
+            "start": 201,
+            "end": 201
+          },
+          {
+            "start": 235,
+            "end": 240
+          },
+          {
+            "start": 242,
+            "end": 244
+          },
+          {
+            "start": 251,
+            "end": 251
+          },
+          {
+            "start": 390,
+            "end": 396
+          },
+          {
+            "start": 408,
+            "end": 416
+          },
+          {
+            "start": 467,
+            "end": 468
+          },
+          {
+            "start": 539,
+            "end": 539
+          }
+        ],
+        "before_hash": "77f3faeb485821f661310a1be39283c2752b43e7a611ae21e5d1e1eed1035d41",
+        "after_hash": "72a9bab161642af767428497db22af7400c02f5785a77d5956e6cea14898fdfe"
+      },
+      {
+        "file": "src/components/settings/CatalogProviders.tsx",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 217
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "523acf9c42b72eada6221598e8fd031d7301a9d733852f83ff7545160690351a"
+      },
+      {
+        "file": "src/components/settings/copy.ts",
+        "ranges": [
+          {
+            "start": 78,
+            "end": 88
+          }
+        ],
+        "before_hash": "a994b6b63ff7226e3cbbca59cbe77b6ea8dd4c6898962df337f93b331799f9fa",
+        "after_hash": "59719bb81f50f745f079ee5b9989e2e3868ae730dad0444cb7b71e83ec30b99f"
+      },
+      {
+        "file": "src/components/settings/ModelsSection.tsx",
+        "ranges": [
+          {
+            "start": 17,
+            "end": 17
+          },
+          {
+            "start": 131,
+            "end": 131
+          },
+          {
+            "start": 139,
+            "end": 143
+          }
+        ],
+        "before_hash": "d9be6f16a9f0e43186d3426b8d6d80372073ee5fe9efc878c31a3ec133725f2f",
+        "after_hash": "47cac30960688c93cb17577bccf357c82e276aaf9870f654b1019b83cd4f9a8d"
+      },
+      {
+        "file": "src/lib/modelCatalog.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 158
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "918469bb5371fae92c985e9ed5db209e9ad2fe3fcce5f32701cefc61b8cbfbd4"
+      },
+      {
+        "file": "src/lib/providers.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 100
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "4eb724086e8a11d9201c575e63f709baf21f7e2d5050ad1730185b6e5090a086"
+      },
+      {
+        "file": "src/lib/storage.ts",
+        "ranges": [
+          {
+            "start": 2,
+            "end": 10
+          },
+          {
+            "start": 33,
+            "end": 33
+          }
+        ],
+        "before_hash": "518e2b76a952433d086ea69c7766511a09f253c8140a149198beb7e5c414b8f3",
+        "after_hash": "0a8477cc14d28dcd6e942c96b6dce1e4137aaa8b904f11af7ea0abc417b60a4a"
+      },
+      {
+        "file": "src/lib/usePiSession.ts",
+        "ranges": [
+          {
+            "start": 93,
+            "end": 99
+          },
+          {
+            "start": 566,
+            "end": 566
+          },
+          {
+            "start": 604,
+            "end": 604
+          }
+        ],
+        "before_hash": "fb20295fb4126b36c58741cb7fe63bdc1807440dc959e2d9b781508af00ee20c",
+        "after_hash": "7e4718f13fd1b27f9f6ed529a27aec8d25bf290c5e6a2b4d81a69dae861b9826"
+      },
+      {
+        "file": "src/shared/model-catalog.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 88
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "97b38e380db9f465928b5f905e2ada6912af5aa05e0c843222e155166a17285c"
+      },
+      {
+        "file": "src/shared/providers.ts",
+        "ranges": [
+          {
+            "start": 1,
+            "end": 89
+          }
+        ],
+        "before_hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "after_hash": "2bb3e3b7633b4d44c22493a7d6227617ef22db3b8e1067adcba5649ec8c93434"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-17T08:48:23.116Z",
+    "completed_at": "2026-09-17T08:48:24.021Z",
+    "duration_ms": 905,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "partial/INCONCLUSIVE",
+    "latencyMs": 905,
+    "peakMemoryBytes": 231653376,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 17,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9-20260917T084824021Z-68597-414fdffb207f.json",
+    "latest_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9.json",
+    "history_summary": ".mimosa/history/run-20260917T084824021Z-68597-414fdffb207f.json"
+  }
+}

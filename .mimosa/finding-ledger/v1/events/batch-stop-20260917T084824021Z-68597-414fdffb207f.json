@@ -1,0 +1,138 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260917T084824021Z-68597-414fdffb207f",
+  "runId": "20260917T084824021Z-68597-414fdffb207f",
+  "runStatus": "inconclusive",
+  "coverage": {
+    "status": "partial",
+    "reasons": [
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "server/model-catalog.ts",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "baseline_snapshot_unreadable",
+        "stage": "baseline-read",
+        "target": "server/providers.ts",
+        "detail": "file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "server/model-catalog.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      },
+      {
+        "code": "project_check_failed",
+        "stage": "baseline-read",
+        "target": "server/providers.ts",
+        "detail": "baseline_snapshot_unreadable: file is missing from task baseline",
+        "affectsCompletion": true
+      }
+    ]
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "f9ddcb067a0aa4c8bd2208ec1ba7c747c203381a",
+  "diffHash": "96c8c70ad5aec7744ffd6d5d614b5d82dcafc5ab3ba2c4ae4f44797e504d1112",
+  "rulesVersion": "unavailable",
+  "sessionHash": "956f73bb7d9a5de93bc16d5ce1e2fea522df9cd35ac2f54e9a79969d71a4998c",
+  "reportRef": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9-20260917T084824021Z-68597-414fdffb207f.json",
+  "events": [],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/shared/model-catalog.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/pi/host.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/routes.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/modelCatalog.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/Composer.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/ModelSelectV3.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/App.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/usePiSession.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/storage.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/shared/providers.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/lib/providers.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/settings/CatalogProviders.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/settings/copy.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/settings/ModelsSection.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/stored-sessions.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/model-catalog.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "server/providers.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-17T08:48:24.252Z"
+}

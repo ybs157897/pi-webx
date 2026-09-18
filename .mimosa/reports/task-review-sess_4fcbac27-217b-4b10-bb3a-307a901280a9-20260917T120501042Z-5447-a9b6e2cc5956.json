@@ -1,0 +1,306 @@
+{
+  "schema_version": "mimosa-task-review/v2",
+  "run_id": "20260917T120501042Z-5447-a9b6e2cc5956",
+  "run_status": "completed",
+  "errors": [],
+  "coverage": {
+    "schema_version": "mimosa-hook-coverage/v1",
+    "status": "complete",
+    "scope": "hook_observed_diff",
+    "baseline": {
+      "complete": true,
+      "captured_files": 80,
+      "candidate_limit": 5000,
+      "truncated": false,
+      "enumeration_error_count": 0,
+      "snapshot_error_count": 0,
+      "compensated_target_count": 8
+    },
+    "change_tracking": {
+      "touched_observed": 8,
+      "touched_retained": 8,
+      "truncated": false,
+      "bash_mutation": true,
+      "bash_discovered": 8,
+      "bash_discovery_limit": 80,
+      "bash_discovery_truncated": false
+    },
+    "candidates": {
+      "eligible_files": 8,
+      "selected_files": 8,
+      "limit": 20,
+      "truncated": false
+    },
+    "scanning": {
+      "required_files": 8,
+      "scanned_files": 8,
+      "skipped_files": 0,
+      "failed_files": 0,
+      "project_checks_required": 0,
+      "project_checks_completed": 0
+    },
+    "notification": {
+      "eligible_findings": 0,
+      "detailed_findings": 0,
+      "detail_limit": 3,
+      "truncated": false
+    },
+    "reason_counts": {},
+    "reasons": [],
+    "reasons_truncated": false
+  },
+  "generated_at": "2026-09-17T12:05:01.042Z",
+  "session_id": "sess_4fcbac27-217b-4b10-bb3a-307a901280a9",
+  "target": ".",
+  "revision": "f9ddcb067a0aa4c8bd2208ec1ba7c747c203381a",
+  "rules_version": "unavailable",
+  "diff_hash": "174b2a210db35701ad39aec4fd36b1597c4e1cb68de202c70fc2d776ddef7af2",
+  "diff": {
+    "algorithm": "sha256",
+    "changed_file_count": 8,
+    "changed_files": [
+      {
+        "file": "src/App.tsx",
+        "ranges": [
+          {
+            "start": 27,
+            "end": 27
+          },
+          {
+            "start": 35,
+            "end": 35
+          },
+          {
+            "start": 472,
+            "end": 475
+          },
+          {
+            "start": 479,
+            "end": 479
+          }
+        ],
+        "before_hash": "7bcbc323b7d67efb460f3f08bfa05f4db5077b2a56b586b1c7b7f23f76ed802f",
+        "after_hash": "6d4ad44e401fa10c5607ac90df22930746b6d17574afe91c9f8ad8b682cd7218"
+      },
+      {
+        "file": "src/components/Composer.tsx",
+        "ranges": [
+          {
+            "start": 16,
+            "end": 16
+          },
+          {
+            "start": 31,
+            "end": 40
+          },
+          {
+            "start": 182,
+            "end": 183
+          },
+          {
+            "start": 185,
+            "end": 187
+          },
+          {
+            "start": 217,
+            "end": 217
+          }
+        ],
+        "before_hash": "d5925a197a66241db570b079c23f587b8a9b22a25d07ffb4436be7e3c1d90671",
+        "after_hash": "bfd57eed153c84936f990eb64ebf1d07b95120c3bf0d7548d8cc6f1b61c2d454"
+      },
+      {
+        "file": "src/components/ModelSelectV3.tsx",
+        "ranges": [
+          {
+            "start": 21,
+            "end": 22
+          },
+          {
+            "start": 84,
+            "end": 84
+          },
+          {
+            "start": 86,
+            "end": 86
+          },
+          {
+            "start": 476,
+            "end": 476
+          }
+        ],
+        "before_hash": "b5391ac245cedb82ced487ff6748b130f4f34d118656f490e5aabc8d0bcf0462",
+        "after_hash": "c72a66e6b32b33157e1bc96ab00046915d39b0ac45dbf85013b5315dcd07bcc5"
+      },
+      {
+        "file": "src/components/SessionSettings.tsx",
+        "ranges": [
+          {
+            "start": 7,
+            "end": 7
+          },
+          {
+            "start": 9,
+            "end": 9
+          },
+          {
+            "start": 74,
+            "end": 75
+          },
+          {
+            "start": 77,
+            "end": 87
+          },
+          {
+            "start": 111,
+            "end": 111
+          },
+          {
+            "start": 114,
+            "end": 114
+          }
+        ],
+        "before_hash": "f05b30b39d5c49dc505087f61d672c04b6a91c25d202d64960a7efe6f2989fe6",
+        "after_hash": "6910fbb5c55652520ab649cb2a7e15bc3c005dfd88639a2ff74cc9729960019e"
+      },
+      {
+        "file": "src/components/sidebar/tree.ts",
+        "ranges": [
+          {
+            "start": 18,
+            "end": 18
+          },
+          {
+            "start": 86,
+            "end": 94
+          },
+          {
+            "start": 98,
+            "end": 98
+          },
+          {
+            "start": 174,
+            "end": 174
+          },
+          {
+            "start": 202,
+            "end": 202
+          },
+          {
+            "start": 226,
+            "end": 226
+          }
+        ],
+        "before_hash": "3974a52db3e600fc7c130feadccabeee841f1421667e767cbef24ed84bcff9e3",
+        "after_hash": "1ac8898359a8b78243bb495d934c2d175fc0e63a8c33ef6e87edcc21e78cb690"
+      },
+      {
+        "file": "src/components/sidebar/WorkspaceBrowser.tsx",
+        "ranges": [
+          {
+            "start": 214,
+            "end": 215
+          },
+          {
+            "start": 454,
+            "end": 454
+          },
+          {
+            "start": 460,
+            "end": 461
+          },
+          {
+            "start": 548,
+            "end": 548
+          },
+          {
+            "start": 557,
+            "end": 558
+          }
+        ],
+        "before_hash": "d6dc66ad503be4b3703fedffad35262bc7b59b21877eb9b7edec55d8242f2060",
+        "after_hash": "e0eb6375596292176d5e5d8a0f50d0985654a5c7d80e537cb07fe469da364733"
+      },
+      {
+        "file": "src/lib/modelCatalog.ts",
+        "ranges": [
+          {
+            "start": 81,
+            "end": 102
+          },
+          {
+            "start": 109,
+            "end": 110
+          },
+          {
+            "start": 114,
+            "end": 117
+          }
+        ],
+        "before_hash": "05b94376122743ae64aefa4bddd881b8a2c12dad04302519d8b9fa455b4924bd",
+        "after_hash": "2e0cf053c416f6bc9dd86d824c78425a9bd1bfecf9f0769c6310ee9da1853a05"
+      },
+      {
+        "file": "src/shared/protocol.ts",
+        "ranges": [
+          {
+            "start": 16,
+            "end": 21
+          }
+        ],
+        "before_hash": "35357733187eb83de8f81513b158f61ab6a684bb35f47010becadb3fb91fdc6b",
+        "after_hash": "b49b439132743c8ca915917d5dbe929364339561c32ae236bb92cd7a1aee4d45"
+      }
+    ]
+  },
+  "timing": {
+    "started_at": "2026-09-17T12:05:00.073Z",
+    "completed_at": "2026-09-17T12:05:01.042Z",
+    "duration_ms": 969,
+    "measurement": "hook_wall_clock"
+  },
+  "tokens": {
+    "input": 0,
+    "output": 0,
+    "total": 0,
+    "model_calls": 0,
+    "measurement": "known-zero"
+  },
+  "telemetry": {
+    "schemaVersion": "mimosa-gate-telemetry/v1",
+    "profile": "gate",
+    "operation": "Stop",
+    "outcome": "complete",
+    "latencyMs": 969,
+    "peakMemoryBytes": 228884480,
+    "memoryMeasurement": "max-observed-process-rss",
+    "scannedFiles": 8,
+    "cache": {
+      "hits": 0,
+      "misses": 0,
+      "measurement": "not-applicable"
+    },
+    "denyCount": 0,
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "total": 0,
+      "modelCalls": 0,
+      "measurement": "known-zero"
+    }
+  },
+  "finding_count": 0,
+  "rewake_finding_count": 0,
+  "evidence_boundary": {
+    "scan": "candidate",
+    "static_fix_verification": "observed_static_only",
+    "runtime_verification": "not_performed"
+  },
+  "finding_events": [],
+  "findings": [],
+  "artifacts": {
+    "immutable_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9-20260917T120501042Z-5447-a9b6e2cc5956.json",
+    "latest_report": ".mimosa/reports/task-review-sess_4fcbac27-217b-4b10-bb3a-307a901280a9.json",
+    "history_summary": ".mimosa/history/run-20260917T120501042Z-5447-a9b6e2cc5956.json"
+  }
+}

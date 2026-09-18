@@ -1,0 +1,89 @@
+{
+  "schemaVersion": "mimosa-finding-ledger-batch/v1",
+  "batchId": "stop-20260917T015141062Z-31585-356f3e4f7bb7",
+  "runId": "20260917T015141062Z-31585-356f3e4f7bb7",
+  "runStatus": "completed",
+  "coverage": {
+    "status": "complete",
+    "reasons": []
+  },
+  "source": {
+    "component": "zcode-hook",
+    "operationId": "Stop"
+  },
+  "revision": "f7b5564fc9a1727fdd6a7f525b07708b5e6c503d",
+  "diffHash": "5edb4b9f39b648c5cbcc0065de0055ba795eda7b68bc91e7c36f20d5dd0e5ddb",
+  "rulesVersion": "unavailable",
+  "sessionHash": "667533ff5a02463bc30b9e5290e7b39dea74a0f90585190c92823da6da98d7f2",
+  "reportRef": ".mimosa/reports/task-review-sess_1cf7036e-9960-42b4-bf65-843b08d48d12-20260917T015141062Z-31585-356f3e4f7bb7.json",
+  "events": [
+    {
+      "eventId": "hook-5ea1833e340412bb4c5e55edaf831855",
+      "findingId": "mimosa-48209f8f042a4bc042c000d7",
+      "type": "finding_observed",
+      "at": "2026-09-17T01:51:41.062Z",
+      "identity": {
+        "projectRelativeFile": "package.json",
+        "ruleId": "mimosa.supply.version-range",
+        "codeEvidenceHash": "c3748144ea8e55f4fb64e6801507cea38727c21d6e65a6cbb8e4368f52903717",
+        "confidence": "stable"
+      },
+      "scope": "direct",
+      "line": 25,
+      "endLine": 25,
+      "reasonCode": "observe",
+      "reportedToAgent": false,
+      "evidence": {
+        "kind": "source",
+        "boundary": "candidate",
+        "producer": "deterministic",
+        "evidenceHash": "c3748144ea8e55f4fb64e6801507cea38727c21d6e65a6cbb8e4368f52903717"
+      },
+      "sequence": 0
+    }
+  ],
+  "observedFindingIds": [],
+  "verifiedFiles": [
+    {
+      "file": "src/lib/tokui-dsl.ts",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/tokui/TokUIView.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/main.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/uikit/UiShowcase.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/App.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/Composer.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/TranscriptView.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    },
+    {
+      "file": "src/components/MessageItem.tsx",
+      "direct": "complete",
+      "projectContext": "partial"
+    }
+  ],
+  "recordedAt": "2026-09-17T01:51:41.291Z"
+}

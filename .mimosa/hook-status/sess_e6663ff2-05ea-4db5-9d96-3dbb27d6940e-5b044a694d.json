@@ -1,14 +1,14 @@
 {
   "schemaVersion": "mimosa-hook-status/v1",
-  "recordedAt": "2026-09-17T01:49:59.661Z",
+  "recordedAt": "2026-09-17T03:55:36.567Z",
   "sessionId": "sess_e6663ff2-05ea-4db5-9d96-3dbb27d6940e",
   "event": "PostToolUse",
   "toolName": "Write",
-  "file": "src/dsh/primitives/Menu.tsx",
-  "outcome": "clear",
-  "coverage": "complete",
+  "file": "/tmp/pi-webx-push-main.sh",
+  "outcome": "inconclusive",
+  "coverage": "partial",
   "findingCount": 0,
-  "durationMs": 4,
+  "durationMs": 5,
   "hostState": "hook_complete",
   "reportHint": ".mimosa/reports/"
 }

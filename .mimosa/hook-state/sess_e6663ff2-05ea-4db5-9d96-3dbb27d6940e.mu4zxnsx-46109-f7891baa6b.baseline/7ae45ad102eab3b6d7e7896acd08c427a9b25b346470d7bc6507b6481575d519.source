@@ -1,0 +1,45 @@
+{
+  "name": "pi-webx",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Web UI for the local pi coding agent, built with LobeHub UI",
+  "scripts": {
+    "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
+    "dev:server": "tsx watch server/index.ts",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "cross-env NODE_ENV=production tsx server/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@earendil-works/pi-ai": "^0.84.4",
+    "@earendil-works/pi-coding-agent": "^0.84.4",
+    "@jboltai/tokui": "^0.2.6",
+    "@jboltai/tokui-react": "^0.2.6",
+    "@lobehub/fluent-emoji": "^4.1.1",
+    "@lobehub/icons": "^5.18.0",
+    "@lobehub/ui": "^5.47.1",
+    "antd": "^6.6.4",
+    "antd-style": "^4.1.0",
+    "clsx": "^2.1.1",
+    "cross-env": "^10.1.0",
+    "express": "^5.2.1",
+    "katex": "^0.18.7",
+    "lucide-react": "^0.562.0",
+    "motion": "^12.43.0",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "tsx": "^4.20.6"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.5",
+    "@types/node": "^24.10.1",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.1.1",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.0"
+  }
+}
