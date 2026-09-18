@@ -88,41 +88,25 @@ function KeyField({
   )
 }
 
-/** One configured provider: a single line with the dot and its two actions. */
+/** One configured provider: a selectable line with the dot and its state. */
 function ProviderRow({
   provider,
-  onWritten,
+  active,
+  onSelect,
 }: {
   provider: ProviderView
-  onWritten: (providers: ProviderView[]) => void
+  active: boolean
+  onSelect: () => void
 }): ReactNode {
-  const [open, setOpen] = useState(false)
-  const [draft, setDraft] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [failure, setFailure] = useState<string | undefined>(undefined)
-
-  const writable = provider.methods.apiKey?.interactive === true
   const stored = provider.storedCredential !== null
-
-  const run = useCallback(
-    (task: Promise<{ providers: ProviderView[] }>): void => {
-      setBusy(true)
-      setFailure(undefined)
-      void task
-        .then((next) => {
-          onWritten(next.providers)
-          setOpen(false)
-          setDraft('')
-        })
-        .catch((error: unknown) => { setFailure(errorMessage(error)) })
-        .finally(() => { setBusy(false) })
-    },
-    [onWritten],
-  )
-
   return (
-    <li className={styles['rowCard']}>
-      <div className={styles['rowHead']}>
+    <li>
+      <button
+        type="button"
+        className={`${styles['listRow']} ${active ? styles['listRowActive'] : ''}`}
+        aria-pressed={active}
+        onClick={onSelect}
+      >
         <span className={styles['rowIdentity']}>
           <span className={styles['rowName']}>{provider.name}</span>
           <span
@@ -134,59 +118,82 @@ function ProviderRow({
             title={credentialSourceLabel(provider.status)}
           />
         </span>
-        <span className={styles['rowActions']}>
-          {writable ? (
-            <button
-              type="button"
-              className={styles['secondaryButton']}
-              aria-label={providerCopy(t('editProvider'), provider)}
-              disabled={busy}
-              onClick={() => {
-                setFailure(undefined)
-                setDraft('')
-                setOpen((prev) => !prev)
-              }}
-            >
-              {t('edit')}
-            </button>
-          ) : (
-            <span className={styles['rowTag']}>
-              {provider.methods.oauth !== undefined && provider.methods.apiKey === undefined
-                ? t('oauthOnly')
-                : t('ambientOnly')}
-            </span>
-          )}
-          {/* Only a stored credential can be removed; an environment-provided key
-              is reported by its source and has nothing here to delete. */}
-          {stored ? (
-            <button
-              type="button"
-              className={styles['dangerButton']}
-              aria-label={providerCopy(t('disconnect'), provider)}
-              disabled={busy}
-              onClick={() => { run(providersApi.removeCredential(provider.id)) }}
-            >
-              {t('delete')}
-            </button>
-          ) : null}
-        </span>
-      </div>
+        {stored ? <span className={styles['rowTag']}>{t('credentialConfigured')}</span> : null}
+      </button>
+    </li>
+  )
+}
 
-      {open ? (
-        <div className={styles['editor']}>
-          <KeyField
-            provider={provider}
-            draft={draft}
-            busy={busy}
-            failure={failure}
-            onChange={setDraft}
-            onCancel={() => { setOpen(false) }}
-            onSubmit={() => { run(providersApi.setCredential(provider.id, draft.trim())) }}
-            submitLabel={t('apply')}
-          />
+/**
+ * The right-pane editor for a catalog provider: its credential, write-only,
+ * plus the disconnect action when one is stored.
+ */
+export function CatalogProviderDetail({
+  provider,
+  onWritten,
+}: {
+  provider: ProviderView
+  onWritten: (providers: ProviderView[]) => void
+}): ReactNode {
+  const [draft, setDraft] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [failure, setFailure] = useState<string | undefined>(undefined)
+  const writable = provider.methods.apiKey?.interactive === true
+  const stored = provider.storedCredential !== null
+
+  const run = useCallback(
+    (task: Promise<{ providers: ProviderView[] }>): void => {
+      setBusy(true)
+      setFailure(undefined)
+      void task
+        .then((next) => {
+          onWritten(next.providers)
+          setDraft('')
+        })
+        .catch((error: unknown) => { setFailure(errorMessage(error)) })
+        .finally(() => { setBusy(false) })
+    },
+    [onWritten],
+  )
+
+  return (
+    <div className={styles['editor']}>
+      <div className={styles['editorHeader']}>
+        <span className={styles['editorTitle']}>{provider.name}</span>
+        <span className={styles['editorRoute']}>{provider.id}</span>
+      </div>
+      {writable ? (
+        <KeyField
+          provider={provider}
+          draft={draft}
+          busy={busy}
+          failure={failure}
+          onChange={setDraft}
+          onCancel={() => { setDraft('') }}
+          onSubmit={() => { run(providersApi.setCredential(provider.id, draft.trim())) }}
+          submitLabel={t('apply')}
+        />
+      ) : (
+        <p className={styles['advancedHint']}>
+          {provider.methods.oauth !== undefined && provider.methods.apiKey === undefined
+            ? t('oauthOnly')
+            : t('ambientOnly')}
+        </p>
+      )}
+      {stored && !writable ? null : stored ? (
+        <div className={styles['editorActions']}>
+          <button
+            type="button"
+            className={styles['dangerButton']}
+            disabled={busy}
+            aria-label={providerCopy(t('disconnect'), provider)}
+            onClick={() => { run(providersApi.removeCredential(provider.id)) }}
+          >
+            {t('disconnect')}
+          </button>
         </div>
       ) : null}
-    </li>
+    </div>
   )
 }
 
@@ -280,25 +287,27 @@ export function AddProviderCard({
 }
 
 /**
- * The configured catalog providers — one row each.
+ * The configured catalog providers — one selectable row each.
  *
- * Presentational by contract: `ModelsSection` owns the list because the add
- * flow below it writes to the same providers, and dsh's bottom row of
- * `添加提供方` / `添加自定义提供方` sits after *both* halves of the list, not
- * between them.
+ * Presentational by contract: `ModelsSection` owns the list and the selection
+ * because the add flow writes to the same providers, and the pane beside the
+ * list renders whichever entry is chosen.
  *
- * @param props - the provider list and the write callback that replaces it.
+ * @param props - the provider list, the current selection, and the callback
+ *   that moves the selection.
  * @returns the rows, or an error line; the declared providers stay usable either
  *   way, so a failed read is reported rather than thrown.
  */
 export function CatalogProviders({
   providers,
   loadError,
-  onWritten,
+  activeId,
+  onSelect,
 }: {
   providers: readonly ProviderView[] | undefined
   loadError: string | undefined
-  onWritten: (providers: ProviderView[]) => void
+  activeId: string | undefined
+  onSelect: (id: string) => void
 }): ReactNode {
   const rows = (providers ?? []).filter(
     (provider) => provider.declared === false && provider.status.configured,
@@ -309,9 +318,14 @@ export function CatalogProviders({
       {loadError === undefined ? null : (
         <p className={styles['error']}>{`${t('loadFailed')}：${loadError}`}</p>
       )}
-      <ul className={styles['rows']}>
+      <ul className={styles['list']}>
         {rows.map((provider) => (
-          <ProviderRow key={provider.id} provider={provider} onWritten={onWritten} />
+          <ProviderRow
+            key={provider.id}
+            provider={provider}
+            active={provider.id === activeId}
+            onSelect={() => { onSelect(provider.id) }}
+          />
         ))}
       </ul>
     </>

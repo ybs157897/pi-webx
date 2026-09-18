@@ -17,6 +17,7 @@ import type {
   ApiKeyView,
   ModelConfigResponse,
   ModelProviderUpsertRequest,
+  ModelSuggestResponse,
   ModelUpsertRequest,
   PiApiKind,
   ProviderView,
@@ -63,7 +64,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return payload as T;
 }
 
-function jsonInit(method: 'PUT', body: unknown): RequestInit {
+function jsonInit(method: 'PUT' | 'POST', body: unknown): RequestInit {
   return {
     method,
     headers: { 'content-type': 'application/json' },
@@ -115,6 +116,18 @@ export const modelsConfigApi = {
     return request<ModelConfigResponse>(
       `/api/models-config/providers/${encodeURIComponent(providerId)}/models/${encodeURIComponent(modelId)}`,
       { method: 'DELETE' },
+    );
+  },
+
+  /**
+   * "Smart configuration": the fields pi's own catalogue knows for a model id.
+   * `match: null` means pi does not list the id — the editor then keeps what is
+   * typed instead of guessing.
+   */
+  suggest(modelId: string): Promise<ModelSuggestResponse> {
+    return request<ModelSuggestResponse>(
+      '/api/models-config/suggest',
+      jsonInit('POST', { modelId }),
     );
   },
 };

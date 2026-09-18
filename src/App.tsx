@@ -33,7 +33,7 @@ import { SidebarRoot } from './components/sidebar/SidebarRoot';
 import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
 import { workspaceLabel } from './components/sidebar/tree';
 import type { WorkspaceItem } from './components/sidebar/tree';
-import { GeneralSettings, ModelsSection, SettingsModal } from './components/settings';
+import { GeneralSettings, ModelsSection, SettingsPage } from './components/settings';
 import type { ModelCatalog } from './shared/model-catalog';
 import { presetFromToolNames, toolNamesForPreset, type ToolPreset } from './shared/tool-presets';
 import type {
@@ -842,7 +842,14 @@ function Shell({
           </Flexbox>
         ) : (
           <Flexbox style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-            <TranscriptView transcript={session.transcript} onAction={sendAction} renderStyle={renderStyle} />
+            {/* Keyed by session: transcript-local UI state (fold expansion)
+                must not leak from one session's turn numbering to another's. */}
+            <TranscriptView
+              key={sessionId ?? 'pending'}
+              transcript={session.transcript}
+              onAction={sendAction}
+              renderStyle={renderStyle}
+            />
           </Flexbox>
         )}
 
@@ -900,7 +907,7 @@ function Shell({
         disabled={sessionId === null}
       />
 
-      <SettingsModal
+      <SettingsPage
         open={appSettingsOpen}
         onClose={() => {
           setAppSettingsOpen(false);

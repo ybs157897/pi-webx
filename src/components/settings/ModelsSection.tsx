@@ -1,12 +1,12 @@
 /**
- * Models settings section, ported from dsh's `ui-settings-models`
- * ModelsSection: the provider rows with confirmed API-key state dots, with one
- * editor card open at a time. Rows and cards write through the bridge's
- * `/api/models-config` endpoints; every write answers with the whole file, so
- * the page state is replaced rather than refetched. A provider removal first
- * requires confirmation. When models.json has no provider at all, the create
- * card renders in place of the rows (the first-run posture) until the user
- * closes it.
+ * Models settings section — the reference's provider list + detail pane.
+ *
+ * One list on the left, split by ownership (内置目录 / 自定义), one pane on the
+ * right: a catalog provider shows its credential editor, a declared provider
+ * shows {@link ProviderEditor} with its model rows, and the add flows open in
+ * the same pane so nothing ever renders as a stack of inline cards. Every
+ * write answers with the whole file, so the page state is replaced rather than
+ * refetched; a provider removal still requires confirmation.
  */
 
 import { useEffect, useState } from 'react'
@@ -14,7 +14,11 @@ import type { ReactNode } from 'react'
 import type { ModelConfigResponse, ProviderView } from '../../shared/models-config'
 import { Button, IconPlusOutline16, Modal } from '../../ui/primitives/index.ts'
 import { errorMessage, modelsConfigApi, sortedProviders } from '../../lib/modelsConfig'
-import { AddProviderCard, CatalogProviders } from './CatalogProviders.tsx'
+import {
+  AddProviderCard,
+  CatalogProviderDetail,
+  CatalogProviders,
+} from './CatalogProviders.tsx'
 import { providersApi } from '../../lib/providers'
 import type { ProviderView as CatalogProviderView } from '../../shared/providers'
 import { providerCopy, t } from './copy.ts'
@@ -44,8 +48,6 @@ export function ModelsSection(): ReactNode {
   const [config, setConfig] = useState<ModelConfigResponse | undefined>(undefined)
   const [loadError, setLoadError] = useState<string | undefined>(undefined)
   const [loading, setLoading] = useState(true)
-  const [editing, setEditing] = useState<ProviderView | undefined>(undefined)
-  const [adding, setAdding] = useState(false)
   const [dismissedSetup, setDismissedSetup] = useState(false)
   const [deleteTarget, setDeleteTarget] = useState<ProviderView | undefined>(undefined)
   const [deleting, setDeleting] = useState(false)
@@ -56,6 +58,10 @@ export function ModelsSection(): ReactNode {
   const [catalogError, setCatalogError] = useState<string | undefined>(undefined)
   /** `'catalog'` opens 添加提供方, `'custom'` opens 添加自定义提供方, `undefined` neither. */
   const [addFlow, setAddFlow] = useState<'catalog' | 'custom' | undefined>(undefined)
+  /** Which detail the pane shows; defaults to the first declared provider. */
+  const [selectedId, setSelectedId] = useState<string | undefined>(undefined)
+  /** Same, for the catalog half (`undefined` = follow the default). */
+  const [selectedCatalogId, setSelectedCatalogId] = useState<string | undefined>(undefined)
 
   useEffect(() => {
     let stale = false
@@ -70,14 +76,13 @@ export function ModelsSection(): ReactNode {
     return () => { stale = true }
   }, [])
 
-  /** A card closed: clear its seat, adopt the fresh config, announce a write. */
+  /** A card closed: adopt the fresh config and announce a write. */
   const closeCard = (
     changed: boolean,
     nextConfig: ModelConfigResponse | undefined,
     target: ProviderIdentity,
   ): void => {
-    setEditing(undefined)
-    setAdding(false)
+    setAddFlow(undefined)
     setDismissedSetup(true)
     if (nextConfig !== undefined) setConfig(nextConfig)
     if (changed) setSavedTarget(identityOf(nextConfig, target.id))
@@ -92,12 +97,14 @@ export function ModelsSection(): ReactNode {
   const confirmDelete = (): void => {
     /* v8 ignore next -- the action only renders with a target and is disabled while a deletion is pending */
     if (deleteTarget === undefined || deleting) return
+    const id = deleteTarget.id
     setDeleting(true)
     setDeleteFailure(undefined)
-    void modelsConfigApi.deleteProvider(deleteTarget.id)
+    void modelsConfigApi.deleteProvider(id)
       .then((nextConfig) => {
         setConfig(nextConfig)
         setDeleteTarget(undefined)
+        setSelectedId(current => (current === id ? undefined : current))
       })
       .catch((error: unknown) => {
         setDeleteFailure(errorMessage(error))
@@ -133,6 +140,70 @@ export function ModelsSection(): ReactNode {
     ? undefined
     : identityOf(config, savedTarget.id)
 
+  // The pane always shows something: the explicit pick, else the first declared
+  // provider, else the first configured catalog provider.
+  const catalogRows = (catalogProviders ?? []).filter(
+    provider => provider.declared === false && provider.status.configured,
+  )
+  const activeCustom = providers.find(provider => provider.id === selectedId) ?? providers[0]
+  const activeCatalog = catalogRows.find(provider => provider.id === selectedCatalogId) ?? catalogRows[0]
+
+  const pane = ((): ReactNode => {
+    if (addFlow === 'catalog') {
+      return (
+        <div className={styles['addCard']}>
+          <AddProviderCard
+            providers={catalogProviders ?? []}
+            onWritten={setCatalogProviders}
+            onClose={() => { setAddFlow(undefined) }}
+          />
+        </div>
+      )
+    }
+    if (addFlow === 'custom' || firstRun) {
+      return (
+        <div className={styles['addCard']}>
+          <CustomProviderCard
+            taken={providers.map(provider => provider.id)}
+            onClose={(changed, nextConfig, createdId) => {
+              closeCard(changed, nextConfig, { id: createdId ?? '' })
+              setAddFlow(undefined)
+            }}
+          />
+        </div>
+      )
+    }
+    // The explicit selection wins over the default: picking a catalog provider
+    // must not keep showing the first declared one.
+    const wantsCatalog = selectedCatalogId !== undefined || selectedId === undefined
+    if (wantsCatalog && activeCatalog !== undefined) {
+      return (
+        <CatalogProviderDetail
+          key={activeCatalog.id}
+          provider={activeCatalog}
+          onWritten={setCatalogProviders}
+        />
+      )
+    }
+    if (activeCustom !== undefined) {
+      return (
+        <ProviderEditor
+          key={activeCustom.id}
+          provider={activeCustom}
+          onClose={(changed, nextConfig) => {
+            closeCard(changed, nextConfig, activeCustom)
+          }}
+          onRequestDelete={() => {
+            setSavedTarget(undefined)
+            setDeleteFailure(undefined)
+            setDeleteTarget(activeCustom)
+          }}
+        />
+      )
+    }
+    return <p className={styles['emptyHint']}>{t('selectProviderHint')}</p>
+  })()
+
   return (
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
@@ -145,107 +216,64 @@ export function ModelsSection(): ReactNode {
             {providerCopy(t('savedProvider'), savedIdentity)}
           </p>
         )}
-      {/* One list, split by ownership the way dsh splits a catalog route from a
-          declared one: the catalog half edits a credential, the declared half
-          (below) owns a whole `models.json` profile. */}
-      <CatalogProviders
-        providers={catalogProviders}
-        loadError={catalogError}
-        onWritten={setCatalogProviders}
-      />
-      <ul className={styles['rows']}>
-        {providers.map((provider) => {
-          const open = !adding && editing?.id === provider.id
-          return (
-            <li key={provider.id} className={styles['rowCard']}>
-              <div className={styles['rowHead']}>
-                <span className={styles['rowIdentity']}>
-                  <span className={styles['rowName']}>{provider.name ?? provider.id}</span>
-                  {/* dsh tags the routes a user declared so they read differently
-                      from the ones the catalogue already knows. */}
-                  <span className={styles['rowTag']}>{t('customTag')}</span>
-                  {provider.apiKey.has
-                    ? (
-                      <span
-                        className={`${styles['credentialDot']} ${styles['credentialDotConfigured']}`}
-                        role="img"
-                        aria-label={t('credentialConfigured')}
-                        title={t('credentialConfigured')}
-                      />
-                    )
-                    : (
-                      <span
-                        className={`${styles['credentialDot']} ${styles['credentialDotMissing']}`}
-                        role="img"
-                        aria-label={t('credentialMissing')}
-                        title={t('credentialMissing')}
-                      />
-                    )}
-                </span>
-                <span className={styles['rowActions']}>
-                  <button
-                    type="button"
-                    className={styles['secondaryButton']}
-                    aria-label={providerCopy(t('editProvider'), provider)}
-                    onClick={() => {
-                      setSavedTarget(undefined)
-                      // One card at a time: leaving `adding` set would show the
-                      // create card beside this editor, and closing either one
-                      // discards the other's draft.
-                      setAdding(false)
-                      setEditing(open ? undefined : provider)
-                    }}
-                  >
-                    {t('edit')}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles['dangerButton']}
-                    aria-label={providerCopy(t('removeProvider'), provider)}
-                    onClick={() => {
-                      setSavedTarget(undefined)
-                      setDeleteFailure(undefined)
-                      setDeleteTarget(provider)
-                    }}
-                  >
-                    {t('remove')}
-                  </button>
-                </span>
-              </div>
-              {open
-                ? (
-                  <ProviderEditor
-                    provider={provider}
-                    onClose={(changed, nextConfig) => {
-                      closeCard(changed, nextConfig, provider)
-                    }}
-                  />
-                )
-                : null}
-            </li>
-          )
-        })}
-      </ul>
-      <div className={styles['addBlock']}>
-        {addFlow === 'catalog' ? (
-          <div className={styles['addCard']}>
-            <AddProviderCard
-              providers={catalogProviders ?? []}
-              onWritten={setCatalogProviders}
-              onClose={() => { setAddFlow(undefined) }}
-            />
-          </div>
-        ) : addFlow === 'custom' || firstRun ? (
-          <div className={styles['addCard']}>
-            <CustomProviderCard
-              taken={providers.map(provider => provider.id)}
-              onClose={(changed, nextConfig, createdId) => {
-                closeCard(changed, nextConfig, { id: createdId ?? '' })
-                setAddFlow(undefined)
-              }}
-            />
-          </div>
-        ) : (
+
+      <div className={styles['panes']}>
+        <aside className={styles['listPane']} aria-label={t('providerList')}>
+          {catalogRows.length > 0 || catalogError !== undefined ? (
+            <>
+              <div className={styles['listGroupLabel']}>{t('groupCatalog')}</div>
+              <CatalogProviders
+                providers={catalogProviders}
+                loadError={catalogError}
+                activeId={activeCatalog?.id}
+                onSelect={(id) => {
+                  setAddFlow(undefined)
+                  setSelectedCatalogId(id)
+                  setSelectedId(undefined)
+                }}
+              />
+            </>
+          ) : null}
+          <div className={styles['listGroupLabel']}>{t('groupCustom')}</div>
+          <ul className={styles['list']}>
+            {providers.map((provider) => (
+              <li key={provider.id}>
+                <button
+                  type="button"
+                  className={`${styles['listRow']} ${
+                    provider.id === activeCustom?.id && selectedCatalogId === undefined
+                      ? styles['listRowActive']
+                      : ''
+                  }`}
+                  aria-pressed={provider.id === activeCustom?.id}
+                  onClick={() => {
+                    setAddFlow(undefined)
+                    setSavedTarget(undefined)
+                    setSelectedId(provider.id)
+                    setSelectedCatalogId(undefined)
+                  }}
+                >
+                  <span className={styles['rowIdentity']}>
+                    <span className={styles['rowName']}>{provider.name ?? provider.id}</span>
+                    <span className={styles['rowTag']}>{t('customTag')}</span>
+                    <span
+                      className={`${styles['credentialDot']} ${
+                        provider.apiKey.has
+                          ? styles['credentialDotConfigured']
+                          : styles['credentialDotMissing']
+                      }`}
+                      role="img"
+                      aria-label={provider.apiKey.has ? t('credentialConfigured') : t('credentialMissing')}
+                      title={provider.apiKey.has ? t('credentialConfigured') : t('credentialMissing')}
+                    />
+                  </span>
+                  {provider.piWebx?.enabled === false
+                    ? <span className={styles['rowTag']}>{t('modelDisabled')}</span>
+                    : null}
+                </button>
+              </li>
+            ))}
+          </ul>
           <div className={styles['addActions']}>
             <button
               type="button"
@@ -269,8 +297,10 @@ export function ModelsSection(): ReactNode {
               {t('addCustom')}
             </button>
           </div>
-        )}
+        </aside>
+        <div className={styles['detailPane']}>{pane}</div>
       </div>
+
       <Modal
         open={deleteTarget !== undefined}
         onClose={closeDelete}

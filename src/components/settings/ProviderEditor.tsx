@@ -46,6 +46,8 @@ export interface ProviderEditorProps {
    * replace its state without a refetch.
    */
   onClose: (changed: boolean, config?: ModelConfigResponse) => void
+  /** Ask the owner to open its delete confirmation for this provider. */
+  onRequestDelete?: (() => void) | undefined
 }
 
 /**
@@ -59,6 +61,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
   const [baseUrlDraft, setBaseUrlDraft] = useState(provider.baseUrl ?? '')
   const [apiDraft, setApiDraft] = useState<PiApiKind | ''>(provider.api ?? '')
   const [authHeaderDraft, setAuthHeaderDraft] = useState(provider.authHeader === true)
+  const [enabled, setEnabled] = useState(provider.piWebx?.enabled !== false)
   const [keyDraft, setKeyDraft] = useState('')
   const [removeKey, setRemoveKey] = useState(false)
   const [models, setModels] = useState<readonly ModelDraft[]>(() => modelDrafts(provider.models))
@@ -87,6 +90,7 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
         baseUrl: baseUrlDraft,
         api: apiDraft,
         authHeader: authHeaderDraft,
+        piWebx: { enabled },
         ...keyValue.length > 0
           ? { apiKey: { value: keyValue } }
           : removeKey
@@ -112,6 +116,33 @@ export function ProviderEditor(props: ProviderEditorProps): ReactNode {
             {provider.name !== undefined && provider.name !== provider.id
               ? <span className={styles['editorRoute']}>{provider.id}</span>
               : null}
+            <span className={styles['editorHeaderActions']}>
+              <label
+                className={styles['headerToggle']}
+                title={enabled ? t('providerEnabled') : t('modelDisabled')}
+              >
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={enabled}
+                  aria-label={t('providerEnabled')}
+                  disabled={disabled}
+                  onChange={(event) => { setEnabled(event.target.checked) }}
+                />
+              </label>
+              {props.onRequestDelete === undefined
+                ? null
+                : (
+                  <button
+                    type="button"
+                    className={styles['linkButton']}
+                    disabled={disabled}
+                    onClick={props.onRequestDelete}
+                  >
+                    {t('remove')}
+                  </button>
+                )}
+            </span>
           </div>
         )}
       <div className={styles['field']}>

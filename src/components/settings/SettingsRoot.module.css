@@ -234,3 +234,37 @@
   clip: rect(0 0 0 0);
   white-space: nowrap;
 }
+
+/* --------------------------------------------------------------- full page */
+
+/* The page replaces the app content while open: same layer, own rail, no mask. */
+.page {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+}
+
+.backRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 12px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+}
+
+.backRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--dsw-alias-label-primary);
+}

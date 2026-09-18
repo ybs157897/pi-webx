@@ -705,3 +705,245 @@ select.input {
   line-height: 20px;
   text-align: center;
 }
+
+/* ---------------------------------------------------- list + detail panes */
+
+.panes {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.listPane {
+  flex: none;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.detailPane {
+  flex: 1;
+  min-width: 0;
+}
+
+.listGroupLabel {
+  margin: 8px 0 2px;
+  padding: 0 8px;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.listRow {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--dsw-alias-label-primary);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.listRow:hover {
+  background: var(--dsw-alias-interactive-bg-hover);
+}
+
+.listRowActive {
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.emptyHint {
+  margin: 0;
+  padding: 24px 12px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+/* ---------------------------------------------------- model rows (reference) */
+
+.modelRowId {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.modelBadges {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.badge {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: var(--dsw-alias-bg-module-platform);
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.modelRowActions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.modelRowToggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---------------------------------------------------- editor header extras */
+
+.editorHeaderActions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.headerToggle {
+  display: inline-flex;
+  align-items: center;
+}
+
+/* ---------------------------------------------------- model editor modal */
+
+.modelModal {
+  width: 640px;
+}
+
+.modelModalBody {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.modalSwitchRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.modalSwitchLabel {
+  font-size: 14px;
+  color: var(--dsw-alias-label-primary);
+}
+
+.modalField {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.modalFieldLabel {
+  font-size: 13px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+.modalHint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.modalAdvanced {
+  border-top: 0.5px solid var(--dsw-alias-border-l3);
+  padding-top: 10px;
+}
+
+.modalAdvancedSummary {
+  margin: 0 0 10px;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 10px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  color: var(--dsw-alias-label-primary);
+  cursor: pointer;
+}
+
+.chip input {
+  margin: 0;
+}
+
+.chipOn {
+  border-color: var(--dsw-alias-border-l2);
+  background: var(--dsw-alias-interactive-bg-hover-solid);
+}
+
+.chipLocked {
+  cursor: default;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.chipButton {
+  font-size: 13px;
+}
+
+.chipAdd {
+  color: var(--dsw-alias-label-secondary);
+}
+
+.modalCode {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 0.5px solid var(--dsw-alias-border-l3);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
+  color: var(--dsw-alias-label-primary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 18px;
+  resize: vertical;
+}
+
+.modalFootnote {
+  display: flex;
+}

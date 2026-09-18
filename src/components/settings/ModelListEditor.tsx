@@ -1,6 +1,9 @@
 /**
  * The model list of one provider, plus the action that asks the provider what
- * it serves. Ported from dsh's `ui-settings-models` ModelListEditor.
+ * it serves. Ported from dsh's `ui-settings-models` ModelListEditor, restyled
+ * after the reference's model rows: one line per model — id, capability
+ * badges derived from the profile, an enable switch, and edit/delete — with
+ * the full editor living in {@link ModelEditModal}.
  *
  * The list is the provider's `models` array as the card holds it, replaced as
  * one array on save. Fetching asks the endpoint **the form currently shows** —
@@ -15,16 +18,15 @@ import { useState } from 'react'
 import type { ReactNode } from 'react'
 import {
   Button,
-  IconChevronDownOutline14,
-  IconChevronRightOutline14,
   IconPlusOutline16,
   IconTrashOutline16,
   Modal,
 } from '../../ui/primitives/index.ts'
-import { formatCapacity, parseCapacity } from './capacity.ts'
+import { badgeCapacity } from './capacity.ts'
 import type { ModelDraft } from './capacity.ts'
 import { discoverModels } from './discover.ts'
 import type { DiscoverTarget } from './discover.ts'
+import { ModelEditModal } from './ModelEditModal.tsx'
 import { t } from './copy.ts'
 import styles from './ModelsSection.module.css'
 
@@ -53,58 +55,26 @@ function textOf(model: ModelDraft, key: 'id' | 'name'): string {
   return typeof value === 'string' ? value : ''
 }
 
-/** A row's numeric field, or `undefined` when unset or not a number. */
-function numberOf(model: ModelDraft, key: 'contextWindow' | 'maxTokens'): number | undefined {
-  const value = model[key]
-  return typeof value === 'number' ? value : undefined
-}
-
-/** The two token counts edited as K/M-suffixed text behind a row's disclosure. */
-type CapacityField = 'contextWindow' | 'maxTokens'
-
-/**
- * What an empty capacity field is worth, shown as its placeholder so a row left
- * blank does not read as a model with no capacity at all. A hint, not a mirror:
- * this page counts `K` as 1000.
- */
-const CAPACITY_HINT: Readonly<Record<CapacityField, string>> = {
-  contextWindow: '256K',
-  maxTokens: '32K',
-}
-
-/** Spell a stored count for a field that may be unset. */
-function capacitySpelling(value: number | undefined): string {
-  return value === undefined ? '' : formatCapacity(value)
+/** A model's `piWebx.enabled` reads as enabled unless switched off. */
+function isEnabled(model: ModelDraft): boolean {
+  return model.piWebx?.enabled !== false
 }
 
 /**
- * Whether a row declares image input.
- *
- * pi's `input` is a capability list, and an unset one means text-only — pi fills
- * in `['text']` itself. Absence therefore reads as "no images" rather than as
- * "unknown", which is what keeps the box honest for rows that never set it.
+ * The badges a row shows: the context window as quoted (`1M`), and the input
+ * kinds beyond text — all derived from the profile, never stored separately.
  */
-function acceptsImages(model: ModelDraft): boolean {
-  return Array.isArray(model.input) && model.input.includes('image')
-}
-
-/** The `input` value the toggle writes: `text` always, `image` on request. */
-function inputKinds(images: boolean): string[] {
-  return images ? ['text', 'image'] : ['text']
-}
-
-/**
- * One row after a patch: emptied optional fields leave the profile rather than
- * being stored as values the file would reject; `id` stays a string ('' while
- * cleared) so the row keeps its shape.
- */
-function patchRow(model: ModelDraft, next: Partial<ModelDraft>): ModelDraft {
-  const record: Record<string, unknown> = { ...model, ...next }
-  for (const key of Object.keys(record)) {
-    if (record[key] === undefined || record[key] === '') delete record[key]
+function badgesOf(model: ModelDraft): string[] {
+  const badges: string[] = []
+  if (typeof model.contextWindow === 'number' && model.contextWindow > 0) {
+    badges.push(badgeCapacity(model.contextWindow))
   }
-  if (record['id'] === undefined) record['id'] = ''
-  return record as unknown as ModelDraft
+  if (Array.isArray(model.input) && model.input.includes('image')) badges.push(t('badgeVision'))
+  const extension = model.piWebx?.inputFormat
+  if (extension?.video === true) badges.push(t('badgeVideo'))
+  if (extension?.audio === true) badges.push(t('badgeAudio'))
+  if (extension?.pdf === true) badges.push(t('badgePdf'))
+  return badges
 }
 
 /**
@@ -119,55 +89,21 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   const [candidates, setCandidates] = useState<readonly string[] | undefined>(undefined)
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())
   const [candidateQuery, setCandidateQuery] = useState('')
-  // Rows carry an id and a name; capacities are the exception, so they stay
-  // folded until asked for rather than crowding every row with four inputs.
-  const [expanded, setExpanded] = useState<ReadonlySet<number>>(new Set())
-  // Capacities are edited as text, so a field's keystrokes are held here rather
-  // than re-derived from the parsed count on every change — that would rewrite
-  // `1000` to `1K` mid-word. Unreadable text is kept past blur so the refusal
-  // names a row the user can still see, which is why this is one entry PER
-  // FIELD: a single buffer would be displaced by editing any other field, and
-  // the abandoned one would render its stored NaN as the literal `NaN`.
-  const [editing, setEditing] = useState<ReadonlyMap<string, string>>(new Map())
+  /** Index opened in the editor modal, or `'new'` while creating one. */
+  const [editing, setEditing] = useState<number | 'new' | undefined>(undefined)
 
-  /** Buffer key for one capacity field; the row half moves when rows do. */
-  const bufferKey = (index: number, field: CapacityField): string => `${String(index)}:${field}`
-
-  const patch = (index: number, next: Partial<ModelDraft>): void => {
-    onChange(models.map((model, at) => at === index ? patchRow(model, next) : model))
+  /** Replace one row wholesale (the modal hands back a finished draft). */
+  const replaceRow = (index: number, draft: ModelDraft): void => {
+    onChange(models.map((model, at) => (at === index ? draft : model)))
   }
 
-  const editCapacity = (index: number, field: CapacityField, text: string): void => {
-    setEditing(current => new Map(current).set(bufferKey(index, field), text))
-    const parsed = parseCapacity(text)
-    patch(index, field === 'contextWindow' ? { contextWindow: parsed } : { maxTokens: parsed })
-  }
-
-  /** What a capacity field shows: the buffer while typing, else the stored count. */
-  const capacityText = (model: ModelDraft, index: number, field: CapacityField): string =>
-    editing.get(bufferKey(index, field)) ?? capacitySpelling(numberOf(model, field))
-
-  /** Drop one row's entries and shift the rows after it down, in one pass. */
-  const reindexOnRemove = (
-    current: ReadonlyMap<string, string>,
-    index: number,
-  ): Map<string, string> => {
-    const next = new Map<string, string>()
-    for (const [key, value] of current) {
-      const at = Number(key.slice(0, key.indexOf(':')))
-      if (at === index) continue
-      // Only the row number moves; the field half of the key is untouched.
-      next.set(at > index ? key.replace(/^\d+/, String(at - 1)) : key, value)
-    }
-    return next
-  }
-
-  const toggleExpanded = (index: number): void => {
-    setExpanded((current) => {
-      const next = new Set(current)
-      if (!next.delete(index)) next.add(index)
-      return next
-    })
+  const toggleEnabled = (index: number, enabled: boolean): void => {
+    onChange(models.map((model, at) => {
+      if (at !== index) return model
+      const piWebx = { ...(model.piWebx ?? {}) }
+      piWebx.enabled = enabled
+      return { ...model, piWebx }
+    }))
   }
 
   const fetchCandidates = async (): Promise<void> => {
@@ -248,6 +184,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
   // An existing provider can answer through its stored endpoint; only a draft
   // with neither a route nor a baseUrl has nothing to ask about.
   const askable = probe.providerId !== undefined || (probe.baseUrl !== undefined && probe.baseUrl.length > 0)
+  const editingDraft = typeof editing === 'number' ? models[editing] : undefined
   return (
     <section className={styles['modelCatalog']} aria-label={t('models')}>
       <div className={styles['modelListHead']}>
@@ -265,122 +202,83 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
         </button>
       </div>
       {models.length === 0 ? <p className={styles['modelEmpty']}>{t('modelsEmpty')}</p> : null}
-      {models.map((model, index) => (
-        <div key={index} className={styles['modelEntry']}>
-          <div className={styles['modelRow']}>
-            <input
-              className={styles['input']}
-              type="text"
-              value={textOf(model, 'id')}
-              placeholder={t('modelId')}
-              aria-label={`${t('modelId')} ${index + 1}`}
-              disabled={disabled}
-              onChange={(event) => { patch(index, { id: event.target.value }) }}
-            />
-            <input
-              className={styles['input']}
-              type="text"
-              value={textOf(model, 'name')}
-              placeholder={t('modelName')}
-              aria-label={`${t('modelName')} ${index + 1}`}
-              disabled={disabled}
-              onChange={(event) => { patch(index, { name: event.target.value === '' ? undefined : event.target.value }) }}
-            />
-            <button
-              type="button"
-              className={styles['iconButton']}
-              aria-label={`${t('modelAdvanced')} ${index + 1}`}
-              aria-expanded={expanded.has(index)}
-              title={t('modelAdvanced')}
-              onClick={() => { toggleExpanded(index) }}
-            >
-              {expanded.has(index) ? <IconChevronDownOutline14 /> : <IconChevronRightOutline14 />}
-            </button>
-            <button
-              type="button"
-              className={`${styles['iconButton']} ${styles['iconButtonDanger']}`}
-              aria-label={`${t('removeModel')} ${index + 1}`}
-              title={t('removeModel')}
-              disabled={disabled}
-              onClick={() => {
-                onChange(models.filter((_model, at) => at !== index))
-                // Both stores are keyed by position, so every row after this
-                // one shifts down and would otherwise inherit its neighbour's
-                // state — a different row's capacities popping open, or its
-                // half-typed text appearing in another row's field.
-                setExpanded((current) => {
-                  const next = new Set<number>()
-                  for (const at of current) {
-                    if (at < index) next.add(at)
-                    else if (at > index) next.add(at - 1)
-                  }
-                  return next
-                })
-                setEditing(current => reindexOnRemove(current, index))
-              }}
-            >
-              <IconTrashOutline16 size={14} />
-            </button>
+      {models.map((model, index) => {
+        const badges = badgesOf(model)
+        const enabled = isEnabled(model)
+        return (
+          <div key={`${textOf(model, 'id')}-${String(index)}`} className={styles['modelEntry']}>
+            <div className={styles['modelRow']}>
+              <label className={styles['modelRowToggle']} title={enabled ? t('modelEnabled') : t('modelDisabled')}>
+                <input
+                  type="checkbox"
+                  role="switch"
+                  checked={enabled}
+                  aria-label={`${t('modelEnabled')} ${index + 1}`}
+                  disabled={disabled}
+                  onChange={(event) => { toggleEnabled(index, event.target.checked) }}
+                />
+              </label>
+              <span className={styles['modelRowId']} title={textOf(model, 'id')}>
+                {textOf(model, 'id') || t('modelId')}
+              </span>
+              <span className={styles['modelBadges']}>
+                {badges.map(badge => (
+                  <span key={badge} className={styles['badge']}>{badge}</span>
+                ))}
+              </span>
+              <span className={styles['modelRowActions']}>
+                <button
+                  type="button"
+                  className={styles['secondaryButton']}
+                  aria-label={`${t('editModel')} ${index + 1}`}
+                  disabled={disabled}
+                  onClick={() => { setEditing(index) }}
+                >
+                  {t('edit')}
+                </button>
+                <button
+                  type="button"
+                  className={`${styles['iconButton']} ${styles['iconButtonDanger']}`}
+                  aria-label={`${t('removeModel')} ${index + 1}`}
+                  title={t('removeModel')}
+                  disabled={disabled}
+                  onClick={() => { onChange(models.filter((_model, at) => at !== index)) }}
+                >
+                  <IconTrashOutline16 size={14} />
+                </button>
+              </span>
+            </div>
           </div>
-          {expanded.has(index)
-            ? (
-              <div className={styles['modelAdvanced']}>
-                <label className={styles['modelField']}>
-                  <span className={styles['modelFieldLabel']}>{t('modelContextWindow')}</span>
-                  <input
-                    className={styles['input']}
-                    type="text"
-                    inputMode="numeric"
-                    value={capacityText(model, index, 'contextWindow')}
-                    placeholder={CAPACITY_HINT.contextWindow}
-                    aria-label={`${t('modelContextWindow')} ${index + 1}`}
-                    disabled={disabled}
-                    onChange={(event) => { editCapacity(index, 'contextWindow', event.target.value) }}
-                  />
-                </label>
-                <label className={styles['modelField']}>
-                  <span className={styles['modelFieldLabel']}>{t('modelMaxTokens')}</span>
-                  <input
-                    className={styles['input']}
-                    type="text"
-                    inputMode="numeric"
-                    value={capacityText(model, index, 'maxTokens')}
-                    placeholder={CAPACITY_HINT.maxTokens}
-                    aria-label={`${t('modelMaxTokens')} ${index + 1}`}
-                    disabled={disabled}
-                    onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
-                  />
-                </label>
-                <label className={styles['modelField']}>
-                  <span className={styles['modelFieldLabel']}>{t('modelImageInput')}</span>
-                  <span className={styles['modelToggle']}>
-                    <input
-                      type="checkbox"
-                      checked={acceptsImages(model)}
-                      aria-label={`${t('modelImageInput')} ${index + 1}`}
-                      disabled={disabled}
-                      onChange={(event) => {
-                        patch(index, { input: inputKinds(event.target.checked) })
-                      }}
-                    />
-                    <span className={styles['modelToggleHint']}>{t('modelImageInputHint')}</span>
-                  </span>
-                </label>
-              </div>
-            )
-            : null}
-        </div>
-      ))}
+        )
+      })}
       <button
         type="button"
         className={styles['addModelButton']}
         disabled={disabled}
-        onClick={() => { onChange([...models, { id: '' }]) }}
+        onClick={() => { setEditing('new') }}
       >
         <IconPlusOutline16 size={14} />
         {t('addModel')}
       </button>
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
+
+      {editing === undefined
+        ? null
+        : (
+          <ModelEditModal
+            key={editing === 'new' ? 'new' : String(editing)}
+            open
+            model={editingDraft}
+            takenIds={models.map(model => textOf(model, 'id')).filter(entry => entry.length > 0)}
+            onClose={() => { setEditing(undefined) }}
+            onSubmit={(draft) => {
+              if (editing === 'new') onChange([...models, draft])
+              else replaceRow(editing, draft)
+              setEditing(undefined)
+            }}
+          />
+        )}
+
       <Modal
         open={candidates !== undefined}
         onClose={closePicker}

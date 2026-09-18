@@ -51,6 +51,23 @@ export function formatCapacity(value: number): string {
   return String(value)
 }
 
+/**
+ * A badge's version of the same count: approximate and short, the way model
+ * cards quote capacities (`1048576` → `1M`, `131072` → `131K`). Display only —
+ * nothing parses this back.
+ * @param value - stored capacity.
+ * @returns the badge text.
+ */
+export function badgeCapacity(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) return String(value)
+  if (value >= CAPACITY_SCALE.m) {
+    const millions = value / CAPACITY_SCALE.m
+    return `${String(Math.round(millions * 10) / 10)}M`
+  }
+  if (value >= CAPACITY_SCALE.k) return `${String(Math.round(value / CAPACITY_SCALE.k))}K`
+  return String(value)
+}
+
 /** Convert a stored array into editable rows without dropping hidden fields. */
 export function modelDrafts(value: readonly ProviderModelView[] | undefined): ModelDraft[] {
   return (value ?? []).map(model => ({ ...model }))
