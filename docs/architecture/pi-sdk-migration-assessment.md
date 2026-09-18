@@ -24,6 +24,8 @@ git pull --ff-only origin main
 
 实验服务端可以单独研究，暂不作为主线改造方案。
 
+**实施更新（2026-09-18，b3b0b98 之后）**：上面"三条路线"中路线一的 HTTP/SSE 建议已被用户决策替代——传输层改为 **单条 WebSocket 多路复用**（`/api/ws`），但采纳的是 DSH 的分层语义而非其 Cordis/Typert/Gateway 机制：unary 命令仍走 HTTP POST（与 DSH 相同的拆分）；每会话内存事件日志（seq 环形缓冲，`server/pi/session-journal.ts`）承担断线补帧，缺口回退 `get_messages` 全量快照，pi SessionManager 仍是权威记录；prompt 级 requestId 去重/回显/echo-retire（`PromptRequests` + `transcript.addEcho/retireEcho`）；前端抽出框架无关的 `PiSessionClient` 会话对象（`src/lib/session-client.ts`）经 `useSyncExternalStore` 接入 React，WS 重连状态机独立在 `src/lib/connection.ts`。SSE 路由已移除。相关定点检查：`npm run check`（transcript + journal）与 `scripts/ws-smoke.ts`（需先起服务）。
+
 ## 关键证据
 
 ### 发布状态是第一道限制
