@@ -18,10 +18,13 @@ import path from 'node:path';
 
 import type {
   ModelConfigResponse,
+  ModelExtension,
   ModelProviderUpsertRequest,
   ModelUpsertRequest,
+  ProviderExtension,
   ProviderView,
 } from '../src/shared/models-config';
+import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../src/shared/protocol';
 
 const CONFIG_PATH = path.join(os.homedir(), '.pi', 'agent', 'models.json');
 const BACKUP_SUFFIX = '.bak-piwebx';
@@ -143,8 +146,35 @@ function toView(id: string, raw: RawRecord): ProviderView {
       ...(typeof model['maxTokens'] === 'number'
         ? { maxTokens: model['maxTokens'] as number }
         : {}),
+      ...(viewThinkingLevelMap(model['thinkingLevelMap']) !== undefined
+        ? { thinkingLevelMap: viewThinkingLevelMap(model['thinkingLevelMap']) }
+        : {}),
+      ...(viewModelExtension(model['piWebx']) !== undefined
+        ? { piWebx: viewModelExtension(model['piWebx']) }
+        : {}),
     })),
+    ...(viewProviderExtension(raw['piWebx']) !== undefined
+      ? { piWebx: viewProviderExtension(raw['piWebx']) }
+      : {}),
   };
+}
+
+/** The native map as the client sees it: pi levels only, `null` kept as-is. */
+function viewThinkingLevelMap(
+  value: unknown,
+): Partial<Record<PiThinkingLevel, string | null>> | undefined {
+  const map = cleanThinkingLevelMap(value, { allowEmpty: false });
+  return map === undefined || Object.keys(map).length === 0 ? undefined : map;
+}
+
+function viewModelExtension(value: unknown): ModelExtension | undefined {
+  const ext = cleanModelExtension(value, { allowEmpty: false });
+  return ext === undefined || Object.keys(ext).length === 0 ? undefined : ext;
+}
+
+function viewProviderExtension(value: unknown): ProviderExtension | undefined {
+  const ext = cleanProviderExtension(value, { allowEmpty: false });
+  return ext === undefined || Object.keys(ext).length === 0 ? undefined : ext;
 }
 
 function cleanText(value: unknown, max = MAX_TEXT): string | undefined {
@@ -182,9 +212,148 @@ function collectInputKinds(value: unknown): string[] {
   return kinds;
 }
 
-function normalizeModels(input: unknown): RawRecord[] | undefined {
+/* ----------------------------------------------------------------- extension */
+
+/**
+ * pi's `thinkingLevelMap`, cleaned: pi levels only, values `string | null`.
+ * `allowEmpty: false` is the read path (an empty map is reported as absent);
+ * the write path accepts `{}` as the honest "no levels configured".
+ */
+function cleanThinkingLevelMap(
+  value: unknown,
+  options: { allowEmpty: boolean },
+): Partial<Record<PiThinkingLevel, string | null>> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const out: Partial<Record<PiThinkingLevel, string | null>> = {};
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (!(PI_THINKING_LEVELS as readonly string[]).includes(key)) continue;
+    if (entry === null) {
+      out[key as PiThinkingLevel] = null;
+      continue;
+    }
+    const text = cleanText(entry, 200);
+    if (text !== undefined) out[key as PiThinkingLevel] = text;
+  }
+  if (!options.allowEmpty && Object.keys(out).length === 0) return undefined;
+  return out;
+}
+
+/** The `piWebx` block on one model entry; unknown inner keys are dropped. */
+function cleanModelExtension(
+  value: unknown,
+  options: { allowEmpty: boolean },
+): ModelExtension | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const body = value as RawRecord;
+  const out: ModelExtension = {};
+
+  if (typeof body['enabled'] === 'boolean') out.enabled = body['enabled'];
+
+  const inputFormat = body['inputFormat'];
+  if (typeof inputFormat === 'object' && inputFormat !== null) {
+    const flags = inputFormat as RawRecord;
+    const kinds: NonNullable<ModelExtension['inputFormat']> = {};
+    for (const kind of ['audio', 'video', 'pdf'] as const) {
+      if (typeof flags[kind] === 'boolean') kinds[kind] = flags[kind] as boolean;
+    }
+    if (Object.keys(kinds).length > 0) out.inputFormat = kinds;
+  }
+
+  const capabilities = body['capabilities'];
+  if (typeof capabilities === 'object' && capabilities !== null) {
+    const flags = capabilities as RawRecord;
+    const caps: NonNullable<ModelExtension['capabilities']> = {};
+    for (const name of [
+      'jsonSchemaOutput',
+      'nativeWebSearch',
+      'midConversationSystem',
+      'toolCall',
+    ] as const) {
+      if (typeof flags[name] === 'boolean') caps[name] = flags[name] as boolean;
+    }
+    if (Object.keys(caps).length > 0) out.capabilities = caps;
+  }
+
+  const map = body['reasoningLevelMap'];
+  if (typeof map === 'string' && map.trim().length > 0) {
+    out.reasoningLevelMap = map.trim().slice(0, MAX_TEXT);
+  }
+
+  if (!options.allowEmpty && Object.keys(out).length === 0) return undefined;
+  return out;
+}
+
+function cleanProviderExtension(
+  value: unknown,
+  options: { allowEmpty: boolean },
+): ProviderExtension | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined;
+  const out: ProviderExtension = {};
+  if (typeof (value as RawRecord)['enabled'] === 'boolean') {
+    out.enabled = (value as RawRecord)['enabled'] as boolean;
+  }
+  if (!options.allowEmpty && Object.keys(out).length === 0) return undefined;
+  return out;
+}
+
+/**
+ * One model entry, cleanly. `existing` is the raw entry with the same id, when
+ * there is one: its unmodelled fields (cost, compat, headers, samplingParams, …)
+ * are carried over, which is the read-modify-write rule this file promises —
+ * rebuilding the entry from the request alone used to drop them.
+ */
+function buildModelEntry(
+  body: RawRecord,
+  existing: RawRecord | undefined,
+): RawRecord {
+  const id = cleanText(body['id'] as unknown, 200);
+  if (!id) throw new ModelConfigError(400, '每个模型都需要非空 id');
+
+  const model: RawRecord = { ...(existing ?? {}), id };
+  // Modelled fields are the request's to decide: absent means absent.
+  for (const key of ['name', 'api', 'reasoning', 'input', 'contextWindow', 'maxTokens', 'thinkingLevelMap', 'piWebx']) {
+    delete model[key];
+  }
+
+  const name = cleanText(body['name'] as unknown, 200);
+  if (name) model['name'] = name;
+  const api = cleanText(body['api'] as unknown, 40);
+  if (api) {
+    if (!(API_KINDS as readonly string[]).includes(api)) {
+      throw new ModelConfigError(400, `不支持的 api 类型：${api}`);
+    }
+    model['api'] = api;
+  }
+  if (body['reasoning'] === true) model['reasoning'] = true;
+  const kinds = collectInputKinds(body['input']);
+  if (kinds.length > 0) model['input'] = Array.from(new Set(kinds));
+  const contextWindow = cleanInt(body['contextWindow']);
+  if (contextWindow) model['contextWindow'] = contextWindow;
+  const maxTokens = cleanInt(body['maxTokens']);
+  if (maxTokens) model['maxTokens'] = maxTokens;
+
+  // Present ⇒ replace (an empty map clears the field); absent ⇒ keep existing.
+  if ('thinkingLevelMap' in body) {
+    const map = cleanThinkingLevelMap(body['thinkingLevelMap'], { allowEmpty: true });
+    if (map !== undefined && Object.keys(map).length > 0) model['thinkingLevelMap'] = map;
+  }
+  if ('piWebx' in body) {
+    const ext = cleanModelExtension(body['piWebx'], { allowEmpty: true });
+    if (ext !== undefined && Object.keys(ext).length > 0) model['piWebx'] = ext;
+  }
+  return model;
+}
+
+function normalizeModels(
+  input: unknown,
+  existing: readonly RawRecord[],
+): RawRecord[] | undefined {
   if (input === undefined) return undefined;
   if (!Array.isArray(input)) throw new ModelConfigError(400, 'models 必须是数组');
+  const byId = new Map<string, RawRecord>();
+  for (const entry of existing) {
+    if (typeof entry['id'] === 'string') byId.set(entry['id'], entry);
+  }
   const seen = new Set<string>();
   const out: RawRecord[] = [];
   for (const raw of input.slice(0, MAX_MODELS)) {
@@ -194,24 +363,7 @@ function normalizeModels(input: unknown): RawRecord[] | undefined {
     if (!id) throw new ModelConfigError(400, '每个模型都需要非空 id');
     if (seen.has(id)) throw new ModelConfigError(400, `模型 id 重复：${id}`);
     seen.add(id);
-    const model: RawRecord = { id };
-    const name = cleanText(body['name'] as unknown, 200);
-    if (name) model['name'] = name;
-    const api = cleanText(body['api'] as unknown, 40);
-    if (api) {
-      if (!(API_KINDS as readonly string[]).includes(api)) {
-        throw new ModelConfigError(400, `不支持的 api 类型：${api}`);
-      }
-      model['api'] = api;
-    }
-    if (body['reasoning'] === true) model['reasoning'] = true;
-    const kinds = collectInputKinds(body['input']);
-    if (kinds.length > 0) model['input'] = Array.from(new Set(kinds));
-    const contextWindow = cleanInt(body['contextWindow']);
-    if (contextWindow) model['contextWindow'] = contextWindow;
-    const maxTokens = cleanInt(body['maxTokens']);
-    if (maxTokens) model['maxTokens'] = maxTokens;
-    out.push(model);
+    out.push(buildModelEntry(body, byId.get(id)));
   }
   return out;
 }
@@ -273,6 +425,40 @@ export function readProviderCredentials(
   };
 }
 
+/**
+ * Which entries the model picker must hide, read from `piWebx.enabled`.
+ *
+ * The toggle is pi-webx's own (pi has no enable/disable concept), so this is
+ * where it becomes real: `buildModelCatalog` filters with this before listing.
+ */
+export function readCatalogVisibility(): {
+  disabledProviders: Set<string>;
+  disabledModels: Map<string, Set<string>>;
+} {
+  const disabledProviders = new Set<string>();
+  const disabledModels = new Map<string, Set<string>>();
+  try {
+    const config = readRaw();
+    for (const [id, raw] of Object.entries(config.providers)) {
+      const ext = cleanProviderExtension(raw['piWebx'], { allowEmpty: false });
+      if (ext?.enabled === false) disabledProviders.add(id);
+      const list = Array.isArray(raw['models']) ? (raw['models'] as RawRecord[]) : [];
+      const hidden = new Set<string>();
+      for (const model of list) {
+        const modelExt = cleanModelExtension(model['piWebx'], { allowEmpty: false });
+        if (modelExt?.enabled === false && typeof model['id'] === 'string') {
+          hidden.add(model['id']);
+        }
+      }
+      if (hidden.size > 0) disabledModels.set(id, hidden);
+    }
+  } catch {
+    // A file that cannot be read hides nothing: the picker stays useful and
+    // the settings page is where the parse error is reported.
+  }
+  return { disabledProviders, disabledModels };
+}
+
 export async function upsertProvider(
   id: string,
   body: ModelProviderUpsertRequest,
@@ -317,6 +503,12 @@ export async function upsertProvider(
     else delete next['authHeader'];
   }
 
+  if ('piWebx' in body) {
+    const ext = cleanProviderExtension(body['piWebx'], { allowEmpty: true });
+    if (ext !== undefined && Object.keys(ext).length > 0) next['piWebx'] = ext;
+    else delete next['piWebx'];
+  }
+
   // Blank/absent key keeps whatever is configured; only an explicit shape
   // changes it. That is what makes saving a redacted view safe.
   const keyUpdate = body['apiKey'];
@@ -330,7 +522,10 @@ export async function upsertProvider(
     }
   }
 
-  const models = normalizeModels(body['models']);
+  const existingModels = Array.isArray(existing?.['models'])
+    ? (existing?.['models'] as RawRecord[])
+    : [];
+  const models = normalizeModels(body['models'], existingModels);
   if (models !== undefined) next['models'] = models;
 
   if (!next['baseUrl'] && !next['api']) {
@@ -370,25 +565,11 @@ export async function upsertModel(
   const modelId = cleanText(body['id'] as unknown, 200);
   if (!modelId) throw new ModelConfigError(400, '模型 id 不能为空');
 
-  const model: RawRecord = { id: modelId };
-  const name = cleanText(body['name'] as unknown, 200);
-  if (name) model['name'] = name;
-  const api = cleanText(body['api'] as unknown, 40);
-  if (api) {
-    if (!(API_KINDS as readonly string[]).includes(api)) {
-      throw new ModelConfigError(400, `不支持的 api 类型：${api}`);
-    }
-    model['api'] = api;
-  }
-  if (body['reasoning'] === true) model['reasoning'] = true;
-  const kinds = collectInputKinds(body['input']);
-  if (kinds.length > 0) model['input'] = Array.from(new Set(kinds));
-  const contextWindow = cleanInt(body['contextWindow']);
-  if (contextWindow) model['contextWindow'] = contextWindow;
-  const maxTokens = cleanInt(body['maxTokens']);
-  if (maxTokens) model['maxTokens'] = maxTokens;
-
   const index = list.findIndex((entry) => entry['id'] === modelId);
+  // The existing raw entry is the merge base: unmodelled fields it carries
+  // (cost, compat, headers, …) survive an edit instead of being dropped.
+  const model = buildModelEntry({ ...body, id: modelId }, index >= 0 ? list[index] : undefined);
+
   if (index >= 0) list[index] = model;
   else list.push(model);
   if (list.length > MAX_MODELS) {

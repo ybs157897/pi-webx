@@ -25,6 +25,8 @@ import {
   upsertModel as upsertModelEntry,
   upsertProvider as upsertProviderEntry,
 } from './models-config';
+import { suggestModelFields } from './model-suggest';
+import type { ModelSuggestResponse } from '../src/shared/models-config';
 import { GitError, checkoutBranch, readGitBranches } from './git';
 import { HostError, PiHost } from './pi/host';
 import {
@@ -183,8 +185,19 @@ export function createApiRouter(manager: PiHost): Router {
     res.json(describeModelConfig());
   });
 
-  router.post('/models-config/discover', async (req: Request, res: Response) => {
+  /**
+   * "Smart configuration": what pi's own bundled catalogue knows about a model
+   * id (context window, output limit, input kinds, reasoning support), so the
+   * editor can fill those from one switch instead of hand-copying numbers.
+   */
+  router.post('/models-config/suggest', (req: Request, res: Response) => {
     const body = isRecord(req.body) ? req.body : {};
+    const modelId = typeof body['modelId'] === 'string' ? body['modelId'] : '';
+    const payload: ModelSuggestResponse = suggestModelFields(modelId);
+    res.json(payload);
+  });
+
+  router.post('/models-config/discover', async (req: Request, res: Response) => {    const body = isRecord(req.body) ? req.body : {};
     try {
       // The base URL is validated at the entry (protocol + literal host) before
       // it flows anywhere; discovery re-validates and DNS-checks at fetch time.

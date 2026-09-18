@@ -50,6 +50,7 @@ import type {
   ModelCatalogFailure,
   ModelCatalogGroup,
 } from '../src/shared/model-catalog';
+import { readCatalogVisibility } from './models-config';
 
 /** A settings write could not be persisted; the client must hear about it. */
 export class ModelCatalogError extends Error {
@@ -172,11 +173,22 @@ export async function buildModelCatalog(runtime: ModelRuntime, cwd: string): Pro
 
   const availableProviders = new Set(available.map((model) => model.provider));
 
+  // The enable toggles are pi-webx's own (`piWebx.enabled`): pi has no such
+  // concept, so honouring them here is what makes the switch real — a disabled
+  // provider or model simply does not appear in any picker.
+  const { disabledProviders, disabledModels } = readCatalogVisibility();
+  const visible = (providerId: string, models: readonly Model<any>[]): Model<any>[] => {
+    const hidden = disabledModels.get(providerId);
+    if (hidden === undefined || hidden.size === 0) return [...models];
+    return models.filter((model) => !hidden.has(model.id));
+  };
+
   for (const providerId of providers) {
     try {
+      if (disabledProviders.has(providerId)) continue;
       // Session-independent by construction: `getModels` is the runtime's own
       // catalogue read and needs neither a session nor an auth round trip.
-      const models = runtime.getModels(providerId) as readonly Model<any>[];
+      const models = visible(providerId, runtime.getModels(providerId) as readonly Model<any>[]);
       if (models.length === 0) continue;
       if (!availableProviders.has(providerId)) continue;
       routable.push(providerId);
@@ -194,7 +206,8 @@ export async function buildModelCatalog(runtime: ModelRuntime, cwd: string): Pro
   if (groups.length === 0) {
     for (const providerId of providers) {
       try {
-        const models = runtime.getModels(providerId) as readonly Model<any>[];
+        if (disabledProviders.has(providerId)) continue;
+        const models = visible(providerId, runtime.getModels(providerId) as readonly Model<any>[]);
         if (models.length > 0) groups.push(groupFor(providerId, models));
       } catch {
         // Already reported above.
