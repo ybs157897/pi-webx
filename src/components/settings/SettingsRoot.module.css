@@ -1,160 +1,147 @@
-.triggerRow {
-  flex: none;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: calc(100% + 4px);
-  margin: 4px -2px;
+/* The settings page, laid out like the reference (ZCode's 模型设置): a rail on
+ * the sidebar fill, a panel one step lighter holding a centered 896px column,
+ * and cards inside it. The `--pi-settings-*` values are the reference's own
+ * light palette; the dark pair comes from the app's bluish ramp so the page
+ * keeps reading as part of pi-webx under the dark theme. */
+
+body {
+  --pi-settings-rail: rgb(240, 240, 240);
+  --pi-settings-surface: rgb(248, 248, 248);
+  --pi-settings-card: rgb(255, 255, 255);
+  --pi-settings-border: rgba(13, 13, 13, 0.1);
+  --pi-settings-border-strong: rgba(13, 13, 13, 0.15);
+  --pi-settings-hover: rgba(13, 13, 13, 0.05);
+  --pi-settings-fg: rgb(38, 38, 38);
+  --pi-settings-fg-subtle: rgba(38, 38, 38, 0.6);
+  --pi-settings-fg-subtlest: rgba(38, 38, 38, 0.4);
+  --pi-settings-brand: rgb(0, 0, 0);
+  --pi-settings-brand-fg: rgb(255, 255, 255);
 }
 
-.triggerRow.railRow {
-  width: 36px;
-  margin: 8px 0 10px;
+body[data-ds-dark-theme] {
+  --pi-settings-rail: var(--dsw-static-neutral-bluish-950);
+  --pi-settings-surface: var(--dsw-static-neutral-bluish-900);
+  --pi-settings-card: var(--dsw-static-neutral-bluish-850);
+  --pi-settings-border: rgba(255, 255, 255, 0.1);
+  --pi-settings-border-strong: rgba(255, 255, 255, 0.18);
+  --pi-settings-hover: rgba(255, 255, 255, 0.08);
+  --pi-settings-fg: var(--dsw-static-neutral-bluish-50);
+  --pi-settings-fg-subtle: rgba(255, 255, 255, 0.6);
+  --pi-settings-fg-subtlest: rgba(255, 255, 255, 0.4);
+  --pi-settings-brand: var(--dsw-static-neutral-bluish-50);
+  --pi-settings-brand-fg: var(--dsw-static-neutral-bluish-1000);
 }
 
-.trigger {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  width: auto;
-  height: 42px;
-  margin: 0;
-  padding: 0 10px 0 8px;
-  box-sizing: border-box;
-  border: none;
-  border-radius: 12px;
-  background: transparent;
-  cursor: pointer;
-  overflow: hidden;
-  color: var(--dsw-alias-label-primary);
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 22px;
-}
-
-.trigger:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* Rail trigger: the same 36x36 circle box as the other rail controls. */
-.trigger.rail {
-  flex: none;
-  width: 36px;
-  height: 36px;
-  margin: 0;
-  justify-content: center;
-  gap: 0;
-  padding: 0;
-  border-radius: 50%;
-  corner-shape: round;
-}
-
-.triggerLabel {
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-/* Full-viewport layer (figma Mask 501:29946 #000@24%): mask tokens match the
-   Modal primitive (--dsw-alias-bg-mask-1 + --dsw-mask-blur). */
-.overlay {
+/* The page replaces the app content while open: same layer, own rail, no mask. */
+.page {
   position: fixed;
   inset: 0;
   z-index: 1000;
   display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.mask {
-  position: absolute;
-  inset: 0;
-  background: var(--dsw-alias-bg-mask-1);
-  backdrop-filter: var(--dsw-mask-blur);
-}
-
-/* Panel (figma Settings 501:29947): r24, white; the figma lv3 effects are
-   superseded by the shared elevation treatment; figma's 1080x700 is shrunk to 800 wide.
-   One height for every section, taken from the viewport rather than the
-   content: sections differ by hundreds of pixels (a settings list against the
-   composition editor), and a content-sized panel would resize under the
-   pointer on every nav click. Whatever does not fit scrolls in `.options`. */
-.panel {
-  position: relative;
-  z-index: 1;
-  display: flex;
-  width: 800px;
-  height: min(800px, calc(100vh - 48px));
-  max-width: calc(100vw - 48px);
-  border-radius: 32px;
+  background: var(--pi-settings-rail);
   overflow: hidden;
-  background: var(--dsw-alias-bg-layer-2);
-  box-shadow: var(--dsw-elevation-prominent);
-  /* Elevated surface: the scrollbar thumb takes the l2 elevation tokens.
-     Declared on the panel rather than the scrolling `.options` child so the
-     elevation choice sits with the surface; the custom properties inherit
-     down to whichever descendant scrolls (see ui-theme
-     styles/scrollbar.css for the rebinding contract). */
-  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
-  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
 }
 
-/* Nav rail (figma .Setting-nav 501:29958): 188 wide, pad (12,22,12,0),
-   gap 18, no own fill — the panel white shows through. */
-.nav {
+/* ---------------------------------------------------------------- nav rail */
+
+.rail {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  width: 188px;
-  padding: 22px 12px 0;
-  box-sizing: border-box;
+  width: 256px;
+  overflow: hidden;
 }
 
-/* Title row (figma 501:29959): 16/500 lh24, 12px side padding. */
-.navTitle {
-  padding: 0 12px;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
+/* The reference keeps a 48px strip above the back row — window chrome in the
+   desktop app, and the rhythm the panel header lines up with here. */
+.railTop {
+  flex: none;
+  height: 48px;
 }
 
-/* Cell stack (figma 501:29961): gap 4. */
-.navList {
+.railBack {
+  flex: none;
+  padding: 12px 8px;
+}
+
+.backRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--pi-settings-fg-subtle);
+  font: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.backRow:hover {
+  background: var(--pi-settings-hover);
+  color: var(--pi-settings-fg);
+}
+
+.railNav {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 0 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.navGroup {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
-/* Nav cell (figma .Setting-nav-cell 501:29962): 164x40, r12, pad
-   (12,9,16,9), gap 8; label 14/400 lh22; selected fill #EBEEF2. */
+.navGroupLabel {
+  padding: 0 10px 4px;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 500;
+  color: var(--pi-settings-fg-subtlest);
+}
+
+.navGroupList {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .navCell {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 40px;
-  padding: 9px 16px 9px 12px;
-  box-sizing: border-box;
+  height: 32px;
+  padding: 0 10px;
   border: none;
   border-radius: 12px;
   background: transparent;
-  cursor: pointer;
-  font-family: inherit;
+  color: var(--pi-settings-fg-subtle);
+  font: inherit;
   font-size: 14px;
   line-height: 22px;
-  font-weight: 400;
-  color: var(--dsw-alias-label-primary);
   text-align: left;
+  cursor: pointer;
 }
 
 .navCell:hover {
-  background: var(--dsw-specific-sidebar-nav-item-hover);
+  background: var(--pi-settings-hover);
+  color: var(--pi-settings-fg);
 }
 
-.navCell.active {
-  background: var(--dsw-specific-sidebar-nav-item-active);
+.navCellActive {
+  background: var(--pi-settings-hover);
+  color: var(--pi-settings-fg);
 }
 
 .navIcon {
@@ -169,102 +156,64 @@
   text-overflow: ellipsis;
 }
 
-/* Content column (figma Content 501:29980): header + options. */
-.content {
+/* ------------------------------------------------------------ content panel */
+
+/* Flush against the rail, inset on the other three sides: that inset is what
+   makes the panel read as a surface laid into the window, as in the reference. */
+.contentFrame {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  padding: 4px 4px 4px 0;
 }
 
-/* Header (figma .Header 501:29981): h54, pad (10,20,14,8), close right. */
-.header {
-  flex: none;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 8px;
-  height: 54px;
-  padding: 20px 14px 8px 10px;
-  box-sizing: border-box;
-}
-
-.actions {
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-left: auto;
-}
-
-/* Close button (figma .Icon_container 501:29982): 28x28, r28, 14px glyph. */
-.close {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  border: none;
-  border-radius: 28px;
-  background: transparent;
-  cursor: pointer;
-  color: var(--dsw-alias-label-primary);
-}
-
-.close:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-}
-
-/* Options area (figma Options 501:29983): pad (24,0,24,24), scrolls. */
-.options {
+.panel {
   flex: 1;
   min-height: 0;
-  padding: 0 24px 24px;
+  display: flex;
+  flex-direction: column;
+  background: var(--pi-settings-surface);
+  border: 1px solid var(--pi-settings-border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.panelHeader {
+  flex: none;
+  height: 48px;
+}
+
+.panelBody {
+  flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
-/* Visually-hidden text seat (close button accessible name from slot content). */
-.hiddenLabel {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
-}
-
-/* --------------------------------------------------------------- full page */
-
-/* The page replaces the app content while open: same layer, own rail, no mask. */
-.page {
-  position: fixed;
-  inset: 0;
-  z-index: 1000;
+/* The centered column: 896px including its 32px gutters, so section content
+   lines up at 832px — the card width in the reference. */
+.column {
+  width: 100%;
+  max-width: 896px;
+  margin: 0 auto;
+  padding: 0 32px 40px;
   display: flex;
-  background: var(--dsw-alias-bg-layer-2);
-  overflow: hidden;
+  flex-direction: column;
+  gap: 32px;
 }
 
-.backRow {
+.pageTitle {
+  margin: 0;
+  font-size: 30px;
+  line-height: 36px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--pi-settings-fg);
+}
+
+.sectionBody {
   display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 12px;
-  padding: 6px 8px;
-  border: none;
-  border-radius: 10px;
-  background: transparent;
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  line-height: 20px;
-  color: var(--dsw-alias-label-secondary);
-  text-align: left;
-}
-
-.backRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
-  color: var(--dsw-alias-label-primary);
+  flex-direction: column;
+  gap: 32px;
 }

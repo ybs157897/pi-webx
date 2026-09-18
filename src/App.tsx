@@ -919,7 +919,9 @@ function Shell({
         sections={[
           {
             id: 'general',
-            label: '通用设置',
+            label: '常规',
+            group: '基础设置',
+            title: '通用设置',
             render: () => (
               <GeneralSettings
                 themeMode={themePreference}
@@ -929,10 +931,18 @@ function Shell({
               />
             ),
           },
-          { id: 'models', label: '模型', render: () => <ModelsSection /> },
+          {
+            id: 'models',
+            label: '模型设置',
+            group: '基础设置',
+            title: '模型设置',
+            render: () => <ModelsSection />,
+          },
           {
             id: 'showcase',
             label: '组件库',
+            group: '更多',
+            title: '组件库',
             render: () => <UiShowcase onAction={sendAction} themeMode={themeMode} />,
           },
         ]}

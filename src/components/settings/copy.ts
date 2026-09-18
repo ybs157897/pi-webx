@@ -6,7 +6,7 @@
 
 export const copy = {
   title: '模型',
-  intro: '填入各提供方的 API 密钥即可使用其模型。',
+  intro: '管理自定义模型供应商，配置后可在聊天时选择使用。',
   loadFailed: '加载失败',
   retry: '重试',
   savedProvider: '已保存 {provider}',
@@ -82,6 +82,7 @@ export const copy = {
   fetchAdopt: '添加所选',
   add: '添加提供方',
   addCustom: '添加自定义提供方',
+  refresh: '刷新',
   provider: '提供方',
   keyReplacePlaceholder: '已配置——输入新值可替换',
   delete: '删除',

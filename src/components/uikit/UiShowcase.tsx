@@ -202,13 +202,10 @@ export function UiShowcase({
   );
 
   return (
-    <Flexbox gap={20} style={{ padding: '20px 24px', overflowY: 'auto', height: '100%' }}>
+    <Flexbox gap={20}>
       <Flexbox horizontal align="flex-start" justify="space-between" gap={12} wrap="wrap">
         <Flexbox gap={4} style={{ minWidth: 0 }}>
-          <Text fontSize={16} weight={600}>
-            组件库
-          </Text>
-          <Text fontSize={12} type="secondary">
+          <Text fontSize={14} type="secondary">
             同一份声明式规格，分别用我们的组件渲染器和 TokUI 渲染。共 {SECTIONS.length} 组示例。
           </Text>
         </Flexbox>

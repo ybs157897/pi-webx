@@ -6,24 +6,32 @@
 .section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-width: 720px;
-  color: var(--dsw-alias-label-primary);
+  gap: 16px;
+  color: var(--pi-settings-fg);
 }
 
-.title {
-  margin: 0;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-primary);
+/* Section lead (figma .Header row): the description, and the section's own
+   actions pushed to the trailing edge. */
+.lead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.leadActions {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
 }
 
 .intro {
   margin: 0;
   font-size: 14px;
-  line-height: 22px;
-  color: var(--dsw-alias-label-tertiary);
+  line-height: 24px;
+  color: var(--pi-settings-fg-subtle);
 }
 
 .notice {
@@ -42,8 +50,7 @@
 
 .rows {
   list-style: none;
-  /* Extra air between the title/intro block and the first provider card. */
-  margin: 12px 0 0;
+  margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
@@ -53,8 +60,9 @@
 /* A configured provider: outlined on the panel fill, so the filled editor
    card it expands into reads as the nested object. */
 .rowCard {
-  border: 0.5px solid var(--dsw-alias-border-l4);
-  border-radius: 16px;
+  border: 1px solid var(--pi-settings-border);
+  border-radius: 12px;
+  background: var(--pi-settings-card);
   padding: 12px 14px;
   display: flex;
   flex-direction: column;
@@ -68,6 +76,7 @@
 }
 
 .rowIdentity {
+  flex: 1;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -75,10 +84,14 @@
 }
 
 .rowName {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 14px;
   line-height: 22px;
   font-weight: 500;
-  color: var(--dsw-alias-label-primary);
+  color: var(--pi-settings-fg);
 }
 
 /* Reads as an annotation on the name, not as a second name: caption size and
@@ -88,11 +101,11 @@
 .rowTag {
   flex: none;
   padding: 1px 6px;
-  border: 0.5px solid var(--dsw-alias-border-l3);
+  border: 1px solid var(--pi-settings-border);
   border-radius: 4px;
   font-size: 11px;
   line-height: 16px;
-  color: var(--dsw-alias-label-secondary);
+  color: var(--pi-settings-fg-subtle);
 }
 
 .credentialDot {
@@ -124,46 +137,42 @@
    so without it the outlined variants stand 2px taller than the filled ones
    they sit beside (Cancel next to Apply, Edit next to Delete). */
 .primaryButton,
-.secondaryButton,
-.addButton {
+.secondaryButton {
   box-sizing: border-box;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  height: 36px;
-  padding: 0 14px;
+  height: 28px;
+  padding: 0 10px;
   border: none;
-  border-radius: 18px;
+  border-radius: 8px;
   font: inherit;
   font-size: 14px;
   line-height: 22px;
   cursor: pointer;
 }
 
+/* The reference's primary: brand fill, 80% of it on hover (the fill shows
+   through the panel beneath). */
 .primaryButton {
-  background: var(--dsw-alias-button-primary-fill);
-  color: var(--dsw-alias-label-primary-foreground);
+  background: var(--pi-settings-brand);
+  color: var(--pi-settings-brand-fg);
 }
 
 .primaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-button-primary-hover);
+  background: color-mix(in srgb, var(--pi-settings-brand) 80%, transparent);
 }
 
-.secondaryButton,
-.addButton {
-  border: 0.5px solid var(--dsw-alias-border-l3);
+.secondaryButton {
+  border: 1px solid var(--pi-settings-border);
   background: transparent;
-  color: var(--dsw-alias-label-primary);
-}
-
-.secondaryButton:hover:not(:disabled),
-.addButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover);
+  color: var(--pi-settings-fg);
 }
 
 .secondaryButton:hover:not(:disabled) {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  border-color: var(--pi-settings-border-strong);
+  background: color-mix(in srgb, var(--pi-settings-card) 50%, transparent);
 }
 
 .dangerButton {
@@ -171,10 +180,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 36px;
-  padding: 0 14px;
+  height: 28px;
+  padding: 0 10px;
   border: none;
-  border-radius: 18px;
+  border-radius: 8px;
   background: transparent;
   color: var(--dsw-alias-state-error-primary);
   font: inherit;
@@ -187,20 +196,9 @@
   background: var(--dsw-alias-interactive-bg-hover-danger);
 }
 
-/* Provider-row controls take the dense capsule (Button `.sm`). */
-.rowActions .secondaryButton,
-.rowActions .dangerButton {
-  height: 28px;
-  padding: 0 10px;
-  border-radius: 14px;
-  font-size: 12px;
-  line-height: 18px;
-}
-
 .primaryButton:disabled,
 .secondaryButton:disabled,
 .dangerButton:disabled,
-.addButton:disabled,
 .linkButton:disabled,
 .addModelButton:disabled {
   opacity: 0.4;
@@ -210,7 +208,6 @@
 .primaryButton:focus-visible,
 .secondaryButton:focus-visible,
 .dangerButton:focus-visible,
-.addButton:focus-visible,
 .linkButton:focus-visible,
 .addModelButton:focus-visible,
 .iconButton:focus-visible,
@@ -219,15 +216,12 @@
   box-shadow: 0 0 0 2px var(--dsw-alias-border-l3);
 }
 
-/* Editing surface: a filled module on the panel, matching the settings
-   selector fill rather than adding another outline inside the row. */
+/* Editing surface: the detail column itself is the card, so the editor is a
+   plain stack — no second fill inside the pane. */
 .editor {
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
-  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
 }
 
 .editorHeader {
@@ -252,17 +246,16 @@
 .field {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 4px;
 }
 
 .fieldLabel {
   display: inline-flex;
   align-items: center;
   gap: 10px;
-  font-size: 12px;
-  line-height: 18px;
-  font-weight: 500;
-  color: var(--dsw-alias-label-secondary);
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--pi-settings-fg-subtle);
 }
 
 .linkButton {
@@ -299,50 +292,14 @@
   gap: 8px;
 }
 
-.addBlock {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-/* The two ways to gain a provider, as equal siblings spanning the same width
-   as the rows above. Wraps rather than shrinking below a legible label. */
-.addActions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.addButton {
-  /* Overrides the shared button base above: these two are not pills sitting in
-     a footer but the last slot of the provider list, so they split the row
-     evenly and repeat the row cards' corner. Dashed, like every other "nothing
-     here yet" affordance on this page, to read as a place rather than a
-     command. */
-  flex: 1 1 0;
-  min-width: 180px;
-  gap: 6px;
-  height: 44px;
-  border: 1px dashed var(--dsw-alias-border-l3);
-  border-radius: 16px;
-}
-
+/* The add flows render in the same detail column as an editor, so they carry
+   no chrome of their own. */
 .addCard,
 .setupCard {
-  border-radius: 12px;
-  background: var(--dsw-alias-bg-module-platform);
-  padding: 14px 16px;
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 16px;
   list-style: none;
-}
-
-/* Nested in a card that already carries the module chrome. */
-.addCard .editor,
-.setupCard .editor {
-  background: none;
-  padding: 0;
 }
 
 .customized {
@@ -563,13 +520,13 @@
   width: 100%;
   height: 32px;
   padding: 0 10px;
-  border: 0.5px solid var(--dsw-alias-border-l4);
+  border: 1px solid var(--pi-settings-border);
   border-radius: 8px;
   font: inherit;
   font-size: 14px;
   line-height: 22px;
-  background: var(--dsw-alias-bg-layer-1);
-  color: var(--dsw-alias-label-primary);
+  background: var(--pi-settings-card);
+  color: var(--pi-settings-fg);
 }
 
 /* Enum pickers hold a handful of short options; a field-width dropdown reads
@@ -708,31 +665,57 @@ select.input {
 
 /* ---------------------------------------------------- list + detail panes */
 
+/* The two-pane card (figma .Setting-card): border, 12px corners, a 224px list
+   column ruled off from the detail column, and the reference's 576px minimum so
+   a short list still reads as a panel rather than a stray box. */
 .panes {
-  display: flex;
-  gap: 16px;
-  align-items: flex-start;
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 576px;
+  border: 1px solid var(--pi-settings-border);
+  border-radius: 12px;
+  background: var(--pi-settings-card);
+  overflow: clip;
 }
 
 .listPane {
-  flex: none;
-  width: 232px;
+  min-width: 0;
+  padding: 8px;
+  border-right: 1px solid var(--pi-settings-border);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 12px;
 }
 
 .detailPane {
-  flex: 1;
   min-width: 0;
+  padding: 24px 24px 96px;
+}
+
+.listGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.listGroupHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 28px;
+  padding: 0 8px;
 }
 
 .listGroupLabel {
-  margin: 8px 0 2px;
-  padding: 0 8px;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   font-size: 12px;
   line-height: 18px;
-  color: var(--dsw-alias-label-tertiary);
+  font-weight: 600;
+  color: var(--pi-settings-fg-subtlest);
 }
 
 .list {
@@ -741,39 +724,44 @@ select.input {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
+/* A provider row (figma .Setting-list-cell): a 32px bordered cell; the border
+   is the selection, idle rows only gain one on hover. */
 .listRow {
+  box-sizing: border-box;
   width: 100%;
+  height: 32px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  padding: 8px 10px;
-  border: none;
-  border-radius: 10px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 8px;
   background: transparent;
-  color: var(--dsw-alias-label-primary);
+  color: var(--pi-settings-fg);
   font: inherit;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 500;
   text-align: left;
   cursor: pointer;
 }
 
 .listRow:hover {
-  background: var(--dsw-alias-interactive-bg-hover);
+  border-color: color-mix(in srgb, var(--pi-settings-border-strong) 60%, transparent);
 }
 
 .listRowActive {
-  background: var(--dsw-alias-interactive-bg-hover-solid);
+  border-color: var(--pi-settings-border-strong);
+  background: var(--pi-settings-card);
 }
 
 .emptyHint {
   margin: 0;
-  padding: 24px 12px;
-  font-size: 13px;
-  color: var(--dsw-alias-label-tertiary);
+  padding: 24px 0;
+  font-size: 14px;
+  color: var(--pi-settings-fg-subtlest);
 }
 
 /* ---------------------------------------------------- model rows (reference) */
@@ -830,6 +818,62 @@ select.input {
 .headerToggle {
   display: inline-flex;
   align-items: center;
+}
+
+/* Toggles. The app ships no global switch, so the native checkbox is redrawn
+   here as the reference's 29x16 pill: an outlined track with a filled knob at
+   the leading edge, filling in when checked. */
+.headerToggle input[role='switch'],
+.modelRowToggle input[role='switch'],
+.modalSwitchRow input[role='switch'] {
+  appearance: none;
+  box-sizing: border-box;
+  position: relative;
+  flex: none;
+  width: 29px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--pi-settings-border-strong);
+  border-radius: 999px;
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+.headerToggle input[role='switch']::before,
+.modelRowToggle input[role='switch']::before,
+.modalSwitchRow input[role='switch']::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  margin-top: -6px;
+  border-radius: 50%;
+  background: var(--pi-settings-fg);
+  transition: transform 120ms ease, background-color 120ms ease;
+}
+
+.headerToggle input[role='switch']:checked,
+.modelRowToggle input[role='switch']:checked,
+.modalSwitchRow input[role='switch']:checked {
+  border-color: var(--pi-settings-brand);
+  background: var(--pi-settings-brand);
+}
+
+.headerToggle input[role='switch']:checked::before,
+.modelRowToggle input[role='switch']:checked::before,
+.modalSwitchRow input[role='switch']:checked::before {
+  transform: translateX(13px);
+  background: var(--pi-settings-brand-fg);
+}
+
+.headerToggle input[role='switch']:disabled,
+.modelRowToggle input[role='switch']:disabled,
+.modalSwitchRow input[role='switch']:disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 /* ---------------------------------------------------- model editor modal */

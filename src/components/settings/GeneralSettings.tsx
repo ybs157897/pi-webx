@@ -90,7 +90,6 @@ export function GeneralSettings({
 }): ReactNode {
   return (
     <div className={styles['section']}>
-      <h2 className={styles['title']}>{t('generalTitle')}</h2>
       <p className={styles['intro']}>{t('generalIntro')}</p>
       <ul className={styles['rows']}>
         <SettingRow title={t('appearance')} description={t('appearanceHint')}>

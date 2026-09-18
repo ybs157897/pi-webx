@@ -9,10 +9,15 @@
  * refetched; a provider removal still requires confirmation.
  */
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ModelConfigResponse, ProviderView } from '../../shared/models-config'
-import { Button, IconPlusOutline16, Modal } from '../../ui/primitives/index.ts'
+import {
+  Button,
+  IconPlusOutline16,
+  IconRefreshOutline16,
+  Modal,
+} from '../../ui/primitives/index.ts'
 import { errorMessage, modelsConfigApi, sortedProviders } from '../../lib/modelsConfig'
 import {
   AddProviderCard,
@@ -63,18 +68,23 @@ export function ModelsSection(): ReactNode {
   /** Same, for the catalog half (`undefined` = follow the default). */
   const [selectedCatalogId, setSelectedCatalogId] = useState<string | undefined>(undefined)
 
-  useEffect(() => {
-    let stale = false
-    void modelsConfigApi.read().then(
-      (next) => { if (!stale) setConfig(next) },
-      (error) => { if (!stale) setLoadError(errorMessage(error)) },
-    ).finally(() => { if (!stale) setLoading(false) })
-    void providersApi.list().then(
-      (next) => { if (!stale) setCatalogProviders(next.providers) },
-      (error: unknown) => { if (!stale) setCatalogError(errorMessage(error)) },
-    )
-    return () => { stale = true }
+  /** Read both halves of the list: the declared providers and the catalog. */
+  const load = useCallback(async (): Promise<void> => {
+    setLoading(true)
+    await Promise.all([
+      modelsConfigApi.read().then(
+        (next) => { setConfig(next); setLoadError(undefined) },
+        (error: unknown) => { setLoadError(errorMessage(error)) },
+      ),
+      providersApi.list().then(
+        (next) => { setCatalogProviders(next.providers); setCatalogError(undefined) },
+        (error: unknown) => { setCatalogError(errorMessage(error)) },
+      ),
+    ])
+    setLoading(false)
   }, [])
+
+  useEffect(() => { void load() }, [load])
 
   /** A card closed: adopt the fresh config and announce a write. */
   const closeCard = (
@@ -116,18 +126,7 @@ export function ModelsSection(): ReactNode {
     return (
       <div className={styles['section']}>
         <p className={styles['error']}>{`${t('loadFailed')}：${loadError}`}</p>
-        <button
-          type="button"
-          className={styles['secondaryButton']}
-          onClick={() => {
-            setLoadError(undefined)
-            setLoading(true)
-            void modelsConfigApi.read().then(
-              (next) => setConfig(next),
-              (error) => setLoadError(errorMessage(error)),
-            ).finally(() => { setLoading(false) })
-          }}
-        >
+        <button type="button" className={styles['secondaryButton']} onClick={() => void load()}>
           {t('retry')}
         </button>
       </div>
@@ -206,8 +205,32 @@ export function ModelsSection(): ReactNode {
 
   return (
     <div className={styles['section']}>
-      <h2 className={styles['title']}>{t('title')}</h2>
-      <p className={styles['intro']}>{t('intro')}</p>
+      <div className={styles['lead']}>
+        <p className={styles['intro']}>{t('intro')}</p>
+        <div className={styles['leadActions']}>
+          <button
+            type="button"
+            className={styles['iconButton']}
+            aria-label={t('refresh')}
+            title={t('refresh')}
+            disabled={loading}
+            onClick={() => void load()}
+          >
+            <IconRefreshOutline16 size={14} />
+          </button>
+          <button
+            type="button"
+            className={styles['primaryButton']}
+            onClick={() => {
+              setSavedTarget(undefined)
+              setAddFlow('catalog')
+            }}
+          >
+            <IconPlusOutline16 size={14} />
+            {t('add')}
+          </button>
+        </div>
+      </div>
       {loading ? <p className={styles['intro']}>{t('loading')}</p> : null}
       {savedIdentity === undefined
         ? null
@@ -220,8 +243,10 @@ export function ModelsSection(): ReactNode {
       <div className={styles['panes']}>
         <aside className={styles['listPane']} aria-label={t('providerList')}>
           {catalogRows.length > 0 || catalogError !== undefined ? (
-            <>
-              <div className={styles['listGroupLabel']}>{t('groupCatalog')}</div>
+            <div className={styles['listGroup']}>
+              <div className={styles['listGroupHead']}>
+                <span className={styles['listGroupLabel']}>{t('groupCatalog')}</span>
+              </div>
               <CatalogProviders
                 providers={catalogProviders}
                 loadError={catalogError}
@@ -232,9 +257,24 @@ export function ModelsSection(): ReactNode {
                   setSelectedId(undefined)
                 }}
               />
-            </>
+            </div>
           ) : null}
-          <div className={styles['listGroupLabel']}>{t('groupCustom')}</div>
+          <div className={styles['listGroup']}>
+            <div className={styles['listGroupHead']}>
+              <span className={styles['listGroupLabel']}>{t('groupCustom')}</span>
+              <button
+                type="button"
+                className={styles['iconButton']}
+                aria-label={t('addCustom')}
+                title={t('addCustom')}
+                onClick={() => {
+                  setSavedTarget(undefined)
+                  setAddFlow('custom')
+                }}
+              >
+                <IconPlusOutline16 size={14} />
+              </button>
+            </div>
           <ul className={styles['list']}>
             {providers.map((provider) => (
               <li key={provider.id}>
@@ -274,28 +314,6 @@ export function ModelsSection(): ReactNode {
               </li>
             ))}
           </ul>
-          <div className={styles['addActions']}>
-            <button
-              type="button"
-              className={styles['addButton']}
-              onClick={() => {
-                setSavedTarget(undefined)
-                setAddFlow('catalog')
-              }}
-            >
-              {t('add')}
-            </button>
-            <button
-              type="button"
-              className={styles['addButton']}
-              onClick={() => {
-                setSavedTarget(undefined)
-                setAddFlow('custom')
-              }}
-            >
-              <IconPlusOutline16 size={14} />
-              {t('addCustom')}
-            </button>
           </div>
         </aside>
         <div className={styles['detailPane']}>{pane}</div>

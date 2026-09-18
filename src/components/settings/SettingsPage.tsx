@@ -1,15 +1,17 @@
 /**
  * The settings page — the reference's layout: a full-layer page with its own
- * nav rail on the left and the section content on the right. It replaces the
- * app's content while open (no mask, no floating panel), so working in
- * settings is working in the app, not above it.
+ * nav rail on the left and, to its right, a panel holding the section in a
+ * centered column under a large title. It replaces the app's content while
+ * open (no mask, no floating panel), so working in settings is working in the
+ * app, not above it.
  *
- * Sections arrive as props instead of through registrant slots. Paths back:
- * the 返回工作区 nav row at the top and Escape (mounted only while open, so
- * the listener lifetime is the page's).
+ * Sections arrive as props instead of through registrant slots, grouped by the
+ * order their `group` first appears. Paths back: the 返回工作区 rail row at the
+ * top and Escape (mounted only while open, so the listener lifetime is the
+ * page's).
  */
 
-import { useEffect, useId, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 import {
@@ -23,9 +25,13 @@ import css from './SettingsRoot.module.css'
 export interface SettingsSection {
   /** Section id; picks the nav glyph. */
   id: string
-  /** Nav label. */
+  /** Nav cell label. */
   label: string
-  /** Render the section's content column. */
+  /** Nav group the cell sits under; groups render in first-appearance order. */
+  group?: string
+  /** Page title above the section content. */
+  title: string
+  /** Render the section: content column of the centered page column. */
   render: () => ReactNode
 }
 
@@ -45,6 +51,18 @@ function navIcon(id: string): ReactNode {
   return <IconSettingsOutline16 className={css.navIcon} size={16} />
 }
 
+/** The sections grouped for the rail, in first-appearance order. */
+function navGroups(sections: readonly SettingsSection[]): { label: string; items: SettingsSection[] }[] {
+  const groups: { label: string; items: SettingsSection[] }[] = []
+  for (const section of sections) {
+    const label = section.group ?? ''
+    const group = groups.find(candidate => candidate.label === label)
+    if (group === undefined) groups.push({ label, items: [section] })
+    else group.items.push(section)
+  }
+  return groups
+}
+
 /**
  * Render the settings page.
  * @param props - open state, back contract, and sections.
@@ -52,7 +70,6 @@ function navIcon(id: string): ReactNode {
  */
 export function SettingsPage({ open, onClose, sections }: SettingsPageProps): ReactNode {
   const [activeId, setActiveId] = useState<string | undefined>(undefined)
-  const titleId = useId()
 
   /* The back contract arrives as an inline callback, so its identity changes on
      every parent render — and the app re-renders on its session poll. Reading it
@@ -60,7 +77,7 @@ export function SettingsPage({ open, onClose, sections }: SettingsPageProps): Re
      `onClose` would re-run on every poll, and re-running means resetting the
      active section back to the first row. */
   const closeRef = useRef(onClose)
-  useEffect(() => { closeRef.current = onClose })
+  closeRef.current = onClose
 
   useEffect(() => {
     if (!open) return
@@ -76,36 +93,51 @@ export function SettingsPage({ open, onClose, sections }: SettingsPageProps): Re
 
   // Entries can unmount underneath the requested id, so the render-time
   // projection falls back to the first row when the id is gone.
-  const active = sections.find(section => section.id === activeId)?.id ?? sections[0]?.id
+  const active = sections.find(section => section.id === activeId) ?? sections[0]
 
   return (
     <div className={css.page} role="region" aria-label="设置">
-      <nav className={css.nav}>
-        <button type="button" className={css.backRow} onClick={onClose}>
-          <IconChevronLeftOutline14 />
-          <span>返回工作区</span>
-        </button>
-        <div className={css.navTitle} id={titleId}>设置</div>
-        <div className={css.navList}>
-          {sections.map(section => (
-            <button
-              key={section.id}
-              type="button"
-              className={clsx(css.navCell, section.id === active && css.active)}
-              aria-current={section.id === active ? 'true' : undefined}
-              onClick={() => { setActiveId(section.id) }}
-            >
-              {navIcon(section.id)}
-              <span className={css.navLabel}>{section.label}</span>
-            </button>
+      <aside className={css.rail}>
+        <div className={css.railTop} aria-hidden="true" />
+        <div className={css.railBack}>
+          <button type="button" className={css.backRow} onClick={onClose}>
+            <IconChevronLeftOutline14 size={16} />
+            <span>返回工作区</span>
+          </button>
+        </div>
+        <nav className={css.railNav} aria-label="设置导航">
+          {navGroups(sections).map(group => (
+            <div className={css.navGroup} key={group.label} role="group" aria-label={group.label}>
+              {group.label === '' ? null : <div className={css.navGroupLabel}>{group.label}</div>}
+              <div className={css.navGroupList}>
+                {group.items.map(section => (
+                  <button
+                    key={section.id}
+                    type="button"
+                    className={clsx(css.navCell, section.id === active?.id && css.navCellActive)}
+                    aria-current={section.id === active?.id ? 'page' : undefined}
+                    onClick={() => { setActiveId(section.id) }}
+                  >
+                    {navIcon(section.id)}
+                    <span className={css.navLabel}>{section.label}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
+        </nav>
+      </aside>
+      <section className={css.contentFrame}>
+        <div className={css.panel}>
+          <div className={css.panelHeader} aria-hidden="true" />
+          <main className={css.panelBody}>
+            <div className={css.column}>
+              <h2 className={css.pageTitle}>{active?.title}</h2>
+              <div className={css.sectionBody}>{active?.render()}</div>
+            </div>
+          </main>
         </div>
-      </nav>
-      <div className={css.content}>
-        <div className={css.options}>
-          {active !== undefined && sections.find(section => section.id === active)?.render()}
-        </div>
-      </div>
+      </section>
     </div>
   )
 }
