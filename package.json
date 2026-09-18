@@ -16,7 +16,6 @@
     "@earendil-works/pi-ai": "^0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
     "@jboltai/tokui": "^0.2.6",
-    "@jboltai/tokui-react": "^0.2.6",
     "@lobehub/fluent-emoji": "^4.1.1",
     "@lobehub/icons": "^5.18.0",
     "@lobehub/ui": "^5.47.1",

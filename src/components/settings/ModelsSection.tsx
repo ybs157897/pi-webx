@@ -14,6 +14,9 @@ import type { ReactNode } from 'react'
 import type { ModelConfigResponse, ProviderView } from '../../shared/models-config'
 import { Button, IconPlusOutline16, Modal } from '../../ui/primitives/index.ts'
 import { errorMessage, modelsConfigApi, sortedProviders } from '../../lib/modelsConfig'
+import { AddProviderCard, CatalogProviders } from './CatalogProviders.tsx'
+import { providersApi } from '../../lib/providers'
+import type { ProviderView as CatalogProviderView } from '../../shared/providers'
 import { providerCopy, t } from './copy.ts'
 import { CustomProviderCard } from './CustomProviderCard.tsx'
 import { ProviderEditor } from './ProviderEditor.tsx'
@@ -48,6 +51,11 @@ export function ModelsSection(): ReactNode {
   const [deleting, setDeleting] = useState(false)
   const [deleteFailure, setDeleteFailure] = useState<string | undefined>(undefined)
   const [savedTarget, setSavedTarget] = useState<ProviderIdentity | undefined>(undefined)
+  /** The catalog half of the list; owned here because both add flows write to it. */
+  const [catalogProviders, setCatalogProviders] = useState<CatalogProviderView[] | undefined>(undefined)
+  const [catalogError, setCatalogError] = useState<string | undefined>(undefined)
+  /** `'catalog'` opens 添加提供方, `'custom'` opens 添加自定义提供方, `undefined` neither. */
+  const [addFlow, setAddFlow] = useState<'catalog' | 'custom' | undefined>(undefined)
 
   useEffect(() => {
     let stale = false
@@ -55,6 +63,10 @@ export function ModelsSection(): ReactNode {
       (next) => { if (!stale) setConfig(next) },
       (error) => { if (!stale) setLoadError(errorMessage(error)) },
     ).finally(() => { if (!stale) setLoading(false) })
+    void providersApi.list().then(
+      (next) => { if (!stale) setCatalogProviders(next.providers) },
+      (error: unknown) => { if (!stale) setCatalogError(errorMessage(error)) },
+    )
     return () => { stale = true }
   }, [])
 
@@ -124,10 +136,8 @@ export function ModelsSection(): ReactNode {
   return (
     <div className={styles['section']}>
       <h2 className={styles['title']}>{t('title')}</h2>
-      <p className={styles['intro']}>
-        {config === undefined ? t('intro') : `${t('intro')}（${config.path}）`}
-      </p>
-      {loading ? <p className={styles['intro']}>正在加载…</p> : null}
+      <p className={styles['intro']}>{t('intro')}</p>
+      {loading ? <p className={styles['intro']}>{t('loading')}</p> : null}
       {savedIdentity === undefined
         ? null
         : (
@@ -135,6 +145,14 @@ export function ModelsSection(): ReactNode {
             {providerCopy(t('savedProvider'), savedIdentity)}
           </p>
         )}
+      {/* One list, split by ownership the way dsh splits a catalog route from a
+          declared one: the catalog half edits a credential, the declared half
+          (below) owns a whole `models.json` profile. */}
+      <CatalogProviders
+        providers={catalogProviders}
+        loadError={catalogError}
+        onWritten={setCatalogProviders}
+      />
       <ul className={styles['rows']}>
         {providers.map((provider) => {
           const open = !adding && editing?.id === provider.id
@@ -143,6 +161,9 @@ export function ModelsSection(): ReactNode {
               <div className={styles['rowHead']}>
                 <span className={styles['rowIdentity']}>
                   <span className={styles['rowName']}>{provider.name ?? provider.id}</span>
+                  {/* dsh tags the routes a user declared so they read differently
+                      from the ones the catalogue already knows. */}
+                  <span className={styles['rowTag']}>{t('customTag')}</span>
                   {provider.apiKey.has
                     ? (
                       <span
@@ -206,32 +227,49 @@ export function ModelsSection(): ReactNode {
         })}
       </ul>
       <div className={styles['addBlock']}>
-        {adding || firstRun
-          ? (
-            <div className={styles['addCard']}>
-              <CustomProviderCard
-                taken={providers.map(provider => provider.id)}
-                onClose={(changed, nextConfig, createdId) => {
-                  closeCard(changed, nextConfig, { id: createdId ?? '' })
-                }}
-              />
-            </div>
-          )
-          : (
-            <div className={styles['addActions']}>
-              <button
-                type="button"
-                className={styles['addButton']}
-                onClick={() => {
-                  setSavedTarget(undefined)
-                  setAdding(true)
-                }}
-              >
-                <IconPlusOutline16 size={14} />
-                {t('add')}
-              </button>
-            </div>
-          )}
+        {addFlow === 'catalog' ? (
+          <div className={styles['addCard']}>
+            <AddProviderCard
+              providers={catalogProviders ?? []}
+              onWritten={setCatalogProviders}
+              onClose={() => { setAddFlow(undefined) }}
+            />
+          </div>
+        ) : addFlow === 'custom' || firstRun ? (
+          <div className={styles['addCard']}>
+            <CustomProviderCard
+              taken={providers.map(provider => provider.id)}
+              onClose={(changed, nextConfig, createdId) => {
+                closeCard(changed, nextConfig, { id: createdId ?? '' })
+                setAddFlow(undefined)
+              }}
+            />
+          </div>
+        ) : (
+          <div className={styles['addActions']}>
+            <button
+              type="button"
+              className={styles['addButton']}
+              onClick={() => {
+                setSavedTarget(undefined)
+                setAddFlow('catalog')
+              }}
+            >
+              {t('add')}
+            </button>
+            <button
+              type="button"
+              className={styles['addButton']}
+              onClick={() => {
+                setSavedTarget(undefined)
+                setAddFlow('custom')
+              }}
+            >
+              <IconPlusOutline16 size={14} />
+              {t('addCustom')}
+            </button>
+          </div>
+        )}
       </div>
       <Modal
         open={deleteTarget !== undefined}

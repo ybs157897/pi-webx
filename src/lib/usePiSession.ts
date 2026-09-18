@@ -21,6 +21,8 @@ import type {
   PiSessionStats,
   PiSlashCommand,
   PiThinkingLevel,
+  PiToolInfo,
+  PiToolsPayload,
   ServerFrame,
 } from '../shared/protocol';
 import { PI_DIALOG_METHODS } from '../shared/protocol';
@@ -64,6 +66,10 @@ export interface PiSessionApi {
   models: PiModel[];
   thinkingLevels: PiThinkingLevel[];
   commands: PiSlashCommand[];
+  /** Every tool the session has, with its active flag (dsh/pi-web's tools panel). */
+  tools: PiToolInfo[];
+  /** The builtin selection behind the active set; `null` before it is known. */
+  toolSelection: string[] | null;
 
   dialogs: PendingDialog[];
   notifications: AppNotification[];
@@ -80,7 +86,17 @@ export interface PiSessionApi {
   refreshState(): Promise<void>;
   /** Switches the model and re-reads session state so the UI reflects it at once. */
   setModel(provider: string, modelId: string): Promise<PiRpcResponse>;
-  setThinkingLevel(level: PiThinkingLevel): Promise<PiRpcResponse>;
+  /**
+   * `null` asks for the model's own default (dsh's `Default` entry). pi has no
+   * "unset" on a running session, so the caller records the cleared default
+   * instead of sending a command.
+   */
+  setThinkingLevel(level: PiThinkingLevel | null): Promise<PiRpcResponse>;
+  /**
+   * Replace the session's tool selection with these builtin names. The host merges
+   * the extension tools back in, so this can only narrow the builtin set.
+   */
+  setTools(toolNames: string[]): Promise<PiRpcResponse>;
   renameSession(name: string): Promise<PiRpcResponse>;
   exportHtml(): Promise<{ path: string } | null>;
   setAutoCompaction(enabled: boolean): Promise<PiRpcResponse>;
@@ -90,6 +106,13 @@ export interface PiSessionApi {
   send(command: PiCommandEnvelope): Promise<PiRpcResponse>;
   /** Sends to an arbitrary session, for list actions on non-active sessions. */
   sendTo(sessionId: string, command: PiCommandEnvelope): Promise<PiRpcResponse>;
+  /**
+   * Surface an application-level message through the same stack the protocol
+   * notifications use. Needed by callers that perform work pi does not know
+   * about — e.g. saving the deployment default, which can fail without
+   * invalidating the session's own selection.
+   */
+  notify(level: AppNotification['level'], text: string, detail?: string): void;
   respondToDialog(id: string, body: { value?: string; confirmed?: boolean; cancelled?: boolean }): Promise<void>;
   dismissNotification(id: string): void;
   consumeEditorText(): void;
@@ -126,6 +149,8 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
   const [models, setModels] = useState<PiModel[]>([]);
   const [thinkingLevels, setThinkingLevels] = useState<PiThinkingLevel[]>([]);
   const [commands, setCommands] = useState<PiSlashCommand[]>([]);
+  const [tools, setToolsState] = useState<PiToolInfo[]>([]);
+  const [toolSelection, setToolSelection] = useState<string[] | null>(null);
 
   const [dialogs, setDialogs] = useState<PendingDialog[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -196,12 +221,13 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
 
   const refreshState = useCallback(async () => {
     if (!sessionId) return;
-    const [state, sessionStats, availableModels, levels, commandList] = await Promise.all([
+    const [state, sessionStats, availableModels, levels, commandList, toolList] = await Promise.all([
       send({ type: 'get_state' }),
       send({ type: 'get_session_stats' }),
       send({ type: 'get_available_models' }),
       send({ type: 'get_available_thinking_levels' }),
       send({ type: 'get_commands' }),
+      send({ type: 'get_tools' }),
     ]);
 
     const stateData = pickRecord<PiSessionState>(state.data);
@@ -218,6 +244,12 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
 
     const commandEntries = pickArray<PiSlashCommand>(commandList.data, 'commands');
     if (commandEntries.length > 0) setCommands(commandEntries);
+
+    const toolsData = pickRecord<PiToolsPayload>(toolList.data);
+    if (toolsData !== null) {
+      setToolsState(pickArray<PiToolInfo>(toolsData, 'tools'));
+      if (Array.isArray(toolsData.selection)) setToolSelection(toolsData.selection);
+    }
   }, [send, sessionId]);
 
   // pi acknowledges a model switch long before it reports the new state, so the
@@ -232,8 +264,22 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
   );
 
   const setThinkingLevel = useCallback(
-    async (level: PiThinkingLevel) => {
+    async (level: PiThinkingLevel | null) => {
+      if (level === null) {
+        // Nothing to send: pi has no "unset". The caller clears the remembered
+        // default; a running session keeps the level it started with.
+        return { type: 'response', command: 'set_thinking_level', success: true } as PiRpcResponse;
+      }
       const response = await send({ type: 'set_thinking_level', level });
+      if (response.success) await refreshState();
+      return response;
+    },
+    [send, refreshState],
+  );
+
+  const setTools = useCallback(
+    async (toolNames: string[]) => {
+      const response = await send({ type: 'set_tools', toolNames });
       if (response.success) await refreshState();
       return response;
     },
@@ -535,6 +581,8 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       models,
       thinkingLevels,
       commands,
+      tools,
+      toolSelection,
       dialogs,
       notifications,
       statuses,
@@ -548,6 +596,7 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       refreshState,
       setModel,
       setThinkingLevel,
+      setTools,
       renameSession,
       exportHtml,
       setAutoCompaction,
@@ -556,6 +605,7 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       setFollowUpMode,
       send,
       sendTo,
+      notify: pushNotification,
       respondToDialog,
       dismissNotification,
       consumeEditorText,
@@ -572,6 +622,8 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       models,
       thinkingLevels,
       commands,
+      tools,
+      toolSelection,
       dialogs,
       notifications,
       statuses,
@@ -585,6 +637,7 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       refreshState,
       setModel,
       setThinkingLevel,
+      setTools,
       renameSession,
       exportHtml,
       setAutoCompaction,
@@ -593,6 +646,7 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
       setFollowUpMode,
       send,
       sendTo,
+      pushNotification,
       respondToDialog,
       dismissNotification,
       consumeEditorText,

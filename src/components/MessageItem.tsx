@@ -1,13 +1,12 @@
 import { ActionIcon, Flexbox, Icon, Markdown, Text, Tooltip } from '@lobehub/ui';
 import { ChatItem } from '@lobehub/ui/chat';
 import { theme } from 'antd';
-import { Bot, Brain, ChevronDown, ChevronRight, CircleAlert, Copy, User } from 'lucide-react';
+import { Bot, CircleAlert, Copy, User } from 'lucide-react';
 import { useCallback, useMemo, useState } from 'react';
 import { useThemeMode } from 'antd-style';
 
-import { formatCost, formatTokens } from '../lib/format';
 import { specToTokDsl } from '../lib/tokui-dsl';
-import type { AssistantEntry, TranscriptUsage, UserEntry } from '../shared/transcript';
+import type { AssistantEntry, UserEntry } from '../shared/transcript';
 import {
   extractA2uiBlocks,
   parseA2uiBlock,
@@ -15,6 +14,8 @@ import {
   stripA2uiBlocks,
   type UiSpec,
 } from '../shared/uikit';
+import { IconThinkOutline14 } from '../ui/primitives/index.ts';
+import { LeadingGlyph } from './LeadingGlyph';
 import { ToolCard } from './ToolCard';
 import { TokUIView } from './tokui/TokUIView';
 import { UiRenderer } from './uikit/UiRenderer';
@@ -23,81 +24,64 @@ import { UiRenderer } from './uikit/UiRenderer';
 export type UiActionHandler = (action: string) => void;
 type RenderStyle = 'ours' | 'tokui';
 
-/** Collapsible chain-of-thought panel shown above an assistant message. */
+/**
+ * Collapsible chain-of-thought row shown above an assistant message.
+ *
+ * Flat, like dsh's `ReasoningRow`: no card, no fill — a 24px row whose glyph
+ * carries the affordance and whose body, when open, indents under the title.
+ */
 function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: boolean }) {
   const { token } = theme.useToken();
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   return (
-    <div
-      style={{
-        border: `1px solid ${token.colorBorderSecondary}`,
-        borderRadius: token.borderRadiusLG,
-        background: token.colorFillQuaternary,
-        overflow: 'hidden',
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
       <Flexbox
         horizontal
         align="center"
-        gap={8}
-        paddingInline={10}
-        paddingBlock={6}
-        style={{ cursor: 'pointer' }}
+        gap={6}
+        style={{ height: 24, cursor: 'pointer' }}
         onClick={() => setOpen((prev) => !prev)}
+        onMouseEnter={() => { setHovered(true); }}
+        onMouseLeave={() => { setHovered(false); }}
       >
-        <Icon icon={open ? ChevronDown : ChevronRight} size={14} style={{ color: token.colorTextTertiary }} />
-        <Icon icon={Brain} size={14} style={{ color: token.colorTextTertiary }} />
-        <Text fontSize={12} type="secondary">
+        {/* dsh's reasoning row prefix, glyph for glyph: the harness's own think
+            mark at rest, and the chevron only while hovered or open. */}
+        <LeadingGlyph icon={<IconThinkOutline14 />} swap={hovered || open} />
+        <Text fontSize={13} type="secondary" style={{ flexShrink: 0 }}>
           {streaming ? '思考中…' : '思考过程'}
         </Text>
         {!open && (
-          <Text fontSize={11} type="secondary" ellipsis style={{ flex: 1, minWidth: 0, opacity: 0.75 }}>
-            {thinking.replace(/\s+/g, ' ').slice(0, 120)}
-          </Text>
+          <>
+            <Text fontSize={13} type="secondary" style={{ flexShrink: 0, opacity: 0.45 }}>
+              ·
+            </Text>
+            <Text fontSize={13} type="secondary" ellipsis style={{ flex: 1, minWidth: 0, opacity: 0.75 }}>
+              {thinking.replace(/\s+/g, ' ').slice(0, 120)}
+            </Text>
+          </>
         )}
       </Flexbox>
       {open && (
         <div
           style={{
-            padding: '0 10px 10px',
+            // Indented under the title (leading box 16 + gap 6), dsh's
+            // `.thinkBody` geometry.
+            padding: '4px 0 4px 22px',
             maxHeight: 360,
             overflow: 'auto',
-            fontSize: 12.5,
-            lineHeight: 1.65,
+            fontSize: 13,
+            lineHeight: 1.6,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
-            color: token.colorTextSecondary,
-            borderTop: `1px solid ${token.colorBorderSecondary}`,
-            paddingTop: 8,
+            color: token.colorTextTertiary,
           }}
         >
           {thinking}
         </div>
       )}
     </div>
-  );
-}
-
-function UsageLine({ usage, model }: { usage: TranscriptUsage; model?: string | undefined }) {
-  const { token } = theme.useToken();
-  return (
-    <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextQuaternary }} wrap="wrap">
-      {model && (
-        <Text fontSize={11} type="secondary">
-          {model}
-        </Text>
-      )}
-      <Text fontSize={11} type="secondary">
-        ↑{formatTokens(usage.input)} ↓{formatTokens(usage.output)}
-        {usage.cacheRead > 0 ? ` · cache ${formatTokens(usage.cacheRead)}` : ''}
-      </Text>
-      {usage.cost > 0 && (
-        <Text fontSize={11} type="secondary">
-          {formatCost(usage.cost)}
-        </Text>
-      )}
-    </Flexbox>
   );
 }
 
@@ -126,6 +110,12 @@ export function UserMessageItem({ entry }: { entry: UserEntry }) {
   );
 }
 
+/**
+ * One assistant message: markdown body, its reasoning row, and the tool rows it
+ * produced. dsh's transcript carries no per-message usage footer, so neither
+ * does this one — the model and ↑↓/cache figures are bookkeeping, not
+ * conversation, and the live ones already sit in the status strip.
+ */
 export function AssistantMessageItem({
   entry,
   onAction,
@@ -196,15 +186,6 @@ export function AssistantMessageItem({
           : entry.stopReason === 'aborted'
             ? { type: 'warning', message: '已中断', variant: 'borderless' }
             : undefined
-      }
-      messageExtra={
-        entry.usage ? (
-          <UsageLine usage={entry.usage} model={entry.model} />
-        ) : entry.model ? (
-          <Text fontSize={11} type="secondary">
-            {entry.model}
-          </Text>
-        ) : undefined
       }
       belowMessage={
         toolCards.length > 0 || uiSpecs.length > 0 || (isEmpty && entry.streaming) || displayText.length > 0 ? (

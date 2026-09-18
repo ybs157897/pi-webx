@@ -1,4 +1,4 @@
-import { Alert, Flexbox, Text } from '@lobehub/ui';
+import { Alert, Flexbox, Highlighter, Text } from '@lobehub/ui';
 import { theme } from 'antd';
 import { ArrowDown, Eraser } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -38,14 +38,19 @@ function EntryView({
     case 'bash':
       return (
         <Flexbox gap={6}>
-          <Text fontSize={12} style={{ fontFamily: token.fontFamilyCode }} type="secondary">
-            $ {entry.command}
-          </Text>
+          {/* The command line is the one piece of a shell entry that is code, so
+              it is drawn by the same highlighter the markdown blocks use. The
+              card below then reports only what the command produced — its
+              arguments stay empty, so the command is not printed twice (prompt
+              line and card summary) on top of the JSON that wrapped it. */}
+          <Highlighter language="bash" variant="borderless" wrap showLanguage={false}>
+            {`$ ${entry.command}`}
+          </Highlighter>
           <ToolCard
             run={{
               toolCallId: entry.id,
               toolName: 'bash',
-              args: { command: entry.command },
+              args: {},
               output: entry.output,
               status: entry.streaming ? 'running' : entry.exitCode === 0 ? 'success' : 'error',
               startedAt: entry.at,

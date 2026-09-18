@@ -280,6 +280,30 @@ function rawArgsOf(run: ToolRun): string {
   return typeof raw === 'string' ? raw : '';
 }
 
+/**
+ * The tool call a `toolcall_*` delta belongs to.
+ *
+ * pi's delta events carry no id or name of their own — the call lives in the
+ * event's `partial` message, at `contentIndex`. Reading the identity off the
+ * event instead (as this reducer did) minted a synthetic `${entryId}-tool-N`
+ * run named `unknown` on every `toolcall_start`, which `message_end` then could
+ * not match by id: every parallel call rendered twice, once as the real tool and
+ * once as a permanently nameless `unknown` card.
+ */
+function deltaToolCall(delta: Dict): PiToolCallBlock | null {
+  const partial = asRecord(delta['partial']);
+  const content = partial?.['content'];
+  if (!Array.isArray(content)) return null;
+  const contentIndex = asNumber(delta['contentIndex']);
+  if (contentIndex !== undefined) return toolCallBlock(content[contentIndex]);
+  // No index (an older event shape): the call being streamed is the last one.
+  for (let index = content.length - 1; index >= 0; index -= 1) {
+    const call = toolCallBlock(content[index]);
+    if (call) return call;
+  }
+  return null;
+}
+
 function parseArgsObject(raw: string): Record<string, unknown> | null {
   if (!raw.trim()) return null;
   try {
@@ -445,7 +469,12 @@ function reconcileToolRuns(
   for (let index = 0; index < existing.length; index += 1) {
     if (claimed.has(index)) continue;
     const run = existing[index];
-    if (run) next.push(run);
+    if (!run) continue;
+    // An unclaimed run whose id is the synthetic one this module mints came from
+    // a partial delta that the authoritative message never claimed. Keeping it
+    // rendered a second, permanently nameless `unknown` card beside the real one.
+    if (run.toolCallId.startsWith(`${entryId}-tool-`)) continue;
+    next.push(run);
   }
   return next;
 }
@@ -602,12 +631,14 @@ function applyMessageUpdate(
       break;
     }
     case 'toolcall_start': {
-      const toolCallId = asString(delta.id) ?? `${entry.id}-tool-${entry.tools.length}`;
+      const call = deltaToolCall(delta);
+      const toolCallId =
+        call?.id || asString(delta.id) || `${entry.id}-tool-${entry.tools.length}`;
       if (entry.tools.some((run) => run.toolCallId === toolCallId)) break;
       const run: ToolRun = {
         toolCallId,
-        toolName: asString(delta.toolName) ?? 'unknown',
-        args: {},
+        toolName: call?.name || asString(delta.toolName) || 'unknown',
+        args: call?.arguments ?? {},
         output: '',
         status: 'running',
         startedAt: Date.now(),
@@ -616,11 +647,16 @@ function applyMessageUpdate(
       break;
     }
     case 'toolcall_delta': {
-      // Argument fragments stream contiguously for the newest call in the entry,
-      // so they route to the last run. The raw text is buffered in `details`
-      // until it parses (or until `toolcall_end`), so no fragment is ever lost.
+      // Argument fragments stream contiguously for one call, so they route to
+      // that call by id (falling back to the newest run). The raw text is
+      // buffered in `details` until it parses (or until `toolcall_end`), so no
+      // fragment is ever lost.
       const fragment = asString(delta.delta) ?? '';
-      const index = entry.tools.length - 1;
+      const streamed = deltaToolCall(delta);
+      const byId = streamed?.id
+        ? entry.tools.findIndex((run) => run.toolCallId === streamed.id)
+        : -1;
+      const index = byId >= 0 ? byId : entry.tools.length - 1;
       const run = entry.tools[index];
       if (!fragment || !run) break;
       const raw = rawArgsOf(run) + fragment;
@@ -634,7 +670,7 @@ function applyMessageUpdate(
       break;
     }
     case 'toolcall_end': {
-      const call = toolCallBlock(delta.toolCall);
+      const call = toolCallBlock(delta.toolCall) ?? deltaToolCall(delta);
       const byId = call?.id
         ? entry.tools.findIndex((run) => run.toolCallId === call.id)
         : -1;

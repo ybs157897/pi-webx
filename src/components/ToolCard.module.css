@@ -1,0 +1,15 @@
+/*
+ * A failed call's expanded output reads in the error colour — dsh's
+ * `.ioText[data-error]`, and the same design-platform token the collapsed
+ * summary uses.
+ *
+ * The override is forced with `!important` because Shiki writes its palette as
+ * inline styles on the highlighted markup; the fallback `<pre>` is covered too,
+ * for the frame before the highlighter resolves.
+ */
+.errorOutput :global(.shiki),
+.errorOutput :global(.shiki) span,
+.errorOutput pre,
+.errorOutput pre code {
+  color: var(--dsw-alias-state-error-primary) !important;
+}

@@ -1,3 +1,5 @@
 export { ModelsSection } from './ModelsSection.tsx'
 export { SettingsModal } from './SettingsModal.tsx'
 export type { SettingsModalProps, SettingsSection } from './SettingsModal.tsx'
+export { GeneralSettings } from './GeneralSettings.tsx'
+export type { RenderStylePreference, ThemePreference } from './GeneralSettings.tsx'

@@ -18,6 +18,10 @@ import {
 import {
   type AgentSession,
   type AgentSessionEvent,
+  type ExtensionUIDialogOptions,
+  type ExtensionUIContext,
+  type ExtensionWidgetOptions,
+  type LoadExtensionsResult,
   ModelRuntime,
   SessionManager,
   createAgentSession,
@@ -27,6 +31,8 @@ import {
 
 import type {
   PiCommandEnvelope,
+  PiExtensionUiRequest,
+  PiExtensionUiResponse,
   PiModel,
   PiRpcResponse,
   PiSessionState,
@@ -34,6 +40,12 @@ import type {
   ServerFrame,
   SessionSummary,
 } from '../../src/shared/protocol';
+import {
+  appendToolSelection,
+  readToolSelection,
+  validateToolSelection,
+  withExtensionTools,
+} from '../tool-selection';
 
 const MAX_SESSIONS = 12;
 /** Sweep dead sessions with no subscribers after this long. */
@@ -62,6 +74,25 @@ export interface HostedSession {
   sessionFile: string | null;
   sessionName: string | null;
   session: AgentSession;
+  /**
+   * What pi's resource loader found for this session. Its runtime is the only
+   * public source of the merged slash-command list (`getCommands()`), which is
+   * why it is kept: the extension-runner that builds it is private to
+   * `createAgentSession`.
+   */
+  extensionsResult: LoadExtensionsResult;
+  /**
+   * Dialogs an extension is waiting on, keyed by request id. An extension's
+   * `ctx.ui.confirm()` resolves only when the browser answers, so a dead session
+   * has to resolve them rather than leave the agent's tool call hanging.
+   */
+  pendingDialogs: Map<string, (response: PiExtensionUiResponse) => void>;
+  /**
+   * The builtin selection this session is running with, as the user chose it
+   * (before shell resolution and the extension-tool merge). `null` until a
+   * selection is known.
+   */
+  toolSelection: string[] | null;
   subscribers: Set<HostSubscriber>;
   unsubscribe: (() => void) | null;
   lastSeen: number;
@@ -76,6 +107,12 @@ export interface CreateHostedSessionOptions {
   name?: string;
   /** `--no-session`: keep the transcript in memory only. */
   noSession?: boolean;
+  /**
+   * Builtin tools a new session starts with, from the browser's preset. A resumed
+   * session keeps the selection recorded in its own log instead: that record says
+   * what the session was last run with, which the client cannot know.
+   */
+  toolNames?: string[];
 }
 
 function errorText(error: unknown): string {
@@ -107,6 +144,17 @@ export class PiHost {
     return this.modelRuntimePromise;
   }
 
+  /**
+   * The shared model runtime, for readers that must not touch a session.
+   *
+   * The picker's catalog is built from this object rather than from a live
+   * session's `get_available_models`, so it reads the same registry the
+   * sessions resolve against while needing no session to exist.
+   */
+  getModelRuntime(): Promise<ModelRuntime> {
+    return this.runtime();
+  }
+
   /* ----------------------------------------------------------------- create */
 
   async create(options: CreateHostedSessionOptions = {}): Promise<HostedSession> {
@@ -132,7 +180,7 @@ export class PiHost {
         ? SessionManager.inMemory(cwd)
         : SessionManager.create(cwd);
 
-    const { session } = await createAgentSession({
+    const { session, extensionsResult } = await createAgentSession({
       cwd,
       agentDir: getAgentDir(),
       ...(model ? { model } : {}),
@@ -153,14 +201,355 @@ export class PiHost {
       sessionFile: session.sessionFile ?? null,
       sessionName: options.name ?? null,
       session,
+      extensionsResult,
+      pendingDialogs: new Map(),
+      toolSelection: options.toolNames ?? null,
       subscribers: new Set(),
       unsubscribe: null,
       lastSeen: Date.now(),
     };
 
     hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
+    this.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
+    await this.bindExtensions(session, hosted);
     this.sessions.set(hosted.id, hosted);
     return hosted;
+  }
+
+  /**
+   * Put a session's tools where they belong, pi-web's way.
+   *
+   * A resumed session's own log decides: the newest `pi-webx:tool-selection` entry
+   * records what it was last run with, and a client preset cannot know that. A
+   * session with no such entry takes the client's preset and records it, so the
+   * choice survives the next reload. A session with neither keeps pi's own default
+   * tool set — the browser may simply not have sent one.
+   */
+  private applyInitialToolSelection(
+    hosted: HostedSession,
+    sessionManager: SessionManager,
+    requested: readonly string[] | undefined,
+  ): void {
+    let entries: readonly unknown[] = [];
+    try {
+      entries = sessionManager.getEntries() as unknown as readonly unknown[];
+    } catch {
+      entries = [];
+    }
+    const persisted = readToolSelection(entries);
+    if (persisted !== undefined) {
+      this.setToolSelection(hosted, persisted, { persist: false });
+      return;
+    }
+    if (requested === undefined) return;
+    this.setToolSelection(hosted, requested, { persist: true });
+  }
+
+  /**
+   * Apply one tool selection and, unless it came from the log, record it.
+   *
+   * `withExtensionTools` is the part that matters: a preset chooses builtin tools
+   * only, and everything an extension registered stays enabled. pi's
+   * `setActiveToolsByName` adopts the given set exactly, so skipping the merge
+   * would silently switch off extension tools on any preset change.
+   */
+  private setToolSelection(
+    hosted: HostedSession,
+    toolNames: readonly string[],
+    options: { persist: boolean },
+  ): void {
+    const defaultTools = hosted.session.settingsManager?.getDefaultTools?.();
+    const resolved = withExtensionTools(hosted.session, toolNames, defaultTools);
+    hosted.session.setActiveToolsByName(resolved);
+    hosted.toolSelection = [...toolNames];
+    if (!options.persist) return;
+    try {
+      appendToolSelection(hosted.session.sessionManager, toolNames);
+    } catch (error) {
+      this.broadcastError(hosted, `工具选择未能写入会话记录：${errorText(error)}`);
+    }
+  }
+
+  /**
+   * Copy a transcript into a new session and host it — dsh's `分叉会话`.
+   *
+   * `SessionManager.forkFrom` is pi's own implementation of the same idea: it
+   * writes a new session file whose header names the source as `parentSession`,
+   * so the fork is a real session the CLI can also open, not a private view.
+   * The new session starts on the deployment default model rather than the
+   * source's — dsh's fork takes the default the same way, because the copied
+   * prefix is history the next model reads, not a route it is bound to.
+   *
+   * @param options - the source transcript and the workspace to fork into.
+   * @returns the new hosted session.
+   */
+  async fork(options: { source: string; cwd?: string }): Promise<HostedSession> {
+    if (this.sessions.size >= MAX_SESSIONS) {
+      throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
+    }
+    const cwd = options.cwd ?? process.cwd();
+    const runtime = await this.runtime();
+
+    let sessionManager: SessionManager;
+    try {
+      sessionManager = SessionManager.forkFrom(options.source, cwd);
+    } catch (error) {
+      throw new HostError(400, `无法分叉该会话：${errorText(error)}`);
+    }
+
+    const { session, extensionsResult } = await createAgentSession({
+      cwd,
+      agentDir: getAgentDir(),
+      modelRuntime: runtime,
+      sessionManager,
+    });
+
+    const hosted: HostedSession = {
+      id: crypto.randomUUID(),
+      cwd,
+      createdAt: Date.now(),
+      resumed: false,
+      alive: true,
+      streaming: false,
+      sessionFile: session.sessionFile ?? null,
+      sessionName: null,
+      session,
+      extensionsResult,
+      pendingDialogs: new Map(),
+      // A fork keeps pi's default tool set until someone chooses otherwise; the
+      // source session's selection describes that session, not this one.
+      toolSelection: null,
+      subscribers: new Set(),
+      unsubscribe: null,
+      lastSeen: Date.now(),
+    };
+
+    hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
+    await this.bindExtensions(session, hosted);
+    this.sessions.set(hosted.id, hosted);
+    return hosted;
+  }
+
+  /**
+   * Give a freshly created session its extension bindings.
+   *
+   * `bindExtensions` is the public hook pi's own modes use; without it an
+   * extension's `ctx.ui` actions are throwing stubs, which is the state this host
+   * was in. Two differences from the TUI mode are deliberate:
+   *
+   *   - `mode: 'rpc'` — a non-terminal host that *does* have dialogs, which is
+   *     precisely what an extension needs to know to use `ctx.ui.confirm`.
+   *   - Session-swapping command actions (`newSession`, `fork`, `navigateTree`,
+   *     `switchSession`) refuse instead of silently doing nothing: this host owns
+   *     session identity (its own route vocabulary), so an extension command that
+   *     would replace the session must say so rather than appear to work.
+   */
+  private async bindExtensions(session: AgentSession, hosted: HostedSession): Promise<void> {
+    const refused = (action: string) => async (): Promise<never> => {
+      throw new Error(`此宿主不支持扩展命令的 ${action}（会话身份由 pi-webx 管理）`);
+    };
+    try {
+      await session.bindExtensions({
+        uiContext: this.uiContextFor(hosted),
+        mode: 'rpc',
+        abortHandler: () => {
+          void session.abort();
+        },
+        commandContextActions: {
+          waitForIdle: () => session.waitForIdle(),
+          reload: () => session.waitForIdle(),
+          newSession: refused('newSession'),
+          fork: refused('fork'),
+          navigateTree: refused('navigateTree'),
+          switchSession: refused('switchSession'),
+        },
+      });
+    } catch (error) {
+      // A session without extension bindings still runs; only extension UI and
+      // extension commands are lost, so this is reported and not fatal.
+      this.broadcastError(hosted, `扩展绑定失败：${errorText(error)}`);
+    }
+  }
+
+  /* ------------------------------------------------------- extension UI bridge */
+
+  /**
+   * The `ctx.ui` an extension sees, wired to this app's own dialog surface.
+   *
+   * pi's TUI and RPC modes each install an implementation here; a bare
+   * `createAgentSession` installs none, which is why an extension's
+   * `ctx.ui.confirm()` never resolved in this host and its status/widget updates
+   * were dropped. The portable half — select / confirm / input / editor / notify
+   * / setStatus / setWidget / setEditorText — now travels as this app's existing
+   * frames, so the browser renders the dialogs it already knew how to render.
+   *
+   * The terminal-only half (footers, custom TUI components, raw key input) is
+   * deliberately absent: there is no terminal here. Extensions that guard on
+   * `ctx.mode === 'tui'` or ask `ctx.dialogCapable` see a non-TUI,
+   * dialog-capable host, which is what this is.
+   */
+  private uiContextFor(hosted: HostedSession): ExtensionUIContext {
+    const ask = (
+      method: 'select' | 'confirm' | 'input' | 'editor',
+      payload: Partial<PiExtensionUiRequest>,
+      options: { signal?: AbortSignal; timeout?: number } | undefined,
+      fallback?: string | boolean,
+    ): Promise<string | boolean | undefined> =>
+      this.requestDialog(hosted, method, payload, options, fallback);
+
+    const terminalOnly = (): void => {
+      // Nothing here can render a terminal component; these are honest no-ops
+      // rather than errors, because extensions call them defensively.
+    };
+
+    return {
+      select: (title: string, options: string[], opts?: ExtensionUIDialogOptions) =>
+        ask('select', { title, options: [...options] }, opts) as Promise<string | undefined>,
+      confirm: async (
+        title: string,
+        message: string,
+        opts?: ExtensionUIDialogOptions,
+      ): Promise<boolean> => (await ask('confirm', { title, message }, opts, false)) === true,
+      input: (title: string, placeholder?: string, opts?: ExtensionUIDialogOptions) =>
+        ask(
+          'input',
+          { title, ...(placeholder === undefined ? {} : { placeholder }) },
+          opts,
+        ) as Promise<string | undefined>,
+      editor: (title: string, prefill?: string) =>
+        ask(
+          'editor',
+          { title, ...(prefill === undefined ? {} : { prefill }) },
+          undefined,
+        ) as Promise<string | undefined>,
+      notify: (message: string, type?: 'info' | 'warning' | 'error') => {
+        this.broadcastUi(hosted, {
+          method: 'notify',
+          message,
+          ...(type === undefined ? {} : { notifyType: type }),
+        });
+      },
+      setStatus: (key: string, text: string | undefined) => {
+        this.broadcastUi(hosted, {
+          method: 'setStatus',
+          statusKey: key,
+          ...(text === undefined ? {} : { statusText: text }),
+        });
+      },
+      setWidget: (
+        key: string,
+        content: string[] | ((...args: never[]) => unknown) | undefined,
+        options?: ExtensionWidgetOptions,
+      ) => {
+        // A component-factory widget cannot cross this wire; only the
+        // string-array form is meaningful outside a terminal.
+        if (content !== undefined && !Array.isArray(content)) return;
+        this.broadcastUi(hosted, {
+          method: 'setWidget',
+          widgetKey: key,
+          ...(content === undefined ? {} : { widgetLines: content }),
+          ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
+        });
+      },
+      setEditorText: (text: string) => {
+        this.broadcastUi(hosted, { method: 'set_editor_text', text });
+      },
+      pasteToEditor: (text: string) => {
+        this.broadcastUi(hosted, { method: 'set_editor_text', text });
+      },
+      // No editor exists here to read back from; an empty answer is the truth.
+      getEditorText: () => '',
+      onTerminalInput: () => (): void => terminalOnly(),
+      addAutocompleteProvider: terminalOnly,
+      setWorkingMessage: terminalOnly,
+      setWorkingVisible: terminalOnly,
+      setWorkingIndicator: terminalOnly,
+      setHiddenThinkingLabel: terminalOnly,
+      setFooter: terminalOnly,
+      setHeader: terminalOnly,
+      setTitle: terminalOnly,
+      setEditorComponent: terminalOnly,
+      custom: () => Promise.reject(new Error('this host has no terminal UI')),
+    } as unknown as ExtensionUIContext;
+  }
+
+  /**
+   * Broadcast one dialog request and await the browser's answer.
+   *
+   * The timeout is mirrored here rather than trusted to the client: an extension
+   * awaiting a dialog must not hang the agent when no browser is listening.
+   */
+  private requestDialog(
+    hosted: HostedSession,
+    method: 'select' | 'confirm' | 'input' | 'editor',
+    payload: Partial<PiExtensionUiRequest>,
+    options: { signal?: AbortSignal; timeout?: number } | undefined,
+    fallback?: string | boolean,
+  ): Promise<string | boolean | undefined> {
+    const id = crypto.randomUUID();
+    return new Promise((resolve) => {
+      let settled = false;
+      let timer: NodeJS.Timeout | null = null;
+      const settle = (value: string | boolean | undefined): void => {
+        if (settled) return;
+        settled = true;
+        hosted.pendingDialogs.delete(id);
+        if (timer !== null) clearTimeout(timer);
+        options?.signal?.removeEventListener('abort', onAbort);
+        resolve(value);
+      };
+      const onAbort = (): void => settle(fallback);
+
+      if (options?.timeout !== undefined && options.timeout > 0) {
+        timer = setTimeout(() => settle(fallback), options.timeout);
+      }
+      options?.signal?.addEventListener('abort', onAbort, { once: true });
+      if (options?.signal?.aborted === true) {
+        settle(fallback);
+        return;
+      }
+
+      hosted.pendingDialogs.set(id, (response) => {
+        if (response.cancelled === true) return settle(fallback);
+        if (method === 'confirm') return settle(response.confirmed === true);
+        settle(response.value);
+      });
+
+      this.broadcast(hosted, {
+        t: 'pi',
+        event: {
+          type: 'extension_ui_request',
+          id,
+          method,
+          ...payload,
+          ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+        } as unknown as ServerFrame extends { t: 'pi'; event: infer E } ? E : never,
+      });
+    });
+  }
+
+  /** Fire-and-forget UI updates: status, widget, notification, editor text. */
+  private broadcastUi(hosted: HostedSession, payload: Partial<PiExtensionUiRequest>): void {
+    this.broadcast(hosted, {
+      t: 'pi',
+      event: {
+        type: 'extension_ui_request',
+        id: crypto.randomUUID(),
+        ...payload,
+      } as unknown as ServerFrame extends { t: 'pi'; event: infer E } ? E : never,
+    });
+  }
+
+  /** Answer a pending dialog; an unknown id is ignored rather than an error. */
+  respondToDialog(id: string, response: PiExtensionUiResponse): boolean {
+    for (const hosted of this.sessions.values()) {
+      const resolver = hosted.pendingDialogs.get(id);
+      if (resolver !== undefined) {
+        resolver(response);
+        return true;
+      }
+    }
+    return false;
   }
 
   /* ------------------------------------------------------------- event fan-out */
@@ -225,6 +614,12 @@ export class PiHost {
     this.sessions.delete(id);
     session.alive = false;
     session.streaming = false;
+    // An extension awaiting a dialog would otherwise hang forever: answer every
+    // pending request as a dismissal, which is what a closed window means.
+    for (const resolve of session.pendingDialogs.values()) {
+      resolve({ type: 'extension_ui_response', id: '', cancelled: true });
+    }
+    session.pendingDialogs.clear();
     try {
       session.unsubscribe?.();
       session.session.dispose();
@@ -341,10 +736,57 @@ export class PiHost {
           session.setSessionName(command.name);
           hosted.sessionName = command.name;
           return ok(command.type);
+        case 'get_tools': {
+          // pi-web's shape: every tool, each flagged with whether it is active, so
+          // a panel can show what a preset turned off.
+          const active = new Set(hosted.session.getActiveToolNames());
+          return {
+            type: 'response',
+            command: command.type,
+            success: true,
+            data: {
+              tools: hosted.session.getAllTools().map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+                active: active.has(tool.name),
+              })),
+              selection: hosted.toolSelection ?? hosted.session.getActiveToolNames(),
+            },
+          };
+        }
+        case 'set_tools': {
+          const requested = validateToolSelection((command as unknown as { toolNames?: unknown }).toolNames);
+          if (requested === undefined) {
+            return fail(command.type, 'toolNames 必须是内置工具名数组');
+          }
+          this.setToolSelection(hosted, requested, { persist: true });
+          return { type: 'response', command: command.type, success: true, data: { toolNames: requested } };
+        }
+        case 'get_commands':
+          return {
+            type: 'response',
+            command: command.type,
+            success: true,
+            // The merged list: extension commands, prompt templates and skills.
+            // pi built it while loading resources, and its runtime is the only
+            // public accessor — the runner that assembles it is private to
+            // `createAgentSession`.
+            data: { commands: this.commandsOf(hosted) },
+          };
+        case 'extension_ui_response': {
+          const answered = this.respondToDialog(command.id, {
+            type: 'extension_ui_response',
+            id: command.id,
+            ...(command.value === undefined ? {} : { value: command.value }),
+            ...(command.confirmed === undefined ? {} : { confirmed: command.confirmed }),
+            ...(command.cancelled === undefined ? {} : { cancelled: command.cancelled }),
+          });
+          if (!answered) return fail(command.type, `no extension dialog is waiting on id ${command.id}`);
+          return ok(command.type);
+        }
         case 'set_auto_compaction':
         case 'set_auto_retry':
         case 'export_html':
-        case 'get_commands':
         case 'bash':
         case 'abort_bash':
           return fail(command.type, `${command.type} is not supported by the SDK host yet`);
@@ -356,8 +798,32 @@ export class PiHost {
     }
   }
 
-  private stateOf(hosted: HostedSession): PiSessionState {
-    const { session } = hosted;
+  /**
+   * The session's slash commands, as the browser's command menu needs them.
+   *
+   * Sending `/name args` as a prompt is enough to run one: `session.prompt`
+   * dispatches extension commands and expands skill and prompt-template commands
+   * by default, so this list only has to be accurate, not executable here.
+   */
+  private commandsOf(hosted: HostedSession): Array<{
+    name: string;
+    description?: string;
+    source?: string;
+  }> {
+    try {
+      const commands = hosted.extensionsResult.runtime.getCommands();
+      return commands.map((entry) => ({
+        name: entry.name,
+        ...(entry.description === undefined ? {} : { description: entry.description }),
+        ...(entry.source === undefined ? {} : { source: entry.source }),
+      }));
+    } catch (error) {
+      this.broadcastError(hosted, `无法读取斜杠命令列表：${errorText(error)}`);
+      return [];
+    }
+  }
+
+  private stateOf(hosted: HostedSession): PiSessionState {    const { session } = hosted;
     return {
       model: asModel(session.model),
       thinkingLevel: session.thinkingLevel,
@@ -424,13 +890,36 @@ export class PiHost {
     };
   }
 
+  /**
+   * Levels this session's model actually accepts.
+   *
+   * Mirrors pi's own `getSupportedThinkingLevels` (`pi-ai/dist/models.js`),
+   * because it is the same function `session.setThinkingLevel` clamps against:
+   * a model that does not reason supports `off` alone, and a model that does
+   * supports the extended list minus every level its `thinkingLevelMap` pins to
+   * `null` — with `xhigh`/`max` counted as supported only when the map names
+   * them explicitly. Reporting the global vocabulary here (as this used to) told
+   * the browser about levels every request would be clamped away from.
+   */
   private thinkingLevels(hosted: HostedSession): ModelThinkingLevel[] {
-    const map = (hosted.session.model as { thinkingLevelMap?: Record<string, unknown> } | undefined)
-      ?.thinkingLevelMap;
-    if (!map) return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'];
-    const levels = (['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const).filter(
-      (level) => level === 'off' || (map[level] !== null && map[level] !== undefined),
-    );
+    const model = hosted.session.model as
+      | { reasoning?: boolean; thinkingLevelMap?: Record<string, unknown> }
+      | undefined;
+    if (model?.reasoning !== true) return ['off'];
+    const levels = ([
+      'off',
+      'minimal',
+      'low',
+      'medium',
+      'high',
+      'xhigh',
+      'max',
+    ] as const).filter((level) => {
+      const mapped = model.thinkingLevelMap?.[level];
+      if (mapped === null) return false;
+      if (level === 'xhigh' || level === 'max') return mapped !== undefined;
+      return true;
+    });
     return levels as unknown as ModelThinkingLevel[];
   }
 
@@ -448,7 +937,7 @@ export class PiHost {
       // Recreate regardless.
     }
 
-    const { session } = await createAgentSession({
+    const { session, extensionsResult } = await createAgentSession({
       cwd,
       agentDir: getAgentDir(),
       ...(model ? { model } : {}),
@@ -459,9 +948,11 @@ export class PiHost {
     if (hosted.sessionName) session.setSessionName(hosted.sessionName);
 
     hosted.session = session;
+    hosted.extensionsResult = extensionsResult;
     hosted.sessionFile = session.sessionFile ?? null;
     hosted.streaming = false;
     hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
+    await this.bindExtensions(session, hosted);
   }
 }
 

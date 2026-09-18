@@ -1,18 +1,42 @@
 import { ActionIcon, Flexbox, Text, Tooltip } from '@lobehub/ui';
-import { ChatInputAreaInner, ChatSendButton } from '@lobehub/ui/chat';
-import { Segmented, Tag, theme } from 'antd';
+import { ChatInputAreaInner } from '@lobehub/ui/chat';
+import { Tag, theme } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { Eraser, ImagePlus } from 'lucide-react';
-import type { ClipboardEvent } from 'react';
+import type { ClipboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { formatTokens } from '../lib/format';
+import { IconSendOutline16, IconStopFill16 } from '../ui/primitives/icons';
+import {
+  catalogDefaultSelection,
+  catalogLabels,
+  catalogModels,
+  effectiveThinkingLevel,
+  offeredThinkingLevels,
+  rememberedThinkingLevel,
+  thinkingLevelsForModel,
+} from '../lib/modelCatalog';
 import type { PiSessionApi } from '../lib/usePiSession';
-import type { PiImage, PiThinkingLevel } from '../shared/protocol';
-import { ModelSelectV3, type ModelSelection } from './ModelSelectV3';
+import type { ModelCatalog } from '../shared/model-catalog';
+import type { ToolPreset } from '../shared/tool-presets';
+import type { PiImage, PiSlashCommand, PiThinkingLevel } from '../shared/protocol';
+import { ModelSelect, ThinkingSelect, type ModelSelection } from './ModelPicker';
+import { ToolPresetSelect } from './ToolPresetSelect';
+import { SlashCommandMenu } from './SlashCommandMenu';
 
 const MAX_IMAGES = 4;
 const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * The composer's corner radius, in px.
+ *
+ * The rest of the app takes antd's `borderRadiusLG` (12px), which reads square
+ * on a box this tall — and this box is the one surface the product wants soft.
+ * The reference design rounds roughly 0.15 of the box's height (≈19px on 127px),
+ * which on this box is 18px.
+ */
+const COMPOSER_RADIUS = 18;
 
 async function fileToImage(file: File): Promise<PiImage | null> {
   if (!file.type.startsWith('image/')) return null;
@@ -29,25 +53,35 @@ async function fileToImage(file: File): Promise<PiImage | null> {
 export interface ComposerProps {
   api: PiSessionApi;
   disabled: boolean;
+  /**
+   * The session-independent model catalog. Used whenever the live session has
+   * no catalogue of its own — which is every moment before the first message
+   * creates one — so the picker is never an empty list.
+   */
+  catalog?: ModelCatalog | null;
+  /** The active session's tool preset, when it has recorded one. */
+  toolPreset?: ToolPreset | null;
+  /** Change it for the active session; absent leaves only the browser preference. */
+  onToolPresetChange?: ((preset: ToolPreset) => void) | undefined;
   /** context-window usage, 0–100, shown beside the send button like LobeChat */
   contextPercent?: number | null;
-  /** text injected from outside (empty-state suggestions); consumed once */
-  seedText?: string | null;
-  onSeedConsumed?: () => void;
-  renderStyle?: RenderStyle;
-  onRenderStyleChange?: ((style: RenderStyle) => void) | undefined;
+  /**
+   * Chips shown in the bar above the input: the workspace the run happens in and
+   * its branch. The shell owns them — it is the only layer that knows how to
+   * change a workspace — and the composer only gives them their place, so the
+   * one decision a blank session needs sits with the message about to be written.
+   */
+  contextBar?: ReactNode;
 }
-
-type RenderStyle = 'ours' | 'tokui';
 
 export function Composer({
   api,
   disabled,
+  catalog = null,
+  toolPreset = null,
+  onToolPresetChange,
   contextPercent = null,
-  seedText = null,
-  onSeedConsumed,
-  renderStyle = 'ours',
-  onRenderStyleChange,
+  contextBar,
 }: ComposerProps) {
   const { token } = theme.useToken();
   const [text, setText] = useState('');
@@ -65,6 +99,24 @@ export function Composer({
     setTimeout(() => setNotice(null), 4_000);
   }, []);
 
+  /**
+   * Insert a slash command at the caret.
+   *
+   * Nothing is dispatched here: pi itself runs an extension command and expands
+   * skill and template commands when the text arrives as a prompt, so the menu's
+   * whole job is to put the right text in the composer for the user to finish.
+   */
+  const insertCommand = useCallback((command: PiSlashCommand) => {
+    const snippet = `/${command.name} `;
+    setText((previous) => {
+      const area = inputRef.current?.resizableTextArea?.textArea;
+      const start = area?.selectionStart ?? previous.length;
+      const end = area?.selectionEnd ?? previous.length;
+      return `${previous.slice(0, start)}${snippet}${previous.slice(end)}`;
+    });
+    inputRef.current?.focus();
+  }, []);
+
   // An extension can push text into the composer via `set_editor_text`.
   useEffect(() => {
     if (editorText === null) return;
@@ -72,14 +124,6 @@ export function Composer({
     consumeEditorText();
     inputRef.current?.focus();
   }, [editorText, consumeEditorText]);
-
-  // Suggestions from the empty state land in the composer for editing.
-  useEffect(() => {
-    if (seedText === null) return;
-    setText(seedText);
-    onSeedConsumed?.();
-    inputRef.current?.focus();
-  }, [seedText, onSeedConsumed]);
 
   const addFiles = useCallback(
     async (files: FileList | File[]) => {
@@ -104,8 +148,7 @@ export function Composer({
     [addFiles],
   );
 
-  const submit = useCallback(async () => {
-    const value = text.trim();
+  const submit = useCallback(async () => {    const value = text.trim();
     if (value.length === 0 || disabled) return;
     // While a turn is running pi rejects a bare prompt; steer instead so the
     // message lands right after the current tool calls.
@@ -121,10 +164,61 @@ export function Composer({
     setImages([]);
   }, [api, disabled, flash, images, running, text]);
 
+  /**
+   * Picker inputs, layered the way dsh layers its model directory: the shared
+   * catalog supplies the list, the session's own state overrides the current
+   * value when there is one, and the catalog default covers the blank session.
+   */
+  const models = useMemo(
+    () => (api.models.length > 0 ? api.models : catalogModels(catalog)),
+    [api.models, catalog],
+  );
+
   const current: ModelSelection | null = useMemo(() => {
-    const model = api.piState?.model;
-    return model ? { provider: model.provider, id: model.id } : null;
-  }, [api.piState?.model]);
+    const live = api.piState?.model;
+    return live ? { provider: live.provider, id: live.id } : catalogDefaultSelection(catalog);
+  }, [api.piState?.model, catalog]);
+
+  const labels = useMemo(() => catalogLabels(catalog), [catalog]);
+
+  const currentModel = useMemo(
+    () => models.find((model) => model.provider === current?.provider && model.id === current.id),
+    [current?.id, current?.provider, models],
+  );
+
+  /**
+   * What the effort control may offer.
+   *
+   * A live session answers with the levels its model actually accepts — the
+   * bridge mirrors pi's own `getSupportedThinkingLevels`, the same rule
+   * `setThinkingLevel` clamps against — so that answer is the truth. Before a
+   * session exists there is nobody to ask, and the selected model's declaration
+   * in the catalogue is the same fact.
+   */
+  const thinkingLevels = useMemo(
+    () => offeredThinkingLevels(
+      api.thinkingLevels.length > 0 ? api.thinkingLevels : thinkingLevelsForModel(currentModel),
+    ),
+    [api.thinkingLevels, currentModel],
+  );
+
+  // The session's own level is both the choice and the truth while it runs; with
+  // no session, the choice is the remembered one and the effective level may
+  // fall back to pi's global default — the trigger reports the latter, the pane
+  // marks the former.
+  const thinkingLevel = useMemo(
+    () =>
+      (api.piState?.thinkingLevel as PiThinkingLevel | undefined) ??
+      rememberedThinkingLevel(catalog, current, currentModel),
+    [api.piState?.thinkingLevel, catalog, current, currentModel],
+  );
+
+  const effectiveLevel = useMemo(
+    () =>
+      (api.piState?.thinkingLevel as PiThinkingLevel | undefined) ??
+      effectiveThinkingLevel(catalog, current, currentModel),
+    [api.piState?.thinkingLevel, catalog, current, currentModel],
+  );
 
   const queued =
     api.transcript.queued.steering.length + api.transcript.queued.followUp.length;
@@ -134,7 +228,7 @@ export function Composer({
       <div
         style={{
           border: `1px solid ${token.colorBorder}`,
-          borderRadius: token.borderRadiusLG,
+          borderRadius: COMPOSER_RADIUS,
           background: token.colorBgContainer,
           overflow: 'hidden',
         }}
@@ -159,6 +253,17 @@ export function Composer({
           </Flexbox>
         )}
 
+        {/* The chip bar rides the same card surface as the input — dsh's
+            accessory slot (`padding: 10px 12px 0`, no fill of its own) — and the
+            shell only supplies it before a conversation exists: once a run has
+            started, the workspace is the session's own fact and the chips are
+            gone rather than repeated above every message. */}
+        {contextBar !== undefined && (
+          <Flexbox horizontal align="center" gap={8} style={{ padding: '10px 12px 0' }}>
+            {contextBar}
+          </Flexbox>
+        )}
+
         <ChatInputAreaInner
           ref={inputRef}
           value={text}
@@ -179,67 +284,98 @@ export function Composer({
           style={{ padding: '10px 12px' }}
         />
 
-        <ChatSendButton
-          loading={running}
-          onSend={() => {
-            if (canSend) void submit();
-          }}
-          onStop={() => void api.abort()}
-          texts={{ send: '发送', stop: '停止', warp: '换行' }}
-          leftAddons={
-            <ModelSelectV3
-              models={api.models}
-              current={current}
-              thinkingLevels={api.thinkingLevels}
-              thinkingLevel={(api.piState?.thinkingLevel ?? null) as PiThinkingLevel | null}
-              disabled={disabled}
-              onPick={(selection) => void api.setModel(selection.provider, selection.id)}
-              onPickThinking={(level) => void api.setThinkingLevel(level)}
-            />
-          }
-          rightAddons={
-            <Flexbox horizontal align="center" gap={8}>
-              {onRenderStyleChange && (
-                <Tooltip title="agent UI 的渲染引擎">
-                  <Segmented
-                    size="small"
-                    value={renderStyle}
-                    onChange={(value) => onRenderStyleChange(value as RenderStyle)}
-                    options={[
-                      { label: '自研', value: 'ours' },
-                      { label: 'TokUI', value: 'tokui' },
-                    ]}
-                  />
-                </Tooltip>
-              )}
-              <Tooltip title="附加图片">
-                <ActionIcon
-                  icon={ImagePlus}
-                  size="small"
-                  disabled={disabled || images.length >= MAX_IMAGES}
-                  onClick={() => fileRef.current?.click()}
-                />
-              </Tooltip>
-              {contextPercent !== null && (
-                <Tooltip title={`上下文已用 ${contextPercent}%`}>
-                  <Text fontSize={11} type="secondary" style={{ flexShrink: 0 }}>
-                    {formatTokens(api.stats?.contextUsage?.tokens)} · {contextPercent}%
-                  </Text>
-                </Tooltip>
-              )}
-              {queued > 0 && (
-                <Tooltip title="清空排队中的消息">
-                  <ActionIcon icon={Eraser} size="small" onClick={() => void api.clearQueue()} />
-                </Tooltip>
-              )}
-            </Flexbox>
-          }
+        {/* dsh's composer row: the left carries the attach action and whatever
+            mode controls exist, the right carries the model and the send button.
+            The model chip therefore sits immediately beside send, the renderer
+            preference lives in settings, and send is a circular icon control
+            rather than a labelled button with a key hint beside it. It is the
+            same card surface as the input — dsh draws no divider here, so the
+            composer reads as one box rather than an input plus a toolbar. */}
+        <Flexbox
+          horizontal
+          align="center"
+          justify="space-between"
+          gap={8}
           style={{
             paddingInline: 12,
             paddingBlock: 8,
-            borderTop: `1px solid ${token.colorBorderSecondary}`,
           }}
-        />
+        >
+          <Flexbox horizontal align="center" gap={4} style={{ minWidth: 0 }}>
+            {/* dsh's left group: commands, attach, access mode. */}
+            <SlashCommandMenu commands={api.commands} disabled={disabled} onPick={insertCommand} />
+            <Tooltip title="附加图片">
+              <ActionIcon
+                icon={ImagePlus}
+                size="small"
+                disabled={disabled || images.length >= MAX_IMAGES}
+                onClick={() => fileRef.current?.click()}
+              />
+            </Tooltip>
+            <ToolPresetSelect
+              disabled={disabled}
+              current={toolPreset}
+              onApply={onToolPresetChange}
+            />
+            {queued > 0 && (
+              <Tooltip title="清空排队中的消息">
+                <ActionIcon icon={Eraser} size="small" onClick={() => void api.clearQueue()} />
+              </Tooltip>
+            )}
+          </Flexbox>
+
+          <Flexbox horizontal align="center" gap={6} style={{ minWidth: 0 }}>
+            {contextPercent !== null && (
+              <Tooltip title={`上下文已用 ${contextPercent}%`}>
+                <Text fontSize={11} type="secondary" style={{ flexShrink: 0 }}>
+                  {formatTokens(api.stats?.contextUsage?.tokens)} · {contextPercent}%
+                </Text>
+              </Tooltip>
+            )}
+            <ModelSelect
+              models={models}
+              labels={labels}
+              current={current}
+              disabled={disabled}
+              onPick={(selection) => void api.setModel(selection.provider, selection.id)}
+            />
+            <ThinkingSelect
+              thinkingLevels={thinkingLevels}
+              thinkingLevel={thinkingLevel}
+              effectiveThinkingLevel={effectiveLevel}
+              disabled={disabled}
+              onPick={(level) => void api.setThinkingLevel(level)}
+            />
+            <Tooltip title={running ? '停止' : '发送'}>
+              <button
+                type="button"
+                aria-label={running ? '停止' : '发送消息'}
+                disabled={!running && !canSend}
+                onClick={() => {
+                  if (running) void api.abort();
+                  else if (canSend) void submit();
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  width: 32,
+                  height: 32,
+                  padding: 0,
+                  border: 'none',
+                  borderRadius: '50%',
+                  background: running || canSend ? token.colorPrimary : token.colorFillSecondary,
+                  color: running || canSend ? token.colorTextLightSolid : token.colorTextQuaternary,
+                  cursor: running || canSend ? 'pointer' : 'not-allowed',
+                  transition: 'background 0.15s ease',
+                }}
+              >
+                {running ? <IconStopFill16 size={14} /> : <IconSendOutline16 size={16} />}
+              </button>
+            </Tooltip>
+          </Flexbox>
+        </Flexbox>
       </div>
 
       <input

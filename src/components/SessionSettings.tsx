@@ -4,8 +4,9 @@ import { Archive, Download } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { THINKING_LABELS } from '../lib/format';
+import { offeredThinkingLevels } from '../lib/modelCatalog';
 import type { PiSessionApi } from '../lib/usePiSession';
-import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../shared/protocol';
+import type { PiThinkingLevel } from '../shared/protocol';
 
 type QueueMode = 'all' | 'one-at-a-time';
 
@@ -70,8 +71,25 @@ export function SessionSettings({ open, onClose, api, disabled }: SessionSetting
   const { message } = AntApp.useApp();
 
   const state = api.piState;
-  const levels = api.thinkingLevels.length > 0 ? api.thinkingLevels : PI_THINKING_LEVELS;
+  /**
+   * The same stops the composer offers, so the two surfaces cannot disagree:
+   * the session reports what its model accepts (the bridge mirrors pi's own
+   * clamp), and no levels means the readout below is the only entry, with the
+   * row saying why instead of offering a choice pi would clamp away.
+   */
+  const levels = offeredThinkingLevels(api.thinkingLevels);
   const thinking = (state?.thinkingLevel ?? 'medium') as PiThinkingLevel;
+  /**
+   * The stops, plus the running level when it is not one of them.
+   *
+   * A model that cannot reason runs at `off`, and a session resumed from an
+   * older choice can hold any level pi accepts. Without its own row the select
+   * would fall back to printing the raw id; the extra row is disabled, so the
+   * readout stays honest without widening what can be chosen.
+   */
+  const choices = levels.includes(thinking)
+    ? levels.map((level) => ({ level, selectable: true }))
+    : [...levels.map((level) => ({ level, selectable: true })), { level: thinking, selectable: false }];
 
   return (
     <Drawer
@@ -85,7 +103,11 @@ export function SessionSettings({ open, onClose, api, disabled }: SessionSetting
         <Section title="模型">
           <Row
             title="思考等级"
-            description="越高推理越充分，也更慢、更贵。取值来自当前模型支持的范围。"
+            description={levels.length === 0
+              // The composer's control says the same thing; this surface must
+              // not offer levels the model refuses just because it has a select.
+              ? '当前模型不提供推理等级（换一个支持推理的模型后可选）。'
+              : '越高推理越充分，也更慢、更贵。取值来自当前模型支持的范围。'}
             control={
               <Select
                 size="small"
@@ -95,9 +117,10 @@ export function SessionSettings({ open, onClose, api, disabled }: SessionSetting
                 onChange={(value: PiThinkingLevel) => {
                   void api.setThinkingLevel(value);
                 }}
-                options={levels.map((level) => ({
+                options={choices.map(({ level, selectable }) => ({
                   value: level,
                   label: THINKING_LABELS[level] ?? level,
+                  disabled: !selectable,
                 }))}
               />
             }

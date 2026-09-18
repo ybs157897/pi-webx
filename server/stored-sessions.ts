@@ -1,4 +1,4 @@
-import { existsSync, promises as fsp } from 'node:fs';
+import { promises as fsp } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { StoredSession } from '../src/shared/protocol';
@@ -41,6 +41,51 @@ export function sessionsRoot(): string {
   return path.join(homedir(), '.pi', 'agent', 'sessions');
 }
 
+/**
+ * Per-file metadata cache — the piece that makes listing cheap enough to poll.
+ *
+ * deepseek-harness states the rule this implements: "Session listing does not
+ * use either field to open cold logs: it reads headers plus identity-checked
+ * projection-cache hints only, so a cache or Session-format upgrade never turns
+ * startup into a body scan." Its listing is cheap because a previous pass
+ * already summarised each file; ours had no such memory, so every listing
+ * re-read a bounded slice of *every* transcript (up to ~190 KB each), which is
+ * why the stored list could only be refreshed at boot.
+ *
+ * Two facts make the cache safe to keep across writes:
+ *
+ *   - The header is the file's first line, so it is immutable for a given file.
+ *   - The preview is the *first* user message. A growing transcript cannot
+ *     change it, only add after it — the same reason dsh can persist a title
+ *     projection and replay only the tail.
+ *
+ * A file whose size/mtime moved is therefore re-validated for its header (tiny)
+ * while its already-found preview is kept; a file that had no preview yet is
+ * re-read in full, because that is the one case where the answer can change.
+ */
+interface CachedMeta {
+  sizeBytes: number;
+  mtimeMs: number;
+  header: SessionHeader;
+  preview: string | null;
+}
+
+const metaCache = new Map<string, CachedMeta>();
+/** Give up caching rather than growing without bound on a pathological store. */
+const META_CACHE_LIMIT = 2000;
+
+function remember(file: string, entry: CachedMeta): void {
+  if (metaCache.size >= META_CACHE_LIMIT) metaCache.clear();
+  metaCache.set(file, entry);
+}
+
+function forgetMissing(seen: Set<string>): void {
+  if (metaCache.size === 0) return;
+  for (const file of [...metaCache.keys()]) {
+    if (!seen.has(file)) metaCache.delete(file);
+  }
+}
+
 export function clampStoredLimit(value: number | undefined): number {
   if (value === undefined || !Number.isFinite(value)) return DEFAULT_STORED_LIMIT;
   const rounded = Math.floor(value);
@@ -48,55 +93,6 @@ export function clampStoredLimit(value: number | undefined): number {
   return Math.min(rounded, MAX_STORED_LIMIT);
 }
 
-export class StoredSessionError extends Error {
-  readonly status: number;
-  constructor(status: number, message: string) {
-    super(message);
-    this.status = status;
-  }
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * Deletes one persisted session transcript. The path must be a `.jsonl` file
- * directly inside pi's session store — this is a destructive, user-initiated
- * action, so anything outside that exact directory is refused.
- */
-export async function deleteStoredSession(target: string): Promise<void> {
-  const cleaned = typeof target === 'string' ? target.trim() : '';
-  if (cleaned.length === 0) throw new StoredSessionError(400, 'path 不能为空');
-  if (!path.isAbsolute(cleaned)) throw new StoredSessionError(400, 'path 必须是绝对路径');
-  if (cleaned.includes('\0')) throw new StoredSessionError(400, 'path 不合法');
-
-  const root = sessionsRoot();
-  const resolved = path.resolve(cleaned);
-  const relative = path.relative(root, resolved);
-  if (relative.startsWith('..') || path.isAbsolute(relative) || relative.length === 0) {
-    throw new StoredSessionError(400, '只能删除 pi 会话目录里的文件');
-  }
-  // pi's layout is sessions/<escaped-cwd>/<file>.jsonl — exactly one level deep.
-  const parent = path.dirname(resolved);
-  const parentRelative = path.relative(root, parent);
-  if (
-    parentRelative.length === 0 ||
-    parentRelative.startsWith('..') ||
-    path.isAbsolute(parentRelative) ||
-    parentRelative.includes('/')
-  ) {
-    throw new StoredSessionError(400, '只能删除会话工作区目录下的 .jsonl 文件');
-  }
-  if (path.extname(resolved) !== '.jsonl') {
-    throw new StoredSessionError(400, '只能删除 .jsonl 会话文件');
-  }
-  if (!existsSync(resolved)) throw new StoredSessionError(404, '会话文件不存在');
-
-  await fsp.unlink(resolved).catch((error: unknown) => {
-    throw new StoredSessionError(500, `删除失败：${errorMessage(error)}`);
-  });
-}
 
 /**
  * Discover past pi sessions on disk, newest first.
@@ -110,29 +106,71 @@ export async function listStoredSessions(
 ): Promise<StoredSession[]> {
   const limit = clampStoredLimit(options.limit);
   const candidates = await collectCandidates(MAX_CANDIDATE_FILES);
+  const seen = new Set(candidates.map((candidate) => candidate.file));
 
-  const matched: { header: SessionHeader; candidate: Candidate }[] = [];
+  const matched: { header: SessionHeader; candidate: Candidate; preview: string | null }[] = [];
   for (const candidate of candidates) {
-    const header = await readHeader(candidate.file);
-    if (!header) continue;
-    if (options.cwd !== undefined && header.cwd !== options.cwd) continue;
-    matched.push({ header, candidate });
+    const meta = await metaFor(candidate);
+    if (!meta) continue;
+    if (options.cwd !== undefined && meta.header.cwd !== options.cwd) continue;
+    matched.push({ header: meta.header, candidate, preview: meta.preview });
   }
 
+  forgetMissing(seen);
   matched.sort((a, b) => sortKey(b) - sortKey(a));
 
   const sessions: StoredSession[] = [];
-  for (const { header, candidate } of matched.slice(0, limit)) {
+  for (const { header, candidate, preview } of matched.slice(0, limit)) {
     sessions.push({
       path: candidate.file,
       id: header.id,
       cwd: header.cwd,
       startedAt: header.timestamp,
       sizeBytes: candidate.size,
-      preview: await readPreview(candidate.file, candidate.size),
+      preview,
     });
   }
   return sessions;
+}
+
+/**
+ * One candidate's metadata, from the cache when the file has not changed.
+ *
+ * @returns the header and preview, or `null` for a file that is not a readable
+ *   session (malformed, or vanished).
+ */
+async function metaFor(
+  candidate: Candidate,
+): Promise<{ header: SessionHeader; preview: string | null } | null> {
+  const cached = metaCache.get(candidate.file);
+  if (
+    cached !== undefined &&
+    cached.sizeBytes === candidate.size &&
+    cached.mtimeMs === candidate.mtimeMs
+  ) {
+    return { header: cached.header, preview: cached.preview };
+  }
+
+  const header = await readHeader(candidate.file);
+  if (!header) {
+    metaCache.delete(candidate.file);
+    return null;
+  }
+
+  // A transcript only ever grows, so a preview already found stays valid; only
+  // the "no user message yet" case is worth reading the body again.
+  const preview =
+    cached !== undefined && cached.preview !== null
+      ? cached.preview
+      : await readPreview(candidate.file, candidate.size);
+
+  remember(candidate.file, {
+    sizeBytes: candidate.size,
+    mtimeMs: candidate.mtimeMs,
+    header,
+    preview,
+  });
+  return { header, preview };
 }
 
 /**
@@ -145,8 +183,9 @@ export async function recentStoredCwds(): Promise<string[]> {
   const seen = new Set<string>();
 
   for (const candidate of candidates) {
-    const header = await readHeader(candidate.file);
-    if (!header) continue;
+    const meta = await metaFor(candidate);
+    if (!meta) continue;
+    const { header } = meta;
     if (header.cwd.length === 0 || seen.has(header.cwd)) continue;
     seen.add(header.cwd);
     found.push({ cwd: header.cwd, key: sortKey({ header, candidate }) });

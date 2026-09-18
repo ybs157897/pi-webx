@@ -28,7 +28,6 @@ import {
 import type { SessionNode, WorkspaceItem } from './tree.ts'
 import {
   FLAT_SESSION_ORDER_KEY,
-  dateBucketOf,
   deriveFlat,
   deriveGroups,
   deriveSearchResults,
@@ -170,16 +169,14 @@ interface TreeBodyProps {
   orderBy: 'manual' | 'updated'
   groupExpansion: Readonly<Record<string, boolean>>
   sessionOrderByAccount: Readonly<Record<string, readonly string[]>>
-  /** Pinned row ids; rows arrive pre-ordered pinned-first from the derivation. */
-  pinnedSessions: readonly string[]
   revealSessionId: string | undefined
   onSessionRevealed: (id: string) => void
   openNode: (node: SessionNode | { id: string; kind: 'live' | 'stored' }) => void
   onSessionRename: (id: string, currentTitle: string) => void
-  onSessionKill: (id: string, title: string) => void
-  onStoredResume: (node: SessionNode) => void
-  onStoredDelete: (node: SessionNode) => void
-  onTogglePinned: (id: string) => void
+  /** Fork the session into a new transcript (dsh's `分叉会话`). */
+  onSessionFork: (node: SessionNode) => void
+  /** Hide the session from the list; its transcript is untouched (`归档会话`). */
+  onSessionArchive: (node: SessionNode) => void
   onWorkspacePick: (path: string) => void
   onWorkspaceDefault: (path: string) => void
   onWorkspaceForget: (path: string) => void
@@ -193,51 +190,29 @@ interface RowSection {
 }
 
 /**
- * Split one pre-ordered row list into render sections: the pinned run first
- * (rows arrive pinned-first from the derivation), then — in recency order —
- * calendar-day buckets. Manual order renders one unlabeled run. The section
- * split never reorders rows, so the drag math keeps reading the flat list.
+ * Split one pre-ordered row list into render sections.
+ *
+ * There is exactly one run: dsh's list has no pin tier and no calendar-day
+ * buckets, so the rows read as one recency-ordered (or manually ordered) list
+ * with the relative time on each row. The split never reorders rows, so the
+ * drag math keeps reading the flat list.
  */
-function rowSections(
-  rows: readonly SessionNode[],
-  pinned: ReadonlySet<string>,
-  orderBy: 'manual' | 'updated',
-  now: number,
-): RowSection[] {
-  const sections: RowSection[] = []
-  const pinnedRows = rows.filter(row => pinned.has(row.id))
-  if (pinnedRows.length > 0) sections.push({ label: '置顶', rows: pinnedRows })
-  const rest = rows.filter(row => !pinned.has(row.id))
-  if (orderBy === 'updated') {
-    let bucket: string | undefined
-    for (const row of rest) {
-      const label = dateBucketOf(row.updatedAt, now)
-      if (label !== bucket) {
-        bucket = label
-        sections.push({ label, rows: [] })
-      }
-      const current = sections[sections.length - 1]
-      if (current !== undefined) current.rows.push(row)
-    }
-  } else if (rest.length > 0) {
-    sections.push({ rows: rest })
-  }
-  return sections
+function rowSections(rows: readonly SessionNode[]): RowSection[] {
+  return rows.length > 0 ? [{ rows: [...rows] }] : []
 }
 
 /** The scrolling session tree; manual drag order persists into the view store. */
 function SessionTree(props: TreeBodyProps) {
   const {
     workspaces, live, stored, currentId, home, orderBy, groupExpansion, sessionOrderByAccount,
-    pinnedSessions, revealSessionId, onSessionRevealed, openNode,
-    onSessionRename, onSessionKill, onStoredResume, onStoredDelete, onTogglePinned,
+    revealSessionId, onSessionRevealed, openNode,
+    onSessionRename, onSessionFork, onSessionArchive,
     onWorkspacePick, onWorkspaceDefault, onWorkspaceForget, onNewSession,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
-  const pinnedSet = useMemo(() => new Set(pinnedSessions), [pinnedSessions])
   const groups = useMemo(
-    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts, pinnedSessions, home),
-    [workspaces, live, stored, currentId, groupExpansion, orderAccounts, pinnedSessions, home],
+    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts),
+    [workspaces, live, stored, currentId, groupExpansion, orderAccounts],
   )
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<string[]>([])
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -403,7 +378,7 @@ function SessionTree(props: TreeBodyProps) {
                 }}
               />
               {(sessionsExpanded ? group.sessions : collapsed.rows).length > 0
-                && rowSections(sessionsExpanded ? group.sessions : collapsed.rows, pinnedSet, orderBy, now)
+                && rowSections(sessionsExpanded ? group.sessions : collapsed.rows)
                   .flatMap(section => [
                     ...(section.label === undefined ? [] : [
                       <div
@@ -415,11 +390,8 @@ function SessionTree(props: TreeBodyProps) {
                       </div>,
                     ]),
                     ...section.rows.map((node) => {
-                      const isPinned = pinnedSet.has(node.id)
                       const sameGroupDrag = drag !== null && drag.accountKey === group.key
-                      // Pinned rows float above the manual order; dragging one
-                      // would promise an order its pin immediately overrides.
-                      const dragProps = orderBy !== 'manual' || isPinned ? undefined : {
+                      const dragProps = orderBy !== 'manual' ? undefined : {
                         start: () => {
                           sessionDropCommitted.current = false
                           setDrag({ accountKey: group.key, sessionId: node.id, over: null })
@@ -447,14 +419,11 @@ function SessionTree(props: TreeBodyProps) {
                           now={now}
                           onOpen={openNode}
                           onRename={onSessionRename}
-                          onKill={onSessionKill}
-                          onResume={onStoredResume}
-                          onDeleteStored={onStoredDelete}
                           onReveal={node.id === revealSessionId && group.key === revealGroup
                             ? () => { onSessionRevealed(node.id) }
                             : undefined}
-                          pinned={isPinned}
-                          onTogglePinned={() => { onTogglePinned(node.id) }}
+                          onFork={onSessionFork}
+                          onArchive={onSessionArchive}
                           drag={dragProps}
                         />
                       )
@@ -482,15 +451,14 @@ function SessionTree(props: TreeBodyProps) {
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList(props: TreeBodyProps) {
   const {
-    live, stored, currentId, home, orderBy, sessionOrderByAccount,
-    pinnedSessions, revealSessionId, onSessionRevealed, openNode,
-    onSessionRename, onSessionKill, onStoredResume, onStoredDelete, onTogglePinned,
+    live, stored, currentId, orderBy, sessionOrderByAccount,
+    revealSessionId, onSessionRevealed, openNode,
+    onSessionRename, onSessionFork, onSessionArchive,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
-  const pinnedSet = useMemo(() => new Set(pinnedSessions), [pinnedSessions])
   const rows = useMemo(
-    () => deriveFlat(live, stored, orderAccounts, pinnedSessions, home),
-    [live, stored, orderAccounts, pinnedSessions, home],
+    () => deriveFlat(live, stored, orderAccounts),
+    [live, stored, orderAccounts],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -520,7 +488,7 @@ function FlatList(props: TreeBodyProps) {
         {rows.length === 0 && (
           <div className={css.empty}>暂无会话</div>
         )}
-        {rows.length > 0 && rowSections(rows, pinnedSet, orderBy, now)
+        {rows.length > 0 && rowSections(rows)
           .flatMap(section => [
             ...(section.label === undefined ? [] : [
               <div
@@ -532,7 +500,6 @@ function FlatList(props: TreeBodyProps) {
               </div>,
             ]),
             ...section.rows.map((node) => {
-              const isPinned = pinnedSet.has(node.id)
               const active = drag !== null
               return (
                 <SessionNodeItem
@@ -542,16 +509,13 @@ function FlatList(props: TreeBodyProps) {
                   now={now}
                   onOpen={openNode}
                   onRename={onSessionRename}
-                  onKill={onSessionKill}
-                  onResume={onStoredResume}
-                  onDeleteStored={onStoredDelete}
+                  onFork={onSessionFork}
+                  onArchive={onSessionArchive}
                   onReveal={node.id === revealSessionId
                     ? () => { onSessionRevealed(node.id) }
                     : undefined}
-                  pinned={isPinned}
-                  onTogglePinned={() => { onTogglePinned(node.id) }}
                   flat
-                  drag={orderBy !== 'manual' || isPinned ? undefined : {
+                  drag={orderBy !== 'manual' ? undefined : {
                     start: () => {
                       dropCommitted.current = false
                       setDrag({ accountKey: FLAT_SESSION_ORDER_KEY, sessionId: node.id, over: null })
@@ -581,18 +545,17 @@ function FlatList(props: TreeBodyProps) {
 }
 
 /** The flat search body: local metadata matches across both session kinds. */
-function SearchResults({ query, workspaces, live, stored, currentId, home, openResult }: {
+function SearchResults({ query, workspaces, live, stored, currentId, openResult }: {
   query: string
   workspaces: readonly WorkspaceItem[]
   live: readonly SessionSummary[]
   stored: readonly StoredSession[]
   currentId: string | null
-  home: string | undefined
   openResult: (node: SessionNode | { id: string; kind: 'live' | 'stored' }) => void
 }) {
   const results = useMemo(
-    () => deriveSearchResults(workspaces, live, stored, query, home),
-    [workspaces, live, stored, query, home],
+    () => deriveSearchResults(workspaces, live, stored, query),
+    [workspaces, live, stored, query],
   )
   return (
     <div className={clsx(css.treeBody, css.wide)}>
@@ -627,10 +590,11 @@ export interface WorkspaceBrowserProps {
   currentId: string | null
   onSwitch: (id: string) => void
   onNewSession: (cwd: string) => void
-  onKill: (id: string) => void
   onRename: (id: string, name: string) => void
+  /** Open a stored transcript, loading it into a hosted session. */
   onResume: (session: StoredSession) => void
-  onDeleteStored: (session: StoredSession) => void
+  /** dsh's `分叉会话`: copy the session into a new transcript and open it. */
+  onFork: (node: SessionNode) => void
   onPickWorkspace: (path: string) => void
   onSetDefault: (path: string) => void
   onForgetWorkspace: (path: string) => void
@@ -652,10 +616,9 @@ export function WorkspaceBrowser({
   currentId,
   onSwitch,
   onNewSession,
-  onKill,
   onRename,
   onResume,
-  onDeleteStored,
+  onFork,
   onPickWorkspace,
   onSetDefault,
   onForgetWorkspace,
@@ -666,7 +629,42 @@ export function WorkspaceBrowser({
   const groupExpansion = useWorkspaceView(s => s.groupExpansion)
   const sessionOrderByAccount = useWorkspaceView(s => s.sessionOrderByAccount)
   const workspaceOrder = useWorkspaceView(s => s.workspaceOrder)
-  const pinnedSessions = useWorkspaceView(s => s.pinnedSessions)
+  const archivedSessions = useWorkspaceView(s => s.archivedSessions)
+  const archivedSet = useMemo(() => new Set(archivedSessions), [archivedSessions])
+  /**
+   * dsh's `归档会话`: hide the row; the transcript on disk is never touched.
+   *
+   * A resumed conversation is a live row *and* the transcript it is writing to,
+   * so hiding the live row alone would just reveal its history row under another
+   * id — the archive would look like it did nothing. Both ids go: the log
+   * outlives the hiding either way, which is the archive contract.
+   */
+  const archiveSession = (node: SessionNode): void => {
+    viewActions.archiveSession(node.id)
+    const hostedFile = node.kind === 'live' ? node.live?.sessionFile ?? null : null
+    if (hostedFile === null) return
+    if (stored.some(session => session.path === hostedFile)) {
+      viewActions.archiveSession(`stored:${hostedFile}`)
+    }
+  }
+  /**
+   * Archived rows leave here, before derivation: one filtering point means the
+   * groups, the per-workspace counts and the search results all agree without
+   * each re-checking the set. dsh hides an archived session from "every grouping
+   * surface" the same way.
+   *
+   * A transcript a live session is hosting is dropped inside derivation instead
+   * (see tree.ts): telling those two rows apart needs both lists, and the live
+   * row is the one standing for the open conversation.
+   */
+  const visibleLive = useMemo(
+    () => live.filter(session => !archivedSet.has(session.id)),
+    [archivedSet, live],
+  )
+  const visibleStored = useMemo(
+    () => stored.filter(session => !archivedSet.has(`stored:${session.path}`)),
+    [archivedSet, stored],
+  )
 
   // Manual workspace order (drag) reconciled with the owner's list: stored
   // order leads, workspaces the store does not know yet append in arrival order.
@@ -785,32 +783,24 @@ export function WorkspaceBrowser({
 
   // Kill confirmation (browser-owned): ending a live session aborts whatever
   // it is running, so — unlike dsh's dialog-free archive — this asks first.
-  const [killTarget, setKillTarget] = useState<{ id: string; title: string } | null>(null)
-  const onSessionKill = (id: string, title: string) => {
-    setKillTarget({ id, title })
-  }
 
   // Delete-from-disk confirmation: the transcript file goes away permanently.
-  const [deleteStoredTarget, setDeleteStoredTarget] = useState<SessionNode | null>(null)
 
   const treeProps: TreeBodyProps = {
     workspaces: orderedWorkspaces,
-    live,
-    stored,
+    live: visibleLive,
+    stored: visibleStored,
     currentId,
     home,
     orderBy,
     groupExpansion,
     sessionOrderByAccount,
-    pinnedSessions,
     revealSessionId,
     onSessionRevealed: acknowledgeSessionReveal,
     openNode,
     onSessionRename,
-    onSessionKill,
-    onStoredResume: openNode,
-    onStoredDelete: setDeleteStoredTarget,
-    onTogglePinned: viewActions.togglePinnedSession,
+    onSessionFork: onFork,
+    onSessionArchive: archiveSession,
     onWorkspacePick: onPickWorkspace,
     onWorkspaceDefault: onSetDefault,
     onWorkspaceForget: onForgetWorkspace,
@@ -933,7 +923,6 @@ export function WorkspaceBrowser({
               live={live}
               stored={stored}
               currentId={currentId}
-              home={home}
               openResult={openSearchResult}
             />
           )
@@ -972,56 +961,6 @@ export function WorkspaceBrowser({
           }}
         />
       </Modal>
-
-      <Modal
-        open={killTarget !== null}
-        onClose={() => { setKillTarget(null) }}
-        closeLabel="关闭"
-        title="结束会话"
-        description={killTarget === null ? '' : `确定要结束「${killTarget.title}」吗？该会话的 pi 进程会立即退出，转录文件保留在磁盘上。`}
-        footer={(
-          <>
-            <Button variant="outline" onClick={() => { setKillTarget(null) }}>取消</Button>
-            <Button
-              variant="outline"
-              className={css.deleteAction}
-              onClick={() => {
-                if (killTarget === null) return
-                onKill(killTarget.id)
-                setKillTarget(null)
-              }}
-            >
-              结束会话
-            </Button>
-          </>
-        )}
-      />
-
-      <Modal
-        open={deleteStoredTarget !== null}
-        onClose={() => { setDeleteStoredTarget(null) }}
-        closeLabel="关闭"
-        title="从磁盘删除会话"
-        description={deleteStoredTarget === null
-          ? ''
-          : `确定要删除「${deleteStoredTarget.title}」吗？该会话的转录文件会从磁盘永久删除，无法恢复。`}
-        footer={(
-          <>
-            <Button variant="outline" onClick={() => { setDeleteStoredTarget(null) }}>取消</Button>
-            <Button
-              variant="outline"
-              className={css.deleteAction}
-              onClick={() => {
-                if (deleteStoredTarget?.stored === undefined) return
-                onDeleteStored(deleteStoredTarget.stored)
-                setDeleteStoredTarget(null)
-              }}
-            >
-              删除
-            </Button>
-          </>
-        )}
-      />
     </div>
   )
 }

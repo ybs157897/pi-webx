@@ -15,7 +15,7 @@ export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
 export interface WorkspaceItem {
   /** absolute path — the group's identity */
   key: string
-  /** abbreviated display title (e.g. ~/code/foo) */
+  /** display title: the directory's own name (the path lives in the hover card) */
   title: string
   isCurrent: boolean
   isDefault: boolean
@@ -83,43 +83,19 @@ function byRecency(a: SessionNode, b: SessionNode): number {
 }
 
 /**
- * Stable pinned-first partition: pinned rows float to the top in their
- * underlying order (manual or recency); unpinned rows keep theirs. A pin is
- * naturally workspace-scoped — a row id only ever appears in one group — so a
- * flat id list needs no per-workspace keying.
+ * Live session → row node.
+ *
+ * Its display title is the name pi echoes, else the title of the transcript it
+ * resumed, else the folder it runs in — the directory's own name, never the
+ * path: a row under a workspace header repeats that header at worst, where a
+ * path repeats the whole filesystem. The hover card is where the path is
+ * spelled out.
  */
-function pinnedFirst(
-  rows: readonly SessionNode[],
-  pinned: ReadonlySet<string>,
-): SessionNode[] {
-  const top = rows.filter(row => pinned.has(row.id))
-  if (top.length === 0) return [...rows]
-  return [...top, ...rows.filter(row => !pinned.has(row.id))]
-}
-
-/** Calendar-day bucket for the recency-order section labels. */
-export type DateBucket = '今天' | '昨天' | '更早'
-
-/** Local-midnight start of the day containing `at` (DST-safe via Date). */
-function startOfDay(at: number): number {
-  const date = new Date(at)
-  date.setHours(0, 0, 0, 0)
-  return date.getTime()
-}
-
-export function dateBucketOf(updatedAt: number, now: number): DateBucket {
-  const today = startOfDay(now)
-  if (startOfDay(updatedAt) >= today) return '今天'
-  if (startOfDay(updatedAt) >= startOfDay(now - 86_400_000)) return '昨天'
-  return '更早'
-}
-
-/** Live session → row node. Its display title is the name pi echoes, else its directory. */
-export function liveNode(session: SessionSummary, home: string | undefined): SessionNode {
+export function liveNode(session: SessionSummary, hostedTitle?: string | undefined): SessionNode {
   return {
     id: session.id,
     kind: 'live',
-    title: session.sessionName ?? shortenCwd(session.cwd, home),
+    title: session.sessionName ?? hostedTitle ?? workspaceLabel(session.cwd),
     running: session.streaming,
     alive: session.alive,
     updatedAt: session.createdAt,
@@ -148,6 +124,52 @@ export function storedNode(session: StoredSession): SessionNode {
     updatedAt: Number.isNaN(parsed) ? 0 : parsed,
     stored: session,
   }
+}
+
+/* ------------------------------------------- transcripts a live session hosts */
+
+/**
+ * What the live sessions are currently hosting, seen from the stored list.
+ *
+ * Resuming a transcript loads it into a hosted session that keeps writing to the
+ * *same* file, so the file is then both a history row and a live row: two rows
+ * for one conversation, and the one the user just clicked looks like a second,
+ * brand new session. Derivation therefore drops the stored row, and titles the
+ * live row from the log — pi carries no session name for a log it resumed, so
+ * without that the row would fall back to the folder name and read as a fresh
+ * session in that folder all over again.
+ */
+interface HostedView {
+  /** `sessionFile` values a live session is hosting right now. */
+  files: ReadonlySet<string>
+  /** Log-derived titles, keyed by those same paths. */
+  titles: ReadonlyMap<string, string>
+}
+
+function hostedView(
+  live: readonly SessionSummary[],
+  stored: readonly StoredSession[],
+): HostedView {
+  const files = new Set<string>()
+  for (const session of live) {
+    if (session.sessionFile !== null) files.add(session.sessionFile)
+  }
+  const titles = new Map<string, string>()
+  for (const session of stored) {
+    if (files.has(session.path)) titles.set(session.path, previewTitle(session))
+  }
+  return { files, titles }
+}
+
+/** Live row, titled by the transcript it resumed when pi reports no name. */
+function liveRow(session: SessionSummary, hosted: HostedView): SessionNode {
+  const hostedTitle = session.sessionFile === null ? undefined : hosted.titles.get(session.sessionFile)
+  return liveNode(session, hostedTitle)
+}
+
+/** Stored rows that are already represented by a live row. */
+function unhosted(stored: readonly StoredSession[], hosted: HostedView): StoredSession[] {
+  return stored.filter(session => !hosted.files.has(session.path))
 }
 
 /**
@@ -189,19 +211,20 @@ export function deriveGroups(
   currentId: string | null,
   expansion: Readonly<Record<string, boolean>>,
   orderByAccount: Readonly<Record<string, readonly string[]>>,
-  pinned: readonly string[],
-  home: string | undefined,
 ): GroupNode[] {
-  const pinnedSet = new Set(pinned)
   const currentWorkspace = currentId === null
     ? undefined
     : live.find(session => session.id === currentId)?.cwd
+  const hosted = hostedView(live, stored)
+  const free = unhosted(stored, hosted)
   return workspaces.map((workspace) => {
     const rows: SessionNode[] = [
-      ...live.filter(session => session.cwd === workspace.key).map(session => liveNode(session, home)),
-      ...stored.filter(session => session.cwd === workspace.key).map(session => storedNode(session)),
+      ...live.filter(session => session.cwd === workspace.key).map(session => liveRow(session, hosted)),
+      ...free.filter(session => session.cwd === workspace.key).map(session => storedNode(session)),
     ]
-    const ordered = pinnedFirst(reconciledOrder(rows, orderByAccount[workspace.key]), pinnedSet)
+    // No pin tier: dsh's list is one recency-ordered run, so a session's place
+    // in it is earned by being recent rather than by being held there.
+    const ordered = reconciledOrder(rows, orderByAccount[workspace.key])
     const expanded = expansion[workspace.key] ?? workspace.isCurrent
     return {
       key: workspace.key,
@@ -217,19 +240,18 @@ export function deriveGroups(
   })
 }
 
-/** Derive the flat session list ("In one list" mode): pinned first, else newest first. */
+/** Derive the flat session list ("In one list" mode), newest first. */
 export function deriveFlat(
   live: readonly SessionSummary[],
   stored: readonly StoredSession[],
   orderByAccount: Readonly<Record<string, readonly string[]>>,
-  pinned: readonly string[],
-  home: string | undefined,
 ): SessionNode[] {
+  const hosted = hostedView(live, stored)
   const rows: SessionNode[] = [
-    ...live.map(session => liveNode(session, home)),
-    ...stored.map(session => storedNode(session)),
+    ...live.map(session => liveRow(session, hosted)),
+    ...unhosted(stored, hosted).map(session => storedNode(session)),
   ]
-  return pinnedFirst(reconciledOrder(rows, orderByAccount[FLAT_SESSION_ORDER_KEY]), new Set(pinned))
+  return reconciledOrder(rows, orderByAccount[FLAT_SESSION_ORDER_KEY])
 }
 
 /**
@@ -243,15 +265,15 @@ export function deriveSearchResults(
   live: readonly SessionSummary[],
   stored: readonly StoredSession[],
   query: string,
-  home: string | undefined,
 ): SearchResultNode[] {
   const q = query.trim().toLowerCase()
   if (q === '') return []
   const labelOf = (cwd: string): string =>
     workspaces.find(workspace => workspace.key === cwd)?.title ?? workspaceLabel(cwd)
+  const hosted = hostedView(live, stored)
   const results: SearchResultNode[] = []
   for (const session of live) {
-    const node = liveNode(session, home)
+    const node = liveRow(session, hosted)
     const haystack = [node.title, session.cwd, session.provider ?? '', session.model ?? '']
       .join('\n')
       .toLowerCase()
@@ -265,7 +287,7 @@ export function deriveSearchResults(
       alive: node.alive,
     })
   }
-  for (const session of stored) {
+  for (const session of unhosted(stored, hosted)) {
     const node = storedNode(session)
     const haystack = [node.title, session.cwd, session.preview ?? ''].join('\n').toLowerCase()
     if (!haystack.includes(q)) continue

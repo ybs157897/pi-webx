@@ -1,4 +1,4 @@
-import { promises as fsp, statSync } from 'node:fs';
+import { statSync } from 'node:fs';
 import path from 'node:path';
 import express from 'express';
 import type { Request, Response, Router } from 'express';
@@ -7,14 +7,16 @@ import {
   type CommandResponse,
   type CreateSessionRequest,
   type CreateSessionResponse,
-  type FsListResponse,
   type ListSessionsResponse,
   type ListStoredSessionsResponse,
+  type PickDirectoryResponse,
   type PiCommandEnvelope,
   type PiThinkingLevel,
   type ServerFrame,
 } from '../src/shared/protocol';
 import { buildServerConfig } from './config';
+import { DirectoryPickerUnsupportedError, pickNativeDirectory } from './directory-picker';
+import { ModelCatalogError, buildModelCatalog, saveDefaultModelSelection } from './model-catalog';
 import { ModelDiscoveryError, assertPublicHttpUrl, discoverModels } from './model-discovery';
 import {
   ModelConfigError,
@@ -24,12 +26,20 @@ import {
   upsertModel as upsertModelEntry,
   upsertProvider as upsertProviderEntry,
 } from './models-config';
+import { GitError, checkoutBranch, readGitBranches } from './git';
 import {
   HostError,
   PiHost,
   type HostSubscriber,
 } from './pi/host';
-import { clampStoredLimit, deleteStoredSession, listStoredSessions, recentStoredCwds, sessionsRoot, StoredSessionError } from './stored-sessions';
+import {
+  ProviderError,
+  listProviders,
+  removeProviderCredential,
+  setProviderCredential,
+} from './providers';
+import type { CredentialWriteResponse, ListProvidersResponse } from '../src/shared/providers';
+import { clampStoredLimit, listStoredSessions, recentStoredCwds, sessionsRoot } from './stored-sessions';
 
 /** SSE keep-alive cadence. */
 const HEARTBEAT_MS = 15_000;
@@ -74,6 +84,8 @@ const KNOWN_COMMANDS = new Set<string>([
   'abort_bash',
   'get_session_stats',
   'get_commands',
+  'get_tools',
+  'set_tools',
   'set_session_name',
   'extension_ui_response',
   'switch_session',
@@ -98,46 +110,34 @@ export function createApiRouter(manager: PiHost): Router {
     res.json(buildServerConfig(storedCwds));
   });
 
-  router.get('/fs/list', async (req: Request, res: Response) => {
-    const raw = typeof req.query.path === 'string' ? req.query.path : '';
-    if (raw.trim().length === 0) {
-      return sendError(res, 400, 'query parameter "path" is required');
-    }
-    if (!path.isAbsolute(raw)) {
-      return sendError(res, 400, 'path must be an absolute path');
-    }
-
-    const dir = path.resolve(raw);
-
-    let stats;
+  /**
+   * Open the OS directory chooser on the bridge host and report what it returned.
+   *
+   * A cancel is a normal outcome (`path: null`) and has to stay distinguishable
+   * from a failure: "the user changed their mind" must not raise an error
+   * surface, while "this host has no picker" must. The dialog lives on the
+   * server, so the path it yields is a real directory there — the client never
+   * has to guess about a machine it cannot see.
+   */
+  router.post('/workspace/pick', async (req: Request, res: Response) => {
+    const body: unknown = req.body;
+    const initial = isRecord(body) && typeof body['initial'] === 'string' ? body['initial'] : undefined;
+    const controller = new AbortController();
+    // A dialog outlives the request that raised it by design, so the connection
+    // is its lifetime: a tab that goes away must not leave a chooser on screen.
+    res.on('close', () => { if (!res.writableEnded) controller.abort(); });
     try {
-      stats = await fsp.stat(dir);
-    } catch {
-      return sendError(res, 400, `path does not exist: ${dir}`);
-    }
-    if (!stats.isDirectory()) {
-      return sendError(res, 400, `not a directory: ${dir}`);
-    }
-
-    let dirents;
-    try {
-      dirents = await fsp.readdir(dir, { withFileTypes: true });
+      const picked = await pickNativeDirectory({ initial, signal: controller.signal });
+      const payload: PickDirectoryResponse = { path: picked };
+      res.json(payload);
     } catch (error) {
-      return sendError(res, 400, `cannot read directory: ${errorMessage(error)}`);
+      if (controller.signal.aborted) return;
+      sendError(
+        res,
+        error instanceof DirectoryPickerUnsupportedError ? 501 : 500,
+        `cannot open the system directory picker: ${errorMessage(error)}`,
+      );
     }
-
-    const entries = dirents
-      .filter((dirent) => dirent.isDirectory())
-      .map((dirent) => ({ name: dirent.name, path: path.join(dir, dirent.name) }))
-      .sort((a, b) => compareNames(a.name, b.name));
-
-    const parent = path.dirname(dir);
-    const payload: FsListResponse = {
-      path: dir,
-      parent: parent === dir ? null : parent,
-      entries,
-    };
-    res.json(payload);
   });
 
   router.get('/stored-sessions', async (req: Request, res: Response) => {
@@ -156,30 +156,35 @@ export function createApiRouter(manager: PiHost): Router {
     res.json(payload);
   });
 
-  router.delete('/stored-sessions', async (req: Request, res: Response) => {
-    const target = typeof req.query.path === 'string' ? req.query.path : '';
-    // Entry-visible containment — the callee re-runs its own checks; this
-    // keeps the trust boundary at the route for anything filesystem-bound.
-    if (target.trim().length === 0) {
-      return sendError(res, 400, 'path 不能为空');
-    }
-    if (!isInsideSessionsRoot(target)) {
-      return sendError(res, 400, '只能删除 pi 会话目录里的文件');
-    }
-    try {
-      // deleteStoredSession is async: without the await its guard errors would
-      // surface as unhandled rejections after the 200 has already been sent.
-      await deleteStoredSession(target);
-      res.json({ ok: true });
-    } catch (error) {
-      if (error instanceof StoredSessionError) {
-        return sendError(res, error.status, error.message);
-      }
-      sendError(res, 500, errorMessage(error));
-    }
-  });
-
   /* ------------------------------------------------ pi models.json editing */
+
+  /**
+   * Re-read `models.json` into the shared runtime after a config write.
+   *
+   * pi reads the file once per process — `ModelConfig.load()` runs when the
+   * runtime is created — so a provider or model the editor adds stays invisible
+   * to the picker (and to every session that resolves against the runtime) until
+   * the bridge restarts. That is the "配置好了却选不到" failure: the file says one
+   * thing, the running deployment answers with its boot-time snapshot.
+   *
+   * `allowNetwork: false` keeps this a local re-read. The flag exists because
+   * `refresh()` can also refetch catalogs over the network, which a file edit
+   * does not ask for and this bridge does not do to the user.
+   */
+  async function reloadModelsConfig(): Promise<void> {
+    try {
+      const runtime = await manager.getModelRuntime();
+      await runtime.refresh({ allowNetwork: false });
+    } catch (error) {
+      // The file is already written. A runtime that cannot be re-read is a stale
+      // catalog, not a failed save, so it is reported and stepped over rather
+      // than answering an error for an edit that did land.
+      console.warn(
+        '[pi-webx] models.json 重新载入失败：',
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
 
   router.get('/models-config', (_req: Request, res: Response) => {
     res.json(describeModelConfig());
@@ -207,6 +212,7 @@ export function createApiRouter(manager: PiHost): Router {
   router.put('/models-config/providers/:id', async (req: Request, res: Response) => {
     try {
       const payload = await upsertProviderEntry(paramId(req), req.body as Record<string, unknown>);
+      await reloadModelsConfig();
       res.json(payload);
     } catch (error) {
       sendModelConfigError(res, error);
@@ -215,7 +221,9 @@ export function createApiRouter(manager: PiHost): Router {
 
   router.delete('/models-config/providers/:id', async (req: Request, res: Response) => {
     try {
-      res.json(await deleteProviderEntry(paramId(req)));
+      const payload = await deleteProviderEntry(paramId(req));
+      await reloadModelsConfig();
+      res.json(payload);
     } catch (error) {
       sendModelConfigError(res, error);
     }
@@ -224,7 +232,9 @@ export function createApiRouter(manager: PiHost): Router {
   router.put('/models-config/providers/:id/models/:modelId', async (req: Request, res: Response) => {
     try {
       const body = { ...(req.body as Record<string, unknown>), id: String(req.params['modelId'] ?? '') };
-      res.json(await upsertModelEntry(paramId(req), body));
+      const payload = await upsertModelEntry(paramId(req), body);
+      await reloadModelsConfig();
+      res.json(payload);
     } catch (error) {
       sendModelConfigError(res, error);
     }
@@ -232,9 +242,147 @@ export function createApiRouter(manager: PiHost): Router {
 
   router.delete('/models-config/providers/:id/models/:modelId', async (req: Request, res: Response) => {
     try {
-      res.json(await deleteModelEntry(paramId(req), String(req.params['modelId'] ?? '')));
+      const payload = await deleteModelEntry(paramId(req), String(req.params['modelId'] ?? ''));
+      await reloadModelsConfig();
+      res.json(payload);
     } catch (error) {
       sendModelConfigError(res, error);
+    }
+  });
+
+  /* ------------------------------------------------------------------ git */
+
+  /**
+   * The workspace's branch and the branches it could switch to.
+   *
+   * Read-only and request-scoped: no watcher, no cache, nothing to invalidate —
+   * the composer asks again when the workspace changes or a run finishes.
+   */
+  router.get('/git', async (req: Request, res: Response) => {
+    const cwdRaw = typeof req.query['cwd'] === 'string' ? req.query['cwd'].trim() : '';
+    if (cwdRaw.length === 0 || !path.isAbsolute(cwdRaw)) {
+      return sendError(res, 400, 'query parameter "cwd" must be an absolute path');
+    }
+    try {
+      res.json(await readGitBranches(cwdRaw));
+    } catch (error) {
+      sendGitError(res, error);
+    }
+  });
+
+  /** Switch the workspace to one of its own local branches. */
+  router.post('/git/checkout', async (req: Request, res: Response) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const cwdRaw = optionalString(body['cwd']);
+    if (cwdRaw === undefined || !path.isAbsolute(cwdRaw)) {
+      return sendError(res, 400, 'cwd must be an absolute path');
+    }
+    try {
+      const branch = typeof body['branch'] === 'string' ? body['branch'] : '';
+      res.json(await checkoutBranch(cwdRaw, branch));
+    } catch (error) {
+      sendGitError(res, error);
+    }
+  });
+
+  /* ------------------------------------------------- model catalog / default */
+
+  /**
+   * The picker's catalog. Needs no session: it reads the shared model runtime
+   * and pi's settings, so it answers in the detached state a lazy session
+   * starts in — which is exactly when a user needs to choose a model.
+   */
+  router.get('/models', async (req: Request, res: Response) => {
+    const cwdRaw = typeof req.query.cwd === 'string' ? req.query.cwd.trim() : '';
+    if (cwdRaw.length > 0 && !path.isAbsolute(cwdRaw)) {
+      return sendError(res, 400, 'query parameter "cwd" must be an absolute path');
+    }
+    try {
+      const runtime = await manager.getModelRuntime();
+      res.json(await buildModelCatalog(runtime, cwdRaw.length > 0 ? cwdRaw : process.cwd()));
+    } catch (error) {
+      sendModelCatalogError(res, error);
+    }
+  });
+
+  /**
+   * The picker saving its choice as the deployment default — dsh's
+   * `agentDefaultModel.saveSelection()`. Without this the picker's choice died
+   * with the session and the next session fell back to settings.json.
+   */
+  router.put('/models/default', async (req: Request, res: Response) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const cwdRaw = optionalString(body['cwd']);
+    if (cwdRaw !== undefined && !path.isAbsolute(cwdRaw)) {
+      return sendError(res, 400, 'cwd must be an absolute path');
+    }
+    try {
+      const runtime = await manager.getModelRuntime();
+      const payload = await saveDefaultModelSelection(runtime, cwdRaw ?? process.cwd(), {
+        provider: typeof body['provider'] === 'string' ? body['provider'] : '',
+        model: typeof body['model'] === 'string' ? body['model'] : '',
+        ...(typeof body['thinkingLevel'] === 'string'
+          ? { thinkingLevel: body['thinkingLevel'] as PiThinkingLevel }
+          : body['thinkingLevel'] === null
+            ? { thinkingLevel: null }
+            : {}),
+      });
+      res.json(payload);
+    } catch (error) {
+      sendModelCatalogError(res, error);
+    }
+  });
+
+  /* ------------------------------------------------ providers and credentials */
+
+  /**
+   * Every provider the runtime knows, with its credential state. Read-only and
+   * session-independent, like the catalog beside it.
+   */
+  router.get('/providers', async (_req: Request, res: Response) => {
+    try {
+      const runtime = await manager.getModelRuntime();
+      const payload: ListProvidersResponse = {
+        providers: await listProviders(runtime, declaredProviderIds()),
+      };
+      res.json(payload);
+    } catch (error) {
+      sendProviderError(res, error);
+    }
+  });
+
+  /**
+   * Store an API key through the provider's own login flow. pi persists it
+   * through its locked credential store, so the CLI sees the same key.
+   */
+  router.put('/providers/:id/credential', async (req: Request, res: Response) => {
+    const body = isRecord(req.body) ? req.body : {};
+    try {
+      const runtime = await manager.getModelRuntime();
+      const payload: CredentialWriteResponse = {
+        providers: await setProviderCredential(
+          runtime,
+          paramId(req),
+          { apiKey: typeof body['apiKey'] === 'string' ? body['apiKey'] : '' },
+          declaredProviderIds(),
+        ),
+      };
+      res.json(payload);
+    } catch (error) {
+      sendProviderError(res, error);
+    }
+  });
+
+  /** Remove the stored credential for one provider. */
+  router.delete('/providers/:id/credential', async (req: Request, res: Response) => {
+    try {
+      const runtime = await manager.getModelRuntime();
+      const payload: CredentialWriteResponse = {
+        providers: await removeProviderCredential(runtime, paramId(req), declaredProviderIds()),
+      };
+      res.json(payload);
+    } catch (error) {
+      sendProviderError(res, error);
     }
   });
 
@@ -242,6 +390,18 @@ export function createApiRouter(manager: PiHost): Router {
     const parsed = parseCreateSessionRequest(req.body);
     if (!parsed.ok) {
       return sendError(res, 400, parsed.error);
+    }
+
+    // Resuming a log that is already hosted hands back the session hosting it.
+    // Two hosts on one log would append to the same file, and the caller asked
+    // to open that conversation — not for a second copy of it.
+    if (parsed.value.sessionPath !== undefined) {
+      const path = parsed.value.sessionPath;
+      const hosted = manager.list().find((session) => session.sessionFile === path);
+      if (hosted !== undefined) {
+        const payload: CreateSessionResponse = { session: manager.summary(hosted) };
+        return res.json(payload);
+      }
     }
 
     try {
@@ -256,19 +416,60 @@ export function createApiRouter(manager: PiHost): Router {
     }
   });
 
+  /**
+   * Fork a transcript into a new session — dsh's `分叉会话`, which both its live
+   * and stored rows offer. The source is either a hosted session (its own file)
+   * or a stored transcript, whose path must sit inside pi's session store: the
+   * same containment rule the delete route uses, because this is another
+   * operation the client addresses by path.
+   */
+  router.post('/sessions/fork', async (req: Request, res: Response) => {
+    const body = isRecord(req.body) ? req.body : {};
+    const sessionId = optionalString(body['sessionId']);
+    const rawPath = optionalString(body['path']);
+    const cwdRaw = optionalString(body['cwd']);
+    if (cwdRaw !== undefined && !path.isAbsolute(cwdRaw)) {
+      return sendError(res, 400, 'cwd must be an absolute path');
+    }
+
+    let source: string | undefined;
+    if (sessionId !== undefined) {
+      const hosted = manager.get(sessionId);
+      if (!hosted) return sendError(res, 404, `unknown session: ${sessionId}`);
+      if (hosted.sessionFile === null) {
+        return sendError(res, 400, '该会话没有转录文件（未持久化），无法分叉');
+      }
+      source = hosted.sessionFile;
+    } else if (rawPath !== undefined) {
+      if (!isInsideSessionsRoot(rawPath)) {
+        return sendError(res, 400, '只能分叉 pi 会话目录里的转录文件');
+      }
+      source = path.resolve(rawPath.trim());
+    }
+    if (source === undefined) {
+      return sendError(res, 400, 'sessionId 与 path 至少提供一个');
+    }
+
+    try {
+      const session = await manager.fork({
+        source,
+        ...(cwdRaw === undefined ? {} : { cwd: cwdRaw }),
+      });
+      const payload: CreateSessionResponse = { session: manager.summary(session) };
+      res.status(201).json(payload);
+    } catch (error) {
+      if (error instanceof HostError) {
+        return sendError(res, error.status, error.message);
+      }
+      sendError(res, 500, errorMessage(error));
+    }
+  });
+
   router.get('/sessions', (_req: Request, res: Response) => {
     const payload: ListSessionsResponse = {
       sessions: manager.list().map((session) => manager.summary(session)),
     };
     res.json(payload);
-  });
-
-  router.delete('/sessions/:id', async (req: Request, res: Response) => {
-    const id = paramId(req);
-    if (!(await manager.kill(id))) {
-      return sendError(res, 404, `unknown session: ${id}`);
-    }
-    res.json({ ok: true });
   });
 
   router.post('/sessions/:id/command', async (req: Request, res: Response) => {
@@ -445,6 +646,20 @@ function parseCreateSessionRequest(raw: unknown): ParseResult {
     value.extraArgs = raw.extraArgs as string[];
   }
 
+  // The browser's tool preset. Builtin names only: the host merges extension
+  // tools in, and a resumed session's own record wins over this anyway.
+  if (raw.toolNames !== undefined) {
+    if (!Array.isArray(raw.toolNames)) {
+      return { ok: false, error: 'toolNames must be an array of strings' };
+    }
+    for (const name of raw.toolNames) {
+      if (typeof name !== 'string') {
+        return { ok: false, error: 'toolNames must be an array of strings' };
+      }
+    }
+    value.toolNames = raw.toolNames as string[];
+  }
+
   return { ok: true, value };
 }
 
@@ -473,14 +688,6 @@ function paramId(req: Request): string {
   return typeof raw === 'string' ? raw : '';
 }
 
-function compareNames(a: string, b: string): number {
-  const left = a.toLowerCase();
-  const right = b.toLowerCase();
-  if (left !== right) return left < right ? -1 : 1;
-  if (a === b) return 0;
-  return a < b ? -1 : 1;
-}
-
 function sendError(res: Response, status: number, message: string): void {
   if (res.headersSent) {
     res.end();
@@ -497,12 +704,49 @@ function sendModelConfigError(res: Response, error: unknown): void {
   sendError(res, 500, errorMessage(error));
 }
 
+function sendGitError(res: Response, error: unknown): void {
+  if (error instanceof GitError) {
+    sendError(res, error.status, error.message);
+    return;
+  }
+  sendError(res, 500, errorMessage(error));
+}
+
 function sendModelDiscoveryError(res: Response, error: unknown): void {
   if (error instanceof ModelDiscoveryError) {
     sendError(res, error.status, error.message);
     return;
   }
   sendModelConfigError(res, error);
+}
+
+function sendModelCatalogError(res: Response, error: unknown): void {
+  if (error instanceof ModelCatalogError) {
+    sendError(res, error.status, error.message);
+    return;
+  }
+  sendError(res, 500, errorMessage(error));
+}
+
+function sendProviderError(res: Response, error: unknown): void {
+  if (error instanceof ProviderError) {
+    sendError(res, error.status, error.message);
+    return;
+  }
+  sendError(res, 500, errorMessage(error));
+}
+
+/**
+ * Provider ids owned by `models.json` — the ones the custom-provider editor may
+ * edit. A malformed file yields none rather than failing the whole list: the
+ * catalog providers are still worth showing.
+ */
+function declaredProviderIds(): string[] {
+  try {
+    return Object.keys(describeModelConfig().providers);
+  } catch {
+    return [];
+  }
 }
 
 /** Optional free-form string field: blank means "not supplied". */

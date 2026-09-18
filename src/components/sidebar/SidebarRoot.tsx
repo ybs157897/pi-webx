@@ -17,12 +17,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import {
-  IconDarkOutline16,
-  IconLightOutline16,
   IconNewChatOutline16,
   IconPanelLeftOutline16,
   IconSettingsOutline16,
-  StateDot,
   Tooltip,
 } from '../../ui/primitives/index.ts'
 import css from './SidebarRoot.module.css'
@@ -45,10 +42,7 @@ export interface SidebarRootProps {
   onToggle: () => void
   /** pi version rendered beside the wordmark, when known. */
   piVersion: string | null
-  themeMode: 'light' | 'dark'
-  connected: boolean
   onNewSession: () => void
-  onToggleTheme: () => void
   onOpenSettings: () => void
   /** The browsing region; the shell hands it the wide flag and an expand request. */
   region: (wide: boolean, expandSidebar: () => void) => ReactNode
@@ -64,10 +58,7 @@ export function SidebarRoot({
   collapsed,
   onToggle,
   piVersion,
-  themeMode,
-  connected,
   onNewSession,
-  onToggleTheme,
   onOpenSettings,
   region,
 }: SidebarRootProps) {
@@ -209,36 +200,11 @@ export function SidebarRoot({
         {region(wide, () => { if (collapsed) onToggle() })}
       </div>
 
-      {/* Footer actions stack above Settings in both sidebar widths. */}
+      {/* Footer: Settings alone, where dsh's sidebar ends. The connection state
+          and the theme both moved: the first is per-session (each row carries its
+          own status), and the second is a preference, which lives in the settings
+          surface rather than in a rail button. */}
       <div className={css.footArea}>
-        <div className={css.footerActions}>
-          <Tooltip label={themeMode === 'dark' ? '切换浅色' : '切换深色'} delayMs={500}>
-            <button
-              type="button"
-              className={css.iconButton}
-              aria-label={themeMode === 'dark' ? '切换浅色' : '切换深色'}
-              onClick={() => { onToggleTheme() }}
-            >
-              {themeMode === 'dark' ? <IconLightOutline16 size={wide ? 16 : 18} /> : <IconDarkOutline16 size={wide ? 16 : 18} />}
-            </button>
-          </Tooltip>
-          {wide && (
-            <span
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                paddingInlineStart: 8,
-                fontSize: 12,
-                lineHeight: '20px',
-                color: 'var(--dsw-alias-label-tertiary)',
-              }}
-            >
-              <StateDot state={connected ? 'done' : 'error'} size={7} />
-              {connected ? '已连接' : '未连接'}
-            </span>
-          )}
-        </div>
         <div className={css.settingsArea}>
           <Tooltip label="设置" delayMs={500} disabled={wide}>
             <button

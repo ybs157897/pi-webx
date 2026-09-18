@@ -177,10 +177,23 @@ export function languageFromPath(path: string | undefined | null): string {
   return map[ext] ?? 'text';
 }
 
-/** Number of lines in a block of text (used to size collapsed tool output). */
-export function countLines(value: string): number {
-  if (value.length === 0) return 0;
-  return value.split('\n').length;
+/** Last path segment, for a diff header or a file chip (`''` when there is none). */
+export function baseName(path: string | undefined | null): string {
+  if (!path) return '';
+  const parts = path.split('/').filter(Boolean);
+  return parts[parts.length - 1] ?? '';
+}
+
+/**
+ * Language for a tool's *output*, which is not the language of its arguments:
+ * pi pipes a shell's stdout through untouched, so it is terminal text — `log`
+ * colours timestamps, levels and numbers and leaves prose alone, which is as
+ * close to a terminal as this highlighter gets (it bundles no `ansi` grammar) —
+ * while a file tool's output follows the path it was pointed at.
+ */
+export function toolOutputLanguage(toolName: string, args: Record<string, unknown>): string {
+  if (toolName === 'bash' || toolName === 'powershell') return 'log';
+  return languageFromPath(readString(args, 'path', 'file_path', 'filePath'));
 }
 
 export function isImageContent(content: string | undefined): boolean {

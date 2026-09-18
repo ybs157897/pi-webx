@@ -1,4 +1,4 @@
-import { Alert, Flexbox, Icon, Text } from '@lobehub/ui';
+import { Alert, Flexbox, Highlighter, Icon, Text } from '@lobehub/ui';
 import { Progress, Tag, theme } from 'antd';
 import { LoaderCircle, RotateCw } from 'lucide-react';
 
@@ -13,31 +13,24 @@ export function WidgetStrip({
   widgets: Record<string, WidgetState>;
   placement: WidgetState['placement'];
 }) {
-  const { token } = theme.useToken();
   const entries = Object.entries(widgets).filter(([, widget]) => widget.placement === placement);
   if (entries.length === 0) return null;
 
   return (
     <Flexbox gap={6} paddingBlock={4}>
       {entries.map(([key, widget]) => (
-        <pre
+        // A widget is pi's own TUI text (with the escape sequences that implies),
+        // so it goes through the app's highlighter rather than a bare `<pre>`.
+        <Highlighter
           key={key}
-          style={{
-            margin: 0,
-            padding: '6px 10px',
-            fontSize: 11.5,
-            lineHeight: 1.55,
-            fontFamily: token.fontFamilyCode,
-            color: token.colorTextSecondary,
-            background: token.colorFillQuaternary,
-            border: `1px solid ${token.colorBorderSecondary}`,
-            borderRadius: token.borderRadius,
-            whiteSpace: 'pre-wrap',
-            overflowX: 'auto',
-          }}
+          language="log"
+          variant="outlined"
+          wrap
+          copyable={false}
+          showLanguage={false}
         >
           {widget.lines.join('\n')}
-        </pre>
+        </Highlighter>
       ))}
     </Flexbox>
   );

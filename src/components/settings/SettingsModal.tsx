@@ -54,17 +54,26 @@ export function SettingsModal({ open, onClose, sections }: SettingsModalProps): 
   const titleId = useId()
   const closeButton = useRef<HTMLButtonElement | null>(null)
 
+  /* The close contract arrives as an inline callback, so its identity changes on
+     every parent render — and the app re-renders on its session poll. Reading it
+     through a ref keeps the effect below keyed on `open` alone: binding it to
+     `onClose` would re-run on every poll, and re-running means resetting the
+     active section back to the first row and pulling focus off whatever field
+     the user is editing. */
+  const closeRef = useRef(onClose)
+  useEffect(() => { closeRef.current = onClose })
+
   useEffect(() => {
     if (!open) return
     setActiveId(undefined)
     const onKeyDown = (e: KeyboardEvent): void => {
-      if (e.key === 'Escape') onClose()
+      if (e.key === 'Escape') closeRef.current()
     }
     document.addEventListener('keydown', onKeyDown)
     // Entering the dialog focuses the close button.
     closeButton.current?.focus()
     return () => { document.removeEventListener('keydown', onKeyDown) }
-  }, [open, onClose])
+  }, [open])
 
   if (!open) return null
 

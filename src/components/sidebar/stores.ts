@@ -17,8 +17,13 @@ export interface WorkspaceViewState {
   sessionOrderByAccount: Record<string, readonly string[]>
   /** workspace paths in manual drag order (unknown workspaces append by recency of arrival) */
   workspaceOrder: readonly string[]
-  /** pinned session row ids (live id or `stored:` path); pinned rows float to the top */
-  pinnedSessions: readonly string[]
+  /**
+   * Row ids hidden from every list surface — dsh's archive set, whose contract is
+   * "a hidden session keeps its history and its place, but no unarchive action
+   * exists yet". Non-destructive: the transcript on disk is never touched, which
+   * is why archiving replaced the delete entry in the row menu.
+   */
+  archivedSessions: readonly string[]
 }
 
 const STORAGE_KEY = 'pi-webx.workspace.view.v1'
@@ -29,7 +34,7 @@ const DEFAULT_STATE: WorkspaceViewState = {
   groupExpansion: {},
   sessionOrderByAccount: {},
   workspaceOrder: [],
-  pinnedSessions: [],
+  archivedSessions: [],
 }
 
 function loadState(): WorkspaceViewState {
@@ -41,13 +46,13 @@ function loadState(): WorkspaceViewState {
       groupBy: parsed.groupBy === 'flat' ? 'flat' : 'workspace',
       orderBy: parsed.orderBy === 'updated' ? 'updated' : 'manual',
       groupExpansion: isRecord(parsed.groupExpansion) ? parsed.groupExpansion : {},
+      archivedSessions: Array.isArray(parsed.archivedSessions)
+        ? parsed.archivedSessions.filter((id): id is string => typeof id === 'string')
+        : [],
       sessionOrderByAccount: isRecord(parsed.sessionOrderByAccount)
         ? parsed.sessionOrderByAccount
         : {},
       workspaceOrder: Array.isArray(parsed.workspaceOrder) ? parsed.workspaceOrder : [],
-      pinnedSessions: Array.isArray(parsed.pinnedSessions)
-        ? parsed.pinnedSessions.filter((id): id is string => typeof id === 'string')
-        : [],
     }
   } catch {
     return DEFAULT_STATE
@@ -101,12 +106,8 @@ export const viewActions = {
   setWorkspaceOrder(order: readonly string[]): void {
     setState({ ...state, workspaceOrder: order })
   },
-  togglePinnedSession(id: string): void {
-    setState({
-      ...state,
-      pinnedSessions: state.pinnedSessions.includes(id)
-        ? state.pinnedSessions.filter(entry => entry !== id)
-        : [...state.pinnedSessions, id],
-    })
+  archiveSession(id: string): void {
+    if (state.archivedSessions.includes(id)) return
+    setState({ ...state, archivedSessions: [...state.archivedSessions, id] })
   },
 }

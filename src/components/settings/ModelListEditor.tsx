@@ -78,6 +78,22 @@ function capacitySpelling(value: number | undefined): string {
 }
 
 /**
+ * Whether a row declares image input.
+ *
+ * pi's `input` is a capability list, and an unset one means text-only — pi fills
+ * in `['text']` itself. Absence therefore reads as "no images" rather than as
+ * "unknown", which is what keeps the box honest for rows that never set it.
+ */
+function acceptsImages(model: ModelDraft): boolean {
+  return Array.isArray(model.input) && model.input.includes('image')
+}
+
+/** The `input` value the toggle writes: `text` always, `image` on request. */
+function inputKinds(images: boolean): string[] {
+  return images ? ['text', 'image'] : ['text']
+}
+
+/**
  * One row after a patch: emptied optional fields leave the profile rather than
  * being stored as values the file would reject; `id` stays a string ('' while
  * cleared) so the row keeps its shape.
@@ -334,6 +350,21 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                     disabled={disabled}
                     onChange={(event) => { editCapacity(index, 'maxTokens', event.target.value) }}
                   />
+                </label>
+                <label className={styles['modelField']}>
+                  <span className={styles['modelFieldLabel']}>{t('modelImageInput')}</span>
+                  <span className={styles['modelToggle']}>
+                    <input
+                      type="checkbox"
+                      checked={acceptsImages(model)}
+                      aria-label={`${t('modelImageInput')} ${index + 1}`}
+                      disabled={disabled}
+                      onChange={(event) => {
+                        patch(index, { input: inputKinds(event.target.checked) })
+                      }}
+                    />
+                    <span className={styles['modelToggleHint']}>{t('modelImageInputHint')}</span>
+                  </span>
                 </label>
               </div>
             )

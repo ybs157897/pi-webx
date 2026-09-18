@@ -7,14 +7,15 @@ import type {
   CommandResponse,
   CreateSessionRequest,
   CreateSessionResponse,
-  FsListResponse,
   ListSessionsResponse,
   ListStoredSessionsResponse,
+  PickDirectoryResponse,
   PiCommandEnvelope,
   PiRpcResponse,
   ServerConfigResponse,
   SessionSummary,
 } from '../shared/protocol';
+import type { GitBranchView, GitCheckoutRequest } from '../shared/git';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -84,10 +85,16 @@ export const api = {
     return request<CreateSessionResponse>('/api/sessions', jsonInit(body));
   },
 
-  deleteSession(id: string): Promise<{ ok: boolean }> {
-    return request<{ ok: boolean }>(`/api/sessions/${encodeURIComponent(id)}`, {
-      method: 'DELETE',
-    });
+  /**
+   * Fork one transcript into a new session and open it. Exactly one source is
+   * given: `sessionId` for a hosted session, `path` for a stored transcript.
+   */
+  forkSession(body: {
+    sessionId?: string;
+    path?: string;
+    cwd?: string;
+  }): Promise<CreateSessionResponse> {
+    return request<CreateSessionResponse>('/api/sessions/fork', jsonInit(body));
   },
 
   sendCommand(id: string, command: PiCommandEnvelope): Promise<PiRpcResponse> {
@@ -98,8 +105,13 @@ export const api = {
     ).then((payload) => payload.response);
   },
 
-  fsList(path: string): Promise<FsListResponse> {
-    return request<FsListResponse>(`/api/fs/list?path=${encodeURIComponent(path)}`);
+  /**
+   * Open the OS directory chooser on the bridge host. `initial` is where the
+   * dialog should start; the server ignores it when it is not a directory.
+   * `path: null` means the user dismissed the dialog.
+   */
+  pickDirectory(initial: string): Promise<PickDirectoryResponse> {
+    return request<PickDirectoryResponse>('/api/workspace/pick', jsonInit({ initial }));
   },
 
   storedSessions(options?: { cwd?: string; limit?: number }): Promise<ListStoredSessionsResponse> {
@@ -112,12 +124,14 @@ export const api = {
     );
   },
 
-  /** Permanently removes one persisted pi transcript from disk. */
-  deleteStoredSession(path: string): Promise<{ ok: boolean }> {
-    return request<{ ok: boolean }>(
-      `/api/stored-sessions?path=${encodeURIComponent(path)}`,
-      { method: 'DELETE' },
-    );
+  /** The workspace's branch and its local branches. */
+  gitBranches(cwd: string): Promise<GitBranchView> {
+    return request<GitBranchView>(`/api/git?cwd=${encodeURIComponent(cwd)}`);
+  },
+
+  /** Switch the workspace to one of its own local branches. */
+  gitCheckout(body: GitCheckoutRequest): Promise<GitBranchView> {
+    return request<GitBranchView>('/api/git/checkout', jsonInit(body));
   },
 };
 

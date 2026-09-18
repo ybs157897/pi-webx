@@ -13,6 +13,12 @@
 
 export type PiThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
+/**
+ * Every level the wire accepts, i.e. what pi documents for a thinking level.
+ * Wider than the UI on purpose: the three stops a user picks between live in
+ * `THINKING_LEVEL_CHOICES` (lib/modelCatalog), while this stays the server's
+ * validation set so a client may still send any documented level.
+ */
 export const PI_THINKING_LEVELS: readonly PiThinkingLevel[] = [
   'off',
   'minimal',
@@ -262,6 +268,19 @@ export type PiExtensionUiMethod =
 /** Methods that block the agent until the client answers with `extension_ui_response`. */
 export const PI_DIALOG_METHODS = ['select', 'confirm', 'input', 'editor'] as const;
 
+/**
+ * `extension_ui_response` — the browser's answer to an `extension_ui_request`.
+ * Exactly one of the three carries the decision, by dialog kind: `value` for
+ * select/input/editor, `confirmed` for confirm, `cancelled` for a dismissal.
+ */
+export interface PiExtensionUiResponse {
+  type: 'extension_ui_response';
+  id: string;
+  value?: string;
+  confirmed?: boolean;
+  cancelled?: boolean;
+}
+
 export interface PiExtensionUiRequest {
   type: 'extension_ui_request';
   id: string;
@@ -319,6 +338,11 @@ export type PiCommand =
   | { type: 'abort_bash' }
   | { type: 'get_session_stats' }
   | { type: 'get_commands' }
+  /* The tool allowlist: which tools this session has at all. `set_tools` carries
+     builtin names only — the host merges the extension tools back in, so a preset
+     can never switch off a tool an extension registered. */
+  | { type: 'get_tools' }
+  | { type: 'set_tools'; toolNames: string[] }
   | { type: 'set_session_name'; name: string }
   | { type: 'export_html'; outputPath?: string }
   | { type: 'switch_session'; sessionPath: string }
@@ -381,6 +405,24 @@ export interface PiSlashCommand {
   [key: string]: unknown;
 }
 
+/** One tool, as `get_tools` reports it: what exists, and whether it is on. */
+export interface PiToolInfo {
+  name: string;
+  description?: string;
+  active: boolean;
+}
+
+/** `get_tools` payload: every tool plus the builtin selection behind the active set. */
+export interface PiToolsPayload {
+  tools: PiToolInfo[];
+  /**
+   * The builtin selection this session was configured with. It excludes the
+   * extension tools the host merged in, and a resumed session reports the value
+   * recorded in its own log.
+   */
+  selection: string[];
+}
+
 /* ------------------------------------------------- browser <-> server transport */
 
 /** Frames pushed to the browser over SSE (`GET /api/sessions/:id/events`). */
@@ -425,6 +467,11 @@ export interface CreateSessionRequest {
   sessionPath?: string;
   /** Start with session persistence disabled (`--no-session`). */
   noSession?: boolean;
+  /**
+   * Builtin tools this session should start with — the browser's preset. A
+   * resumed session ignores it in favour of the selection in its own log.
+   */
+  toolNames?: string[];
   extraArgs?: string[];
 }
 
@@ -459,10 +506,12 @@ export interface ListStoredSessionsResponse {
   sessions: StoredSession[];
 }
 
-export interface FsListResponse {
-  path: string;
-  parent: string | null;
-  entries: { name: string; path: string }[];
+/**
+ * Answer of `POST /api/workspace/pick`: the directory the OS chooser returned,
+ * or null when the user dismissed it — a cancel is an outcome, not an error.
+ */
+export interface PickDirectoryResponse {
+  path: string | null;
 }
 
 export interface ServerConfigResponse {

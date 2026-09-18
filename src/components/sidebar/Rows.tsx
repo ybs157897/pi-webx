@@ -11,13 +11,14 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import {
   HoverCard,
+  IconArchiveOutline20,
+  IconBranchOutline16,
   IconClockOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
   IconFolderClose16,
   IconFolderOpen16,
   IconPlusOutline16,
-  IconRefreshOutline16,
   IconTrashOutline16,
   IconTriangleRightFill14,
   Menu,
@@ -125,7 +126,11 @@ export function ProjectRowItem({ group, onToggle, onCreate, actions, drag, home 
   const workspaceMenuItems = [
     { id: 'pick', label: '设为当前工作区', icon: <IconFolderOpen16 />, disabled: group.isCurrent },
     { id: 'default', label: '设为默认工作区', icon: <IconCheckMarker />, disabled: group.isDefault },
-    { id: 'forget', label: '从列表移除', icon: <IconTrashOutline16 />, danger: true },
+    // The current workspace is the one a live session runs in, so the list never
+    // subtracts it: saying so beats an item that looks enabled and does nothing.
+    group.isCurrent
+      ? { id: 'forget', label: '当前工作区不可移除', icon: <IconTrashOutline16 />, disabled: true }
+      : { id: 'forget', label: '从列表移除', icon: <IconTrashOutline16 />, danger: true },
   ]
   const ownRow = (
     <div
@@ -216,19 +221,6 @@ function IconCheckMarker() {
 }
 
 /** Pushpin glyph (kept inline: the vendored icon set has no pin). */
-function IconPinMarker({ size = 12 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 16 16" fill="none" aria-hidden>
-      <path
-        d="M9.8 1.8l4.4 4.4-2 .8-2.2 2.2.5 3.2-1.3 1.3-2.7-2.7-3.2 3.2-.9-.9 3.2-3.2-2.7-2.7L4.6 6l3.2.5 2.2-2.2.8-2z"
-        stroke="currentColor"
-        strokeWidth="1.2"
-        strokeLinejoin="round"
-      />
-    </svg>
-  )
-}
-
 /* ------------------------------------------------------------- session row */
 
 interface SessionStatus {
@@ -278,8 +270,7 @@ function SessionHoverContent({ node, now }: { node: SessionNode; now: number }) 
  * transcript, marked with a clock glyph) offer resume/delete.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onKill, onResume, onDeleteStored, onReveal,
-  pinned = false, onTogglePinned, drag, flat = false,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -287,18 +278,16 @@ export function SessionNodeItem({
   onOpen: (node: SessionNode) => void
   /** Open the browser-owned session rename dialog (row menu action). */
   onRename: (id: string, currentTitle: string) => void
-  /** End a live session (row menu action; the confirm dialog is browser-owned). */
-  onKill: (id: string, title: string) => void
-  /** Resume a stored transcript (row menu action; same as opening it). */
-  onResume: (node: SessionNode) => void
-  /** Delete a stored transcript from disk (confirm dialog is browser-owned). */
-  onDeleteStored: (node: SessionNode) => void
+  /**
+   * Copy the session into a new transcript and open it — dsh's `分叉会话`. Offered
+   * for a live session and a stored one alike, because both have a transcript to
+   * copy; that is why the menu no longer branches on the row's kind.
+   */
+  onFork: (node: SessionNode) => void
+  /** Hide the row from every list surface (dsh's `归档会话`). */
+  onArchive: (node: SessionNode) => void
   /** Scroll this row into view after search navigation, then acknowledge it. */
   onReveal?: (() => void) | undefined
-  /** The row is pinned and floats at the top of its list. */
-  pinned?: boolean | undefined
-  /** Toggle the pin (row menu action); absent rows hide the entry. */
-  onTogglePinned?: (() => void) | undefined
   /** Present only on draggable rows (grouped sessions outside search). */
   drag?: RowDragProps | undefined
   /** The row is rendered without a parent Workspace header. */
@@ -315,21 +304,13 @@ export function SessionNodeItem({
     rowRef.current?.scrollIntoView({ block: 'nearest' })
     onReveal()
   }, [onReveal])
+  // dsh's row menu, verb for verb: rename, fork, archive. There is no delete and
+  // no pin — a session's place in the list is its recency, and its transcript
+  // outlives its membership in the list.
   const sessionMenuItems = [
-    ...(onTogglePinned === undefined ? [] : [{
-      id: 'pin',
-      label: pinned ? '取消置顶' : '置顶',
-      icon: <IconPinMarker size={16} />,
-    }]),
-    ...(node.kind === 'live'
-      ? [
-        { id: 'rename', label: '重命名', icon: <IconEditOutline16 /> },
-        { id: 'kill', label: '结束会话', icon: <IconTrashOutline16 />, danger: true },
-      ]
-      : [
-        { id: 'resume', label: '恢复会话', icon: <IconRefreshOutline16 /> },
-        { id: 'delete', label: '从磁盘删除', icon: <IconTrashOutline16 />, danger: true },
-      ]),
+    { id: 'rename', label: '重命名', icon: <IconEditOutline16 /> },
+    { id: 'fork', label: '分叉会话', icon: <IconBranchOutline16 /> },
+    { id: 'archive', label: '归档会话', icon: <IconArchiveOutline20 size={16} /> },
   ]
   const ownRow = (
     <div
@@ -375,14 +356,6 @@ export function SessionNodeItem({
       </span>
       <span className={css.title}>
         {node.title}
-        {pinned && (
-          <span
-            aria-label="已置顶"
-            style={{ display: 'inline-flex', flex: 'none', marginLeft: 6, color: 'var(--dsw-alias-label-tertiary)' }}
-          >
-            <IconPinMarker />
-          </span>
-        )}
       </span>
       <span className={css.time}>{timeLabel(row.updatedAt, now)}</span>
       <span className={css.rowActions}>
@@ -392,11 +365,9 @@ export function SessionNodeItem({
           items={sessionMenuItems}
           onSelect={(id) => {
             setMenuOpen(false)
-            if (id === 'pin') onTogglePinned?.()
-            else if (id === 'rename') onRename(node.id, node.title)
-            else if (id === 'kill') onKill(node.id, node.title)
-            else if (id === 'resume') onResume(node)
-            else if (id === 'delete') onDeleteStored(node)
+            if (id === 'rename') onRename(node.id, node.title)
+            else if (id === 'fork') onFork(node)
+            else if (id === 'archive') onArchive(node)
           }}
           portal
           closeOnPointerLeave

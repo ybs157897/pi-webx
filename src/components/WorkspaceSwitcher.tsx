@@ -1,9 +1,29 @@
-import { Flexbox, Icon, Text } from '@lobehub/ui';
-import { Dropdown, theme } from 'antd';
-import type { MenuProps } from 'antd';
-import { ChevronDown, Folder, FolderOpen, Star, Trash2 } from 'lucide-react';
+/**
+ * The workspace (working directory) chip in the composer's context bar.
+ * LobeChat has no direct analogue — this is pi-specific, since pi always
+ * operates inside one directory.
+ *
+ * It is a pill on purpose: a full-width box above the composer claimed the width
+ * of the surface that actually carries the decision (the message), and it read
+ * as a form field rather than as one chip among the composer's controls. The
+ * menu is the vendored `Menu` primitive — the app's own list language, the same
+ * one the sidebar's workspace rows use: one folder row per workspace, the
+ * current one carrying the trailing check, and the add action pinned under a
+ * hairline in the footer.
+ */
+import { Text } from '@lobehub/ui';
+import { theme } from 'antd';
+import { ChevronDown, Folder } from 'lucide-react';
 import { useState } from 'react';
 
+import { IconFolderClose16, IconPlusOutline16, Menu } from '../ui/primitives/index.ts';
+import type { MenuEntry } from '../ui/primitives/index.ts';
+import { workspaceLabel } from './sidebar/tree';
+
+/** Row id of the footer's add action — never a path, so it cannot collide. */
+const ADD_WORKSPACE = '::add-workspace';
+
+/** `/Users/x/work` → `~/work` when it lives under the reported home dir. */
 function shortPath(path: string, home: string | undefined): string {
   if (home && path.startsWith(home)) return `~${path.slice(home.length)}`;
   return path;
@@ -14,189 +34,95 @@ export interface WorkspaceSwitcherProps {
   /** candidates offered as one-click picks (server-provided + user history) */
   recent: string[];
   home?: string;
-  defaultCwd?: string | null;
-  /** stored-session count per workspace path, when the parent has it */
-  counts?: Record<string, number>;
   disabled?: boolean;
   onPick: (path: string) => void;
+  /** Open the OS directory chooser — the one way a new workspace enters the list. */
   onBrowse: () => void;
-  onSetDefault: (path: string) => void;
-  /** removes a path from the saved list (never deletes anything on disk) */
-  onForget?: (path: string) => void;
 }
 
-/** Positive, finite counts only — anything else renders no badge at all. */
-function sessionCount(counts: Record<string, number> | undefined, path: string): number {
-  const value = counts?.[path];
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
-/**
- * The workspace (working directory) selector. LobeChat has no direct analogue —
- * this is pi-specific, since pi always operates inside one directory.
- */
 export function WorkspaceSwitcher({
   cwd,
   recent,
   home,
-  defaultCwd,
-  counts,
   disabled,
   onPick,
   onBrowse,
-  onSetDefault,
-  onForget,
 }: WorkspaceSwitcherProps) {
   const { token } = theme.useToken();
   const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
 
   const candidates = Array.from(new Set([cwd, ...recent])).filter(Boolean).slice(0, 8);
-  const cwdCount = sessionCount(counts, cwd);
 
-  const items: MenuProps['items'] = [
-    ...candidates.map((path) => {
-      const count = sessionCount(counts, path);
-      return {
-        key: path,
-        label: (
-          <Flexbox horizontal align="center" gap={8} style={{ minWidth: 0 }}>
-            <Icon icon={Folder} size={13} />
-            <Text fontSize={12} ellipsis style={{ maxWidth: 220 }}>
-              {shortPath(path, home)}
-            </Text>
-            {path === cwd && (
-              <>
-                <span
-                  aria-hidden
-                  style={{
-                    flexShrink: 0,
-                    width: 6,
-                    height: 6,
-                    borderRadius: '50%',
-                    background: token.colorPrimary,
-                  }}
-                />
-                <Text fontSize={10.5} style={{ color: token.colorPrimary, flexShrink: 0 }}>
-                  当前
-                </Text>
-              </>
-            )}
-            {defaultCwd === path && (
-              <Icon icon={Star} size={12} style={{ color: token.colorWarning, flexShrink: 0 }} />
-            )}
-          </Flexbox>
-        ),
-        // Right-aligned by antd (`.ant-dropdown-menu-item-extra`), secondary style.
-        extra:
-          count > 0 ? (
-            <Text fontSize={11} style={{ color: token.colorTextTertiary, whiteSpace: 'nowrap' }}>
-              {count} 会话
-            </Text>
-          ) : undefined,
-        onClick: () => {
-          setOpen(false);
-          onPick(path);
-        },
-      };
-    }),
-    { type: 'divider' },
-    {
-      key: 'browse',
-      label: (
-        <Flexbox horizontal align="center" gap={8}>
-          <Icon icon={FolderOpen} size={13} />
-          <Text fontSize={12}>浏览目录…</Text>
-        </Flexbox>
-      ),
-      onClick: () => {
-        setOpen(false);
-        onBrowse();
-      },
-    },
-    ...(cwd
-      ? [
-          {
-            key: 'default',
-            label: (
-              <Flexbox horizontal align="center" gap={8}>
-                <Icon icon={Star} size={13} />
-                <Text fontSize={12}>设为默认工作区</Text>
-              </Flexbox>
-            ),
-            onClick: () => {
-              setOpen(false);
-              onSetDefault(cwd);
-            },
-          },
-        ]
-      : []),
-    ...(onForget !== undefined && cwd
-      ? [
-          {
-            key: 'forget',
-            label: (
-              <Flexbox horizontal align="center" gap={8}>
-                <Icon icon={Trash2} size={13} />
-                <Text fontSize={12}>移出列表（当前工作区）</Text>
-              </Flexbox>
-            ),
-            onClick: () => {
-              setOpen(false);
-              onForget(cwd);
-            },
-          },
-        ]
-      : []),
-  ];
+  const items: MenuEntry[] = candidates.map((path) => ({
+    id: path,
+    // The row is the folder's name and the tooltip its path: two workspaces can
+    // share a basename, and a menu is too narrow for both to be spelled out.
+    label: <span title={shortPath(path, home)}>{workspaceLabel(path) || path}</span>,
+    icon: <IconFolderClose16 />,
+  }));
+  const footer: MenuEntry[] = [{
+    id: ADD_WORKSPACE,
+    label: '添加工作区…',
+    icon: <IconPlusOutline16 />,
+    disabled: disabled === true,
+  }];
 
   return (
-    <Dropdown
-      trigger={['click']}
-      open={open}
-      onOpenChange={setOpen}
-      disabled={disabled}
-      menu={{ items }}
-    >
-      <button
-        type="button"
-        disabled={disabled}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          width: '100%',
-          padding: '6px 8px',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          textAlign: 'left',
-          border: `1px solid ${token.colorBorderSecondary}`,
-          borderRadius: token.borderRadius,
-          background: token.colorBgContainer,
-          color: token.colorText,
-        }}
-      >
-        <Folder size={13} style={{ color: token.colorTextTertiary, flexShrink: 0 }} />
-        <Flexbox gap={0} style={{ minWidth: 0, flex: 1 }}>
-          <Text fontSize={11} style={{ color: token.colorTextQuaternary }}>
-            工作区
+    <Menu
+      open={open && disabled !== true}
+      anchor={(
+        <button
+          type="button"
+          disabled={disabled}
+          aria-label={`当前工作区：${workspaceLabel(cwd) || '未选择'}`}
+          onMouseEnter={() => { setHovered(true); }}
+          onMouseLeave={() => { setHovered(false); }}
+          onClick={() => { setOpen((prev) => !prev); }}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            height: 24,
+            maxWidth: 220,
+            paddingInline: 8,
+            borderStyle: 'none',
+            borderRadius: 999,
+            background: open || hovered ? token.colorFillTertiary : 'transparent',
+            color: token.colorTextSecondary,
+            fontFamily: 'inherit',
+            fontSize: 12,
+            cursor: disabled === true ? 'not-allowed' : 'pointer',
+            opacity: disabled === true ? 0.5 : 1,
+            transition: 'background 0.15s ease',
+          }}
+        >
+          <Folder size={13} style={{ flexShrink: 0 }} />
+          <Text
+            as="span"
+            ellipsis
+            fontSize={12}
+            style={{ minWidth: 0, maxWidth: 170, color: 'inherit' }}
+            title={cwd}
+          >
+            {workspaceLabel(cwd) || '未选择'}
           </Text>
-          <Flexbox horizontal align="center" gap={4} style={{ minWidth: 0 }}>
-            <Text fontSize={12} ellipsis style={{ minWidth: 0 }} title={cwd}>
-              {shortPath(cwd, home) || '未选择'}
-            </Text>
-            {cwdCount > 0 && (
-              <Text
-                fontSize={10.5}
-                style={{ color: token.colorTextQuaternary, flexShrink: 0, whiteSpace: 'nowrap' }}
-              >
-                · {cwdCount} 会话
-              </Text>
-            )}
-          </Flexbox>
-        </Flexbox>
-        <Icon icon={ChevronDown} size={13} style={{ color: token.colorTextQuaternary, flexShrink: 0 }} />
-      </button>
-    </Dropdown>
+          <ChevronDown size={13} style={{ flexShrink: 0, opacity: 0.65 }} />
+        </button>
+      )}
+      items={items}
+      footer={footer}
+      selectedId={cwd}
+      // The chip sits in the composer, so the list opens upward.
+      side="top"
+      portal
+      closeOnPointerLeave
+      onSelect={(id) => {
+        setOpen(false);
+        if (id === ADD_WORKSPACE) onBrowse();
+        else onPick(id);
+      }}
+      onClose={() => { setOpen(false); }}
+    />
   );
 }
-
-export { shortPath };

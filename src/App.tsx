@@ -6,23 +6,24 @@ import {
   Download,
   Ellipsis,
   Eraser,
+  GitBranch,
   MessageSquarePlus,
   RefreshCw,
   Settings2,
-  Trash2,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api as bridge } from './lib/api';
-import { THINKING_LABELS } from './lib/format';
+import { catalogDefaultSelection, modelCatalogApi } from './lib/modelCatalog';
 import { loadPrefs, savePrefs } from './lib/storage';
 import { usePiSession, type ConnectionStatus, type PiSessionApi } from './lib/usePiSession';
 import { Composer } from './components/Composer';
-import { DirectoryPicker } from './components/DirectoryPicker';
+import { readToolPresetPreference } from './components/ToolPresetSelect';
 import { EmptyState } from './components/EmptyState';
 import { ExtensionDialogs } from './components/Dialogs';
-import type { ModelSelection } from './components/ModelSelectV3';
-import { shortPath } from './components/WorkspaceSwitcher';
+import type { ModelSelection } from './components/ModelPicker';
+import { BranchSelect } from './components/BranchSelect';
+import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
 import { NotificationStack } from './components/NotificationStack';
 import { SessionSettings } from './components/SessionSettings';
 import { StatusStrip, WidgetStrip } from './components/StatusStrip';
@@ -30,16 +31,23 @@ import { TranscriptView } from './components/TranscriptView';
 import { UiShowcase } from './components/uikit/UiShowcase';
 import { SidebarRoot } from './components/sidebar/SidebarRoot';
 import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
+import { workspaceLabel } from './components/sidebar/tree';
 import type { WorkspaceItem } from './components/sidebar/tree';
-import { ModelsSection, SettingsModal } from './components/settings';
+import { GeneralSettings, ModelsSection, SettingsModal } from './components/settings';
+import type { ModelCatalog } from './shared/model-catalog';
+import { presetFromToolNames, toolNamesForPreset, type ToolPreset } from './shared/tool-presets';
 import type {
   PiCommandEnvelope,
   PiRpcResponse,
+  PiThinkingLevel,
   ServerConfigResponse,
   SessionSummary,
   StoredSession,
 } from './shared/protocol';
 
+/** The stored preference; `system` resolves against the OS at render time. */
+type ThemePreference = 'light' | 'dark' | 'system';
+/** What the theme layer actually paints. */
 type ThemeMode = 'light' | 'dark';
 /** Which engine renders agent UI inline — ours, or TokUI. */
 type RenderStyle = 'ours' | 'tokui';
@@ -53,10 +61,15 @@ const SIDEBAR_WIDTH = 260;
 /** Matches the dsh AppFrame track transition the collapse crossfade rides on. */
 const SIDEBAR_SLIDE_MS = 300;
 
-function readTheme(): ThemeMode {
+function prefersDark(): boolean {
+  return window.matchMedia?.('(prefers-color-scheme: dark)').matches === true;
+}
+
+/** dsh offers Apperance as light / dark / follow-the-system; so does this. */
+function readTheme(): ThemePreference {
   const stored = localStorage.getItem(THEME_KEY);
-  if (stored === 'light' || stored === 'dark') return stored;
-  return window.matchMedia?.('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
+  return 'system';
 }
 
 function readRenderStyle(): RenderStyle {
@@ -89,14 +102,18 @@ function failedPrompt(error: string): PiRpcResponse {
 type CreateOutcome = { id: string } | { error: string };
 
 function Shell({
+  themePreference,
   themeMode,
   renderStyle,
-  onToggleTheme,
+  onThemePreferenceChange,
   onRenderStyleChange,
 }: {
+  /** The stored preference, which may be "follow the system". */
+  themePreference: ThemePreference;
+  /** The resolved theme the theme layer paints. */
   themeMode: ThemeMode;
   renderStyle: RenderStyle;
-  onToggleTheme: () => void;
+  onThemePreferenceChange: (next: ThemePreference) => void;
   onRenderStyleChange: (style: RenderStyle) => void;
 }) {
   const { token } = theme.useToken();
@@ -105,21 +122,72 @@ function Shell({
   const [cwd, setCwd] = useState(boot.cwd ?? '');
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
-  const [seedText, setSeedText] = useState<string | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
   const [savedWorkspaces, setSavedWorkspaces] = useState<string[]>(() => loadPrefs().workspaces ?? []);
+  /**
+   * Workspaces the user removed from the sidebar's list. It is a *subtraction*
+   * from the derived list below, not a second source of truth: without it a
+   * removal is a no-op, because the current cwd, the server's suggestions, and
+   * every workspace that has a session all re-add the row on the next render.
+   */
+  const [hiddenWorkspaces, setHiddenWorkspaces] = useState<string[]>(
+    () => loadPrefs().hiddenWorkspaces ?? [],
+  );
   const [allStored, setAllStored] = useState<StoredSession[]>([]);
   const [bootError, setBootError] = useState<string | null>(null);
+  /**
+   * The session-independent model catalog. Held here rather than in the session
+   * hook because it must outlive every session: a session is created by the
+   * first message, so the picker needs a catalogue while none exists.
+   */
+  const [catalog, setCatalog] = useState<ModelCatalog | null>(null);
+  /**
+   * A selection made before any session existed. dsh calls the equivalent state
+   * "pending": it is what a blank session reads even when the saved default has
+   * not caught up yet, so picking a model and sending immediately cannot race
+   * the settings write.
+   */
+  const [pendingModel, setPendingModel] = useState<ModelSelection | null>(null);
 
   const session = usePiSession(sessionId);
 
+  /**
+   * The model a new session starts from: the user's in-flight pick, else the
+   * deployment default read from pi's own settings. This replaces an earlier
+   * read of a localStorage slot nothing ever wrote — which is why every new
+   * session silently fell back to whatever settings.json happened to hold.
+   */
   const defaultModel: ModelSelection | null = useMemo(
-    () => (boot.provider && boot.modelId ? { provider: boot.provider, id: boot.modelId } : null),
-    [boot.provider, boot.modelId],
+    () => pendingModel ?? catalogDefaultSelection(catalog),
+    [pendingModel, catalog],
   );
+
+  /**
+   * The preset the active session is running with, read back from its own record —
+   * a resumed transcript reports the tools it was last run with, so the control
+   * shows that rather than the browser preference.
+   */
+  const sessionToolPreset: ToolPreset | null = useMemo(
+    () => (session.toolSelection === null ? null : presetFromToolNames(session.toolSelection)),
+    [session.toolSelection],
+  );
+
+  /** The running session's model when there is one, else the pending default. */
+  const activeSelection: ModelSelection | null = useMemo(() => {
+    const live = session.piState?.model;
+    return live ? { provider: live.provider, id: live.id } : defaultModel;
+  }, [defaultModel, session.piState?.model]);
+
+  const loadCatalog = useCallback(async (target: string): Promise<void> => {
+    try {
+      setCatalog(await modelCatalogApi.read(target.length > 0 ? target : undefined));
+    } catch {
+      // Transient: the picker falls back to the session's own catalogue, and
+      // the next load retries. A missing catalog must not block sending.
+    }
+  }, []);
 
   const refreshSessions = useCallback(async () => {
     try {
@@ -132,6 +200,9 @@ function Shell({
   const loadStored = useCallback(async () => {
     try {
       // One unfiltered listing covers both the sidebar list and the per-workspace counts.
+      // Cheap to repeat: the bridge caches each transcript's header and preview
+      // and only re-reads a file whose size/mtime moved, so this is a stat pass
+      // in the steady state rather than a body scan.
       setAllStored((await bridge.storedSessions({ limit: 100 })).sessions);
     } catch {
       setAllStored([]);
@@ -144,15 +215,54 @@ function Shell({
       savePrefs({ workspaces: [...prev, path].slice(0, 20) });
       return [...prev, path].slice(0, 20);
     });
+    // An explicit pick is what un-hides a workspace: `从列表移除` is a decision
+    // about the list, so choosing the path again (switcher, 浏览目录, or one of its
+    // session rows) revives the row instead of leaving it silently suppressed.
+    setHiddenWorkspaces((prev) => {
+      if (!prev.includes(path)) return prev;
+      const next = prev.filter((entry) => entry !== path);
+      savePrefs({ hiddenWorkspaces: next });
+      return next;
+    });
   }, []);
 
   const forgetWorkspace = useCallback((path: string) => {
+    // The current workspace is never removed: a live session runs in it, and the
+    // derived list re-adds it anyway. The row's menu disables the action; this
+    // guard is what makes that a fact rather than a UI promise.
+    if (path === cwd) return;
     setSavedWorkspaces((prev) => {
       const next = prev.filter((entry) => entry !== path);
       savePrefs({ workspaces: next });
       return next;
     });
-  }, []);
+    setHiddenWorkspaces((prev) => {
+      if (prev.includes(path)) return prev;
+      const next = [...prev, path].slice(0, 100);
+      savePrefs({ hiddenWorkspaces: next });
+      return next;
+    });
+  }, [cwd]);
+
+  /**
+   * Add a workspace by asking the OS for one: the chooser runs on the bridge
+   * host, so it has that machine's sidebar, favourites, and network volumes, and
+   * whatever it returns is by construction a directory there. A dismissed dialog
+   * comes back as `path: null` and simply changes nothing.
+   */
+  const browseWorkspace = useCallback((): void => {
+    void (async () => {
+      try {
+        const picked = await bridge.pickDirectory(cwd);
+        if (picked.path === null) return;
+        pickWorkspace(picked.path);
+        setCwd(picked.path);
+        setSessionId(null);
+      } catch (cause) {
+        session.notify('error', '无法打开系统目录选择器', errorText(cause));
+      }
+    })();
+  }, [cwd, pickWorkspace, session]);
 
   /**
    * Opens an existing pi session — the resume path from the sidebar, which has
@@ -196,6 +306,9 @@ function Shell({
           // No cwd yet means the config never loaded; let the bridge default it.
           ...(cwd.length > 0 ? { cwd } : {}),
           ...(defaultModel ? { provider: defaultModel.provider, model: defaultModel.id } : {}),
+          // pi-web's split: the browser preference decides what a new session
+          // starts from, and the session records it from there on.
+          toolNames: toolNamesForPreset(readToolPresetPreference()),
         });
         setSessionId(result.session.id);
         setCwd(result.session.cwd);
@@ -210,6 +323,83 @@ function Shell({
     pendingCreate.current = pending;
     return pending;
   }, [cwd, defaultModel, refreshSessions]);
+
+  /** Failed response for a local guard, shaped like a pi response. */
+  const refused = useCallback(
+    (command: string, error: string): PiRpcResponse => ({
+      type: 'response',
+      command,
+      success: false,
+      error,
+    }),
+    [],
+  );
+
+  /**
+   * Picker write path, following dsh's `session.selectModel`: the choice applies
+   * to the addressed session *and* is recorded as the deployment default, so the
+   * next blank session starts from it. A failed default write is reported as a
+   * notification but does not undo the session's selection — dsh logs it for the
+   * same reason, and the session is already running the chosen model.
+   */
+  const applyModel = useCallback<PiSessionApi['setModel']>(
+    async (provider, modelId) => {
+      if (sessionId !== null) {
+        const response = await session.setModel(provider, modelId);
+        if (!response.success) return response;
+      }
+      // Recorded before the (async) settings write so picking and sending in one
+      // gesture cannot race it: the created session reads this, not the file.
+      setPendingModel({ provider, id: modelId });
+      try {
+        setCatalog(
+          await modelCatalogApi.saveDefault({
+            provider,
+            model: modelId,
+            ...(cwd.length > 0 ? { cwd } : {}),
+          }),
+        );
+      } catch (cause) {
+        session.notify('warning', '默认模型未保存', errorText(cause));
+      }
+      return { type: 'response', command: 'set_model', success: true };
+    },
+    [cwd, session, sessionId],
+  );
+
+  /**
+   * Thinking-level write, same shape: apply to the session when there is one, and
+   * remember the level against the selected model. pi keys that memory
+   * `provider/model`, so a level can never be inherited by a model that rejects
+   * it — the property dsh reaches by clearing a stored effort on a model change.
+   */
+  const applyThinkingLevel = useCallback<PiSessionApi['setThinkingLevel']>(
+    async (level: PiThinkingLevel | null) => {
+      if (level !== null && sessionId !== null) {
+        const response = await session.setThinkingLevel(level);
+        if (!response.success) return response;
+      }
+      if (activeSelection === null) {
+        return refused('set_thinking_level', '请先选择模型');
+      }
+      try {
+        // `null` clears the remembered level (dsh's `Default`); an omitted field
+        // would instead leave the stored value in place.
+        setCatalog(
+          await modelCatalogApi.saveDefault({
+            provider: activeSelection.provider,
+            model: activeSelection.id,
+            thinkingLevel: level,
+            ...(cwd.length > 0 ? { cwd } : {}),
+          }),
+        );
+      } catch (cause) {
+        session.notify('warning', '推理等级未保存', errorText(cause));
+      }
+      return { type: 'response', command: 'set_thinking_level', success: true };
+    },
+    [activeSelection, cwd, refused, session, sessionId],
+  );
 
   /**
    * Send path for the composer: with a session attached it is a plain prompt,
@@ -239,10 +429,26 @@ function Shell({
     [ensureSession, session, sessionId],
   );
 
-  /** The composer talks to the same api, with sending swapped for the lazy path. */
+  /** The composer talks to the same api, with sending swapped for the lazy path
+      and model/thinking writes routed through the paths that also record the
+      deployment default. */
   const composerApi = useMemo<PiSessionApi>(
-    () => ({ ...session, prompt: guardedPrompt }),
-    [guardedPrompt, session],
+    () => ({
+      ...session,
+      prompt: guardedPrompt,
+      setModel: applyModel,
+      setThinkingLevel: applyThinkingLevel,
+    }),
+    [applyModel, applyThinkingLevel, guardedPrompt, session],
+  );
+
+  /** Apply a preset to the running session; the host records it on the session. */
+  const applyToolPreset = useCallback(
+    (preset: ToolPreset) => {
+      if (sessionId === null) return;
+      void session.setTools(toolNamesForPreset(preset));
+    },
+    [session, sessionId],
   );
 
   /* Boot: discover defaults and remember the workspace. No session is created
@@ -267,8 +473,24 @@ function Shell({
     return () => clearInterval(timer);
   }, [refreshSessions]);
 
+  /* The catalog is read per workspace: project settings can override the global
+     default, so switching workspaces re-reads instead of reusing the answer. */
+  useEffect(() => {
+    void loadCatalog(cwd);
+  }, [cwd, loadCatalog]);
+
+  /**
+   * The stored transcripts, refreshed on the same cadence as the live list.
+   *
+   * dsh pushes list changes over its event stream; pi writes transcripts to disk
+   * with no channel we can subscribe to, so a poll is the honest equivalent — and
+   * it is affordable only because the bridge caches each file's summary instead
+   * of re-reading transcripts on every pass.
+   */
   useEffect(() => {
     void loadStored();
+    const timer = setInterval(() => void loadStored(), 5_000);
+    return () => clearInterval(timer);
   }, [loadStored]);
 
   useEffect(() => {
@@ -277,8 +499,13 @@ function Shell({
 
   /**
    * Workspace rows for the sidebar browser, ordered current → saved →
-   * suggested → anything that has sessions. The browser groups sessions
-   * under these itself.
+   * suggested → anything that has sessions, minus the workspaces the user
+   * removed. The browser groups sessions under these itself.
+   *
+   * The list is a union of five sources, which is exactly why a removal has to
+   * be expressed as a subtraction (`hiddenWorkspaces`) rather than as an edit to
+   * any one of them: removing a path from the saved list alone leaves it coming
+   * back from the server's suggestions or from a stored session's cwd.
    */
   const workspaces = useMemo<WorkspaceItem[]>(() => {
     const order: string[] = [];
@@ -290,15 +517,22 @@ function Shell({
     (config?.suggestedCwds ?? []).forEach(push);
     sessions.forEach((entry) => push(entry.cwd));
     allStored.forEach((entry) => push(entry.cwd));
-    const home = config?.home;
     const defaultCwd = boot.cwd ?? '';
-    return order.map((path) => ({
-      key: path,
-      title: shortPath(path, home),
-      isCurrent: path === cwd,
-      isDefault: path === defaultCwd,
-    }));
-  }, [allStored, boot.cwd, config?.home, config?.suggestedCwds, cwd, savedWorkspaces, sessions]);
+    const hidden = new Set(hiddenWorkspaces);
+    return order
+      // The current workspace is exempt: hiding the directory a live session runs
+      // in would leave that session with no row of its own.
+      .filter((path) => path === cwd || !hidden.has(path))
+      .map((path) => ({
+        key: path,
+        // The row reads as the folder it is; the path stays available in the
+        // row's hover card, which is also what disambiguates two folders that
+        // share a name.
+        title: workspaceLabel(path),
+        isCurrent: path === cwd,
+        isDefault: path === defaultCwd,
+      }));
+  }, [allStored, boot.cwd, config?.suggestedCwds, cwd, hiddenWorkspaces, savedWorkspaces, sessions]);
 
   /**
    * "New session" now just detaches to the empty state — the pi process is
@@ -316,16 +550,32 @@ function Shell({
     [pickWorkspace],
   );
 
-  const onKillSession = useCallback(
-    async (id: string) => {
+  /**
+   * dsh's `分叉会话`: copy the transcript into a new session and open it.
+   *
+   * A live row forks from its hosted session, a stored row from its file — the
+   * bridge resolves the first and re-checks the containment of the second. The
+   * new session is opened rather than the old one closed, matching dsh: forking
+   * is a way to continue somewhere else, not a way to end what was running.
+   */
+  const onForkSession = useCallback(
+    async (node: { id: string; kind: 'live' | 'stored'; cwd?: string }) => {
       try {
-        await bridge.deleteSession(id);
-      } finally {
-        if (id === sessionId) setSessionId(null);
+        const source = node.kind === 'live'
+          ? { sessionId: node.id }
+          : { path: node.id.replace(/^stored:/, '') };
+        const result = await bridge.forkSession({
+          ...source,
+          ...(node.cwd === undefined || node.cwd.length === 0 ? {} : { cwd: node.cwd }),
+        });
+        setSessionId(result.session.id);
         await refreshSessions();
+        await loadStored();
+      } catch (cause) {
+        session.notify('error', '分叉会话失败', errorText(cause));
       }
     },
-    [refreshSessions, sessionId],
+    [loadStored, refreshSessions, session],
   );
 
   const onRenameSession = useCallback(
@@ -336,6 +586,7 @@ function Shell({
     [refreshSessions, session],
   );
 
+  /** Stored-session count per workspace, for the switcher's menu and the empty state. */
   const activeSession = useMemo(
     () => sessions.find((entry) => entry.id === sessionId) ?? null,
     [sessionId, sessions],
@@ -361,7 +612,7 @@ function Shell({
       { key: 'export', icon: <Download size={13} />, label: '导出会话为 HTML', disabled: !session.sessionFile },
       { key: 'copy', icon: <Copy size={13} />, label: '复制会话文件路径', disabled: !session.sessionFile },
       { type: 'divider' as const },
-      { key: 'kill', icon: <Trash2 size={13} />, label: '结束会话', danger: true },
+      { key: 'fork', icon: <GitBranch size={13} />, label: '分叉会话', disabled: !session.sessionFile },
     ],
     [session.sessionFile, session.transcript.running],
   );
@@ -383,14 +634,14 @@ function Shell({
         case 'copy':
           if (session.sessionFile) void navigator.clipboard.writeText(session.sessionFile);
           break;
-        case 'kill':
-          if (sessionId) void onKillSession(sessionId);
+        case 'fork':
+          if (sessionId) void onForkSession({ id: sessionId, kind: 'live', cwd });
           break;
         default:
           break;
       }
     },
-    [onKillSession, onNewSession, sessionId, session],
+    [cwd, onForkSession, onNewSession, session, sessionId],
   );
 
   /**
@@ -472,13 +723,7 @@ function Shell({
           collapsed={sidebarCollapsed}
           onToggle={() => { setSidebarCollapsed((prev) => !prev); }}
           piVersion={config?.piVersion ?? null}
-          themeMode={themeMode}
-          /* With lazy sessions the shell starts detached on purpose: config is
-             loaded and the first message creates the pi session, so "no session
-             id" means ready-to-send, not offline. */
-          connected={session.status === 'live' || sessionId === null}
           onNewSession={() => { onNewSession(); }}
-          onToggleTheme={onToggleTheme}
           onOpenSettings={() => { setAppSettingsOpen(true); }}
           region={(wide, expandSidebar) => (
             <WorkspaceBrowser
@@ -491,12 +736,9 @@ function Shell({
               currentId={sessionId}
               onSwitch={setSessionId}
               onNewSession={(path) => { onNewSession(path); }}
-              onKill={(id) => { void onKillSession(id); }}
               onRename={(id, name) => { void onRenameSession(id, name); }}
               onResume={(entry) => { void openSession(entry.cwd, entry.path); }}
-              onDeleteStored={(entry) => {
-                void bridge.deleteStoredSession(entry.path).then(() => loadStored());
-              }}
+              onFork={(node) => { void onForkSession(node); }}
               onPickWorkspace={(path) => {
                 pickWorkspace(path);
                 setCwd(path);
@@ -504,14 +746,26 @@ function Shell({
               }}
               onSetDefault={(path) => { savePrefs({ cwd: path }); }}
               onForgetWorkspace={forgetWorkspace}
-              onBrowseWorkspace={() => { setPickerOpen(true); }}
+              onBrowseWorkspace={browseWorkspace}
             />
           )}
         />
       </div>
 
       <Flexbox style={{ flex: 1, minWidth: 0, height: '100%' }}>
-        <ChatHeader
+        {/* LobeHub's ChatHeader is `position: absolute; width: 100%`, sized
+            against its containing block because the layout it ships for is a CSS
+            grid whose header area is 52px tall. A flex column gives it neither,
+            and both halves of that went wrong: `width: 100%` resolved against a
+            full-width ancestor, so the bar stretched 260px past this column (its
+            right-hand controls — status, refresh, session settings — landed off
+            screen with nothing able to scroll to them), and being out of flow it
+            reserved no height, so the first 52px of content sat underneath it.
+            This wrapper supplies exactly what the grid would: a 52px box that is
+            positioned, so the bar spans the column and the content starts below
+            it. */}
+        <div style={{ position: 'relative', height: 52, flex: 'none' }}>
+          <ChatHeader
           left={
             <Flexbox horizontal align="center" gap={6}>
               <Text fontSize={14} weight={600} ellipsis style={{ maxWidth: 320 }}>
@@ -562,23 +816,9 @@ function Shell({
               overflow: 'hidden',
             },
           }}
-          style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, flexShrink: 0 }}
-        />
-
-        <Text fontSize={11} type="secondary" style={{ padding: '4px 16px 0' }}>
-          {[
-            session.piState?.model
-              ? `${session.piState.model.provider}/${session.piState.model.id}`
-              : null,
-            session.piState?.thinkingLevel
-              ? `思考 ${THINKING_LABELS[session.piState.thinkingLevel] ?? session.piState.thinkingLevel}`
-              : null,
-            session.piState?.autoCompactionEnabled === false ? '自动压缩已关闭' : null,
-            session.transcript.title,
-          ]
-            .filter((part): part is string => typeof part === 'string' && part.length > 0)
-            .join(' · ')}
-        </Text>
+            style={{ borderBottom: `1px solid ${token.colorBorderSecondary}`, flexShrink: 0 }}
+          />
+        </div>
 
         {session.error !== null && (
           <Alert
@@ -591,13 +831,20 @@ function Shell({
           />
         )}
 
-        <Flexbox style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
-          {empty ? (
-            <EmptyState onPick={setSeedText} />
-          ) : (
+        {/* A blank session is one centered surface: the welcome sits directly
+            above the composer, the composer lands mid-screen, and the spacer
+            below it is the space the transcript will grow into. Keeping the
+            composer in the same child slot across both layouts is what stops a
+            first send from remounting it (and dropping the draft). */}
+        {empty ? (
+          <Flexbox align="center" justify="flex-end" style={{ flex: 1, minHeight: 0 }}>
+            <EmptyState />
+          </Flexbox>
+        ) : (
+          <Flexbox style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             <TranscriptView transcript={session.transcript} onAction={sendAction} renderStyle={renderStyle} />
-          )}
-        </Flexbox>
+          </Flexbox>
+        )}
 
         <Flexbox paddingInline={20} style={{ maxWidth: 940, margin: '0 auto', width: '100%' }}>
           <WidgetStrip widgets={session.widgets} placement="aboveEditor" />
@@ -606,32 +853,45 @@ function Shell({
 
         <Composer
           api={composerApi}
+          catalog={catalog}
+          toolPreset={sessionToolPreset}
+          onToolPresetChange={applyToolPreset}
           /* Nothing to send to yet is not a reason to lock the composer: the
              first send creates the session (see guardedPrompt). */
           disabled={false}
           contextPercent={contextPercent}
-          seedText={seedText}
-          onSeedConsumed={() => setSeedText(null)}
-          renderStyle={renderStyle}
-          onRenderStyleChange={onRenderStyleChange}
+          /* The workspace/branch chips answer a question a blank session still
+             has — where does this run. Once a conversation exists, the workspace
+             is that session's own fact and dsh drops the accessory row too, so
+             the composer below a transcript is just the input and its controls. */
+          contextBar={empty ? (
+            <>
+              <WorkspaceSwitcher
+                cwd={cwd}
+                recent={[...savedWorkspaces, ...(config?.suggestedCwds ?? [])]}
+                {...(config?.home === undefined ? {} : { home: config.home })}
+                onPick={(path) => {
+                  pickWorkspace(path);
+                  setCwd(path);
+                  setSessionId(null);
+                }}
+                onBrowse={browseWorkspace}
+              />
+              {cwd.length > 0 && (
+                <BranchSelect
+                  cwd={cwd}
+                  running={session.transcript.running}
+                  onError={(message) => { session.notify('error', '切换分支失败', message); }}
+                />
+              )}
+            </>
+          ) : undefined}
         />
         <Flexbox paddingInline={20} style={{ maxWidth: 940, margin: '0 auto', width: '100%' }}>
           <WidgetStrip widgets={session.widgets} placement="belowEditor" />
         </Flexbox>
+        {empty && <div style={{ flex: 1, minHeight: 0 }} aria-hidden="true" />}
       </Flexbox>
-
-      <DirectoryPicker
-        open={pickerOpen}
-        initialPath={cwd}
-        suggested={config?.suggestedCwds ?? []}
-        onClose={() => setPickerOpen(false)}
-        onSelect={(path) => {
-          setPickerOpen(false);
-          pickWorkspace(path);
-          setCwd(path);
-          setSessionId(null);
-        }}
-      />
 
       <SessionSettings
         open={sessionSettingsOpen}
@@ -644,11 +904,25 @@ function Shell({
         open={appSettingsOpen}
         onClose={() => {
           setAppSettingsOpen(false);
-          // New providers/models only reach the picker after a state refresh.
+          // Providers, credentials and models.json all feed the catalog, and a
+          // session's catalogue only refreshes on an explicit state read.
           void session.refreshState();
+          void loadCatalog(cwd);
         }}
         sections={[
-          { id: 'models', label: '模型配置', render: () => <ModelsSection /> },
+          {
+            id: 'general',
+            label: '通用设置',
+            render: () => (
+              <GeneralSettings
+                themeMode={themePreference}
+                onThemeModeChange={onThemePreferenceChange}
+                renderStyle={renderStyle}
+                onRenderStyleChange={onRenderStyleChange}
+              />
+            ),
+          },
+          { id: 'models', label: '模型', render: () => <ModelsSection /> },
           {
             id: 'showcase',
             label: '组件库',
@@ -671,16 +945,31 @@ function Shell({
 }
 
 export default function App() {
-  const [themeMode, setThemeMode] = useState<ThemeMode>(readTheme);
+  const [themePreference, setThemePreference] = useState<ThemePreference>(readTheme);
   const [renderStyle, setRenderStyle] = useState<RenderStyle>(readRenderStyle);
+  // Re-resolve when the OS flips, so "follow the system" is live rather than a
+  // decision taken at boot.
+  const [systemDark, setSystemDark] = useState(prefersDark);
 
   useEffect(() => {
-    localStorage.setItem(THEME_KEY, themeMode);
+    if (themePreference !== 'system') return;
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!query) return;
+    const onChange = (event: MediaQueryListEvent) => { setSystemDark(event.matches) };
+    query.addEventListener('change', onChange);
+    return () => { query.removeEventListener('change', onChange) };
+  }, [themePreference]);
+
+  const themeMode: ThemeMode =
+    themePreference === 'system' ? (systemDark ? 'dark' : 'light') : themePreference;
+
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, themePreference);
     document.documentElement.style.colorScheme = themeMode;
     // The dsw design tokens (the sidebar/settings system) key their dark sheet
     // off this attribute.
     document.body.toggleAttribute('data-ds-dark-theme', themeMode === 'dark');
-  }, [themeMode]);
+  }, [themeMode, themePreference]);
 
   useEffect(() => {
     localStorage.setItem(RENDER_STYLE_KEY, renderStyle);
@@ -689,9 +978,10 @@ export default function App() {
   return (
     <ThemeProvider themeMode={themeMode} enableCustomFonts={false}>
       <Shell
+        themePreference={themePreference}
         themeMode={themeMode}
         renderStyle={renderStyle}
-        onToggleTheme={() => setThemeMode((prev) => (prev === 'dark' ? 'light' : 'dark'))}
+        onThemePreferenceChange={setThemePreference}
         onRenderStyleChange={setRenderStyle}
       />
     </ThemeProvider>

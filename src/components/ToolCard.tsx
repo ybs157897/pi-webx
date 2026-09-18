@@ -1,230 +1,337 @@
-import { ActionIcon, Block, Flexbox, Icon, Text, Tooltip } from '@lobehub/ui';
+import { CodeDiff, Flexbox, Highlighter, PatchDiff, Text } from '@lobehub/ui';
 import { theme } from 'antd';
-import type { LucideIcon } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { useMemo, useState } from 'react';
+
 import {
-  ChevronDown,
-  ChevronRight,
-  CircleCheck,
-  CircleX,
-  Copy,
-  FilePlus,
-  FileText,
-  FolderOpen,
-  LoaderCircle,
-  Pencil,
-  Search,
-  Terminal,
-  Wrench,
-} from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
-
-import { countLines, formatArgs, formatRelativeTime, summarizeToolCall } from '../lib/format';
+  baseName,
+  formatArgs,
+  formatRelativeTime,
+  languageFromPath,
+  summarizeToolCall,
+  toolOutputLanguage,
+} from '../lib/format';
+import {
+  IconApiOutline14,
+  IconBrowseOutline16,
+  IconCodeOutline16,
+  IconEditOutline16,
+  IconFolderClose16,
+  IconSearchOutline16,
+  IconSparkle16,
+  StateDot,
+} from '../ui/primitives/index.ts';
+import { LeadingGlyph } from './LeadingGlyph';
 import type { ToolRun } from '../shared/transcript';
+import css from './ToolCard.module.css';
 
-const TOOL_ICONS: Record<string, LucideIcon> = {
-  bash: Terminal,
-  powershell: Terminal,
-  read: FileText,
-  write: FilePlus,
-  edit: Pencil,
-  grep: Search,
-  find: Search,
-  ls: FolderOpen,
-};
-
-/** Tail length kept visible while the card is collapsed. */
-const COLLAPSED_LINES = 8;
-
-function tail(value: string, lines: number): string {
-  const all = value.split('\n');
-  if (all.length <= lines) return value;
-  return all.slice(all.length - lines).join('\n');
+/**
+ * dsh's own tool glyphs, taken verbatim from its `GenericToolCard` variant map
+ * (`packages/client/ui-tool/.../GenericToolCard.tsx`) and read from the icon set
+ * this app vendors from the same source: browse for reads, the prompt glyph for
+ * shells, the pencil for mutations, the magnifier for searches, a sparkle for
+ * anything unrecognised. `ls` has no dsh row of its own — it is the read family
+ * there — so it borrows the folder glyph.
+ */
+function toolGlyph(toolName: string): ReactNode {
+  switch (toolName) {
+    case 'bash':
+    case 'powershell':
+      return <IconApiOutline14 />;
+    case 'read':
+      return <IconBrowseOutline16 size={14} />;
+    case 'write':
+    case 'edit':
+      return <IconEditOutline16 size={14} />;
+    case 'grep':
+    case 'find':
+      return <IconSearchOutline16 size={14} />;
+    case 'ls':
+      return <IconFolderClose16 size={14} />;
+    case 'code':
+      return <IconCodeOutline16 size={14} />;
+    default:
+      return <IconSparkle16 size={14} />;
+  }
 }
+
+/* ------------------------------------------------------------------- helpers */
+
+/** Plain object view of a wire value; `null` for everything else. */
+function record(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+/** Non-empty string, or `null`. */
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/** Any string, including the empty one (an edit may insert where nothing was). */
+function str(value: unknown): string | null {
+  return typeof value === 'string' ? value : null;
+}
+
+interface Fragment {
+  oldText: string;
+  newText: string;
+}
+
+/**
+ * The `{oldText, newText}` pairs an `edit` call carried, if any.
+ *
+ * pi normalises its legacy top-level `oldText`/`newText` into `edits[]` before
+ * the tool runs, but a transcript restored from an older log can still hold the
+ * un-normalised form, so both shapes are read.
+ */
+function editFragments(run: ToolRun): Fragment[] | null {
+  if (run.toolName !== 'edit') return null;
+  const legacyOld = str(run.args['oldText']);
+  const legacyNew = str(run.args['newText']);
+  if (legacyOld !== null && legacyNew !== null) {
+    return [{ oldText: legacyOld, newText: legacyNew }];
+  }
+  const edits = run.args['edits'];
+  if (!Array.isArray(edits)) return null;
+  const fragments = edits.flatMap((entry): Fragment[] => {
+    const edit = record(entry);
+    const oldText = str(edit?.['oldText']);
+    const newText = str(edit?.['newText']);
+    if (oldText === null || newText === null) return [];
+    return [{ oldText, newText }];
+  });
+  return fragments.length > 0 ? fragments : null;
+}
+
+/**
+ * What a file-mutating call changed, drawn by the app's own diff components.
+ *
+ * pi reports the artefact, not the intention: an `edit` result carries its
+ * `{patch, diff}` in `details`, and a `write` carries nothing but the content it
+ * was handed. The unified patch is the most faithful view, so it wins; then the
+ * display diff; then a diff rebuilt from the call's own arguments, which is all
+ * a still-streaming run or an old transcript has.
+ */
+function changeView(run: ToolRun): ReactNode | null {
+  const details = record(run.details);
+  const file = text(run.args['path']) ?? text(run.args['file_path']) ?? text(run.args['filePath']) ?? '';
+  const language = languageFromPath(file);
+  const fileName = baseName(file);
+  const named = fileName.length > 0 ? { fileName } : {};
+
+  const patch = text(details?.['patch']);
+  if (patch !== null) {
+    return <PatchDiff patch={patch} variant="outlined" {...named} />;
+  }
+
+  const recorded = text(details?.['diff']);
+  if (recorded !== null) {
+    return (
+      <Highlighter language="diff" variant="outlined" wrap showLanguage={false}>
+        {recorded}
+      </Highlighter>
+    );
+  }
+
+  const fragments = editFragments(run);
+  if (fragments !== null) {
+    return (
+      <Flexbox gap={6}>
+        {fragments.map((fragment, index) => (
+          <CodeDiff
+            // Edits are positional and carry no id of their own; the index is the
+            // only stable key a call's own argument list can offer.
+            key={String(index)}
+            oldContent={fragment.oldText}
+            newContent={fragment.newText}
+            language={language}
+            variant="outlined"
+            {...named}
+          />
+        ))}
+      </Flexbox>
+    );
+  }
+
+  const written = run.toolName === 'write' ? str(run.args['content']) : null;
+  if (written !== null) {
+    return (
+      <CodeDiff
+        oldContent=""
+        newContent={written}
+        language={language}
+        variant="outlined"
+        {...named}
+      />
+    );
+  }
+
+  return null;
+}
+
+/**
+ * The row's leading mark for a run's state, following dsh's bash row
+ * (`leadingFor`): a failure shows the error dot in the glyph's place, and a
+ * live run dsh's animated ongoing dot — its own running signal is a row sweep
+ * this app has no equivalent of, and the dot is the vocabulary the rest of the
+ * app already uses for "in flight". Everything else keeps the tool's glyph.
+ */
+function leadingGlyph(status: ToolRun['status'], toolName: string): ReactNode {
+  if (status === 'error') return <StateDot state="error" />;
+  if (status === 'running') return <StateDot state="ongoing" />;
+  return toolGlyph(toolName);
+}
+
+/** One labelled block inside the expanded card body. */
+function Section({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <Flexbox gap={4}>
+      <Text fontSize={11} type="secondary">
+        {label}
+      </Text>
+      {children}
+    </Flexbox>
+  );
+}
+
+/* ------------------------------------------------------------------ component */
 
 export function ToolCard({ run }: { run: ToolRun }) {
   const { token } = theme.useToken();
   const [manual, setManual] = useState<boolean | null>(null);
+  const [hovered, setHovered] = useState(false);
 
-  // Running and failed calls open themselves; a successful one collapses unless
-  // the user has explicitly toggled it.
+  // Running and failed calls open themselves; a successful one folds to its
+  // header line unless the user has explicitly toggled it. Collapsed means the
+  // header and nothing else — an output preview under it made the card look
+  // unfolded however many times it was clicked.
   const open = manual ?? (run.status === 'running' || run.status === 'error');
   const summary = summarizeToolCall(run.toolName, run.args);
-  const lineCount = countLines(run.output);
-  const duration = run.endedAt ? run.endedAt - run.startedAt : null;
+  const failed = run.status === 'error';
 
-  const onCopy = useCallback(() => {
-    void navigator.clipboard.writeText(run.output);
-  }, [run.output]);
-
-  const statusMeta = useMemo(() => {
-    switch (run.status) {
-      case 'running':
-        return { icon: LoaderCircle, color: token.colorPrimary, label: '运行中', spin: true };
-      case 'error':
-        return { icon: CircleX, color: token.colorError, label: '失败', spin: false };
-      default:
-        return { icon: CircleCheck, color: token.colorSuccess, label: '完成', spin: false };
-    }
-  }, [run.status, token.colorError, token.colorPrimary, token.colorSuccess]);
-
-  const ToolIcon = TOOL_ICONS[run.toolName] ?? Wrench;
-  const StatusIcon = statusMeta.icon;
+  const command = run.toolName === 'bash' || run.toolName === 'powershell'
+    ? text(run.args['command']) ?? text(run.args['script'])
+    : null;
+  const change = useMemo(() => changeView(run), [run]);
 
   return (
-    <Block
-      variant="outlined"
-      padding={0}
-      style={{
-        borderRadius: token.borderRadiusLG,
-        overflow: 'hidden',
-        background: token.colorFillQuaternary,
-        borderColor: run.status === 'error' ? token.colorErrorBorder : token.colorBorderSecondary,
-      }}
-    >
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
       <Flexbox
         horizontal
         align="center"
-        gap={8}
-        paddingInline={10}
-        paddingBlock={8}
-        style={{ cursor: 'pointer' }}
+        gap={6}
+        style={{ height: 24, cursor: 'pointer' }}
         onClick={() => setManual(!open)}
+        onMouseEnter={() => { setHovered(true); }}
+        onMouseLeave={() => { setHovered(false); }}
       >
-        <Icon icon={open ? ChevronDown : ChevronRight} size={14} style={{ color: token.colorTextTertiary }} />
-        <Icon icon={ToolIcon} size={14} style={{ color: token.colorTextSecondary }} />
-        <Text fontSize={12} weight={600} style={{ fontFamily: token.fontFamilyCode, flexShrink: 0 }}>
+        {/* dsh's row prefix: the tool's own glyph at rest, the chevron only while
+            the row is hovered or open (see LeadingGlyph). A run's state rides
+            that same slot — a failure shows dsh's error dot where the glyph was,
+            a live run its ongoing dot — so the row carries no trailing status
+            mark, and nothing trails the summary either: dsh's row is one line of
+            glyph · title · summary, with the numbers left to the expanded body. */}
+        <LeadingGlyph icon={leadingGlyph(run.status, run.toolName)} swap={hovered || open} />
+        <Text fontSize={13} style={{ fontFamily: token.fontFamilyCode, flexShrink: 0 }}>
           {run.toolName}
         </Text>
         {summary.length > 0 && (
-          <Text
-            fontSize={12}
-            type="secondary"
-            ellipsis
-            style={{ fontFamily: token.fontFamilyCode, flex: 1, minWidth: 0 }}
-          >
-            {summary}
-          </Text>
-        )}
-        {summary.length === 0 && <div style={{ flex: 1 }} />}
-        {lineCount > 0 && (
-          <Text fontSize={11} type="secondary" style={{ flexShrink: 0 }}>
-            {lineCount} 行
-          </Text>
-        )}
-        {duration !== null && duration > 200 && (
-          <Text fontSize={11} type="secondary" style={{ flexShrink: 0 }}>
-            {(duration / 1000).toFixed(1)}s
-          </Text>
-        )}
-        <Tooltip title={statusMeta.label}>
-          <Icon
-            icon={StatusIcon}
-            size={14}
-            spin={statusMeta.spin}
-            style={{ color: statusMeta.color, flexShrink: 0 }}
-          />
-        </Tooltip>
-      </Flexbox>
-
-      {open ? (
-        <Flexbox gap={8} paddingInline={10} paddingBlock={10} style={{ borderTop: `1px solid ${token.colorBorderSecondary}` }}>
-          {Object.keys(run.args).length > 0 && (
-            <Flexbox gap={4}>
-              <Text fontSize={11} type="secondary">
-                参数
-              </Text>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: 8,
-                  maxHeight: 200,
-                  overflow: 'auto',
-                  fontSize: 12,
-                  lineHeight: 1.55,
-                  fontFamily: token.fontFamilyCode,
-                  color: token.colorText,
-                  background: token.colorFillTertiary,
-                  borderRadius: token.borderRadius,
-                }}
-              >
-                {formatArgs(run.args)}
-              </pre>
-            </Flexbox>
-          )}
-
-          {run.output.length > 0 && (
-            <Flexbox gap={4}>
-              <Flexbox horizontal align="center" justify="space-between">
-                <Text fontSize={11} type="secondary">
-                  输出
-                </Text>
-                <ActionIcon icon={Copy} size="small" title="复制输出" onClick={onCopy} />
-              </Flexbox>
-              <pre
-                style={{
-                  margin: 0,
-                  padding: 8,
-                  maxHeight: 420,
-                  overflow: 'auto',
-                  fontSize: 12,
-                  lineHeight: 1.55,
-                  fontFamily: token.fontFamilyCode,
-                  color: run.status === 'error' ? token.colorError : token.colorText,
-                  background: token.colorFillTertiary,
-                  borderRadius: token.borderRadius,
-                  whiteSpace: 'pre-wrap',
-                  wordBreak: 'break-word',
-                }}
-              >
-                {run.output}
-              </pre>
-            </Flexbox>
-          )}
-
-          {run.output.length === 0 && run.status === 'running' && (
-            <Text fontSize={12} type="secondary">
-              等待输出…
+          <>
+            <Text fontSize={13} type="secondary" style={{ flexShrink: 0, opacity: 0.45 }}>
+              ·
             </Text>
-          )}
-        </Flexbox>
-      ) : (
-        run.output.length > 0 && (
-          <div
-            style={{
-              padding: '6px 10px 8px',
-              borderTop: `1px solid ${token.colorBorderSecondary}`,
-            }}
-          >
-            <pre
+            <Text
+              fontSize={13}
+              type="secondary"
+              ellipsis
               style={{
-                margin: 0,
-                fontSize: 11.5,
-                lineHeight: 1.5,
                 fontFamily: token.fontFamilyCode,
-                color: token.colorTextTertiary,
-                maxHeight: 120,
-                overflow: 'hidden',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
+                flex: 1,
+                minWidth: 0,
+                // dsh paints a failed row's summary in the error colour
+                // (`.errorSummary`); with no trailing status mark left, that
+                // colour is what says "this one broke". It has to be inline: the
+                // secondary colour arrives as a generated class of equal
+                // specificity that lands later in the sheet.
+                ...(failed ? { color: 'var(--dsw-alias-state-error-primary)' } : {}),
               }}
             >
-              {tail(run.output, COLLAPSED_LINES)}
-            </pre>
-          </div>
-        )
+              {summary}
+            </Text>
+          </>
+        )}
+        {summary.length === 0 && <div style={{ flex: 1 }} />}
+      </Flexbox>
+
+      {open && (
+        <Flexbox
+          gap={8}
+          // dsh indents the expanded body under the row and boxes only the
+          // blocks inside it (`margin: 4px 0 4px 4px`), so the row itself stays
+          // a flat line in the flow.
+          style={{ margin: '4px 0 4px 4px' }}
+        >
+          {/* A shell call's whole argument is its command, so it is shown as one
+              line of shell rather than as JSON that wraps that same string. */}
+          {command !== null && (
+            <Section label="命令">
+              <Highlighter language="bash" variant="outlined" wrap showLanguage={false}>
+                {command}
+              </Highlighter>
+            </Section>
+          )}
+
+          {change !== null ? (
+            <Section label="变更">{change}</Section>
+          ) : (
+            <>
+              {command === null && Object.keys(run.args).length > 0 && (
+                <Section label="参数">
+                  <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
+                    {formatArgs(run.args)}
+                  </Highlighter>
+                </Section>
+              )}
+
+              {run.output.length > 0 && (
+                <Section label="输出">
+                  {/* dsh colours the expanded OUT text of a failed call
+                      (`.ioText[data-error]`); the class carries that override,
+                      since Shiki writes its palette as inline styles. */}
+                  <div className={failed ? css.errorOutput : undefined}>
+                    <Highlighter
+                      language={toolOutputLanguage(run.toolName, run.args)}
+                      variant="outlined"
+                      wrap
+                      showLanguage={false}
+                    >
+                      {run.output}
+                    </Highlighter>
+                  </div>
+                </Section>
+              )}
+
+              {run.output.length === 0 && run.status === 'running' && (
+                <Text fontSize={12} type="secondary">
+                  等待输出…
+                </Text>
+              )}
+            </>
+          )}
+        </Flexbox>
       )}
-    </Block>
+    </div>
   );
 }
 
 /** Compact one-line rendering used for tool results without a matching call. */
 export function ToolCardHeader({ run }: { run: ToolRun }) {
   const { token } = theme.useToken();
-  const ToolIcon = TOOL_ICONS[run.toolName] ?? Wrench;
   const summary = summarizeToolCall(run.toolName, run.args);
   return (
     <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextSecondary }}>
-      <Icon icon={ToolIcon} size={14} />
+      <LeadingGlyph icon={toolGlyph(run.toolName)} swap={false} />
       <Text fontSize={12} style={{ fontFamily: token.fontFamilyCode }}>
         {run.toolName}
       </Text>
