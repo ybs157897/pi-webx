@@ -47,6 +47,7 @@ import type {
   TranscriptEntry,
   TranscriptState,
   TranscriptUsage,
+  TurnProcess,
   UserEntry,
 } from '../shared/transcript';
 
@@ -782,6 +783,117 @@ function makeNotice(
   return entry;
 }
 
+/* ---------------------------------------------------------------- turn fold */
+
+/**
+ * Fold one turn's region into a summary — the single rule both live turns
+ * (`turn_end`) and rebuilt history (a snapshot) go through.
+ *
+ * The anchor is the last step that ended with text and no tool calls (dsh's
+ * `latestAnswer`): the answer the reader wants to keep. Everything before it
+ * that is step-shaped folds, and the answer's own reasoning folds with them
+ * (dsh hides the answer's reasoning in its compact view too); the user's
+ * message and session-level rows (notices, compaction) never fold. A region
+ * with neither steps nor answer reasoning folds nothing.
+ */
+function foldRegion(region: readonly TranscriptEntry[]): TurnProcess | null {
+  let anchorIndex = -1;
+  for (let index = region.length - 1; index >= 0; index -= 1) {
+    const entry = region[index];
+    if (
+      entry &&
+      entry.kind === 'assistant' &&
+      entry.tools.length === 0 &&
+      entry.text.trim().length > 0
+    ) {
+      anchorIndex = index;
+      break;
+    }
+  }
+  if (anchorIndex < 0) return null;
+  const anchor = region[anchorIndex];
+  if (!anchor || anchor.kind !== 'assistant') return null;
+
+  const hidden = region
+    .slice(0, anchorIndex)
+    .filter(
+      (entry) => entry.kind === 'assistant' || entry.kind === 'toolResult' || entry.kind === 'bash',
+    );
+  const anchorThought = anchor.thinking.trim().length > 0;
+  if (hidden.length === 0 && !anchorThought) return null;
+
+  let messages = 0;
+  let toolCalls = 0;
+  let thought = anchorThought;
+  for (const entry of hidden) {
+    if (entry.kind !== 'assistant') continue;
+    messages += 1;
+    toolCalls += entry.tools.length;
+    if (entry.thinking.trim().length > 0) thought = true;
+  }
+  return {
+    hiddenIds: hidden.map((entry) => entry.id),
+    anchorId: anchor.id,
+    messages,
+    toolCalls,
+    thought,
+    anchorThought,
+  };
+}
+
+/** Close the active turn's window, if it has one worth folding. */
+function finalizeTurn(state: TranscriptState): TranscriptState {
+  const active = state.activeTurn;
+  if (active === null) return state;
+
+  let start = 0;
+  if (active.startId !== null) {
+    const found = state.entries.findIndex((entry) => entry.id === active.startId);
+    // A history rebuild between turn start and end leaves the marker pointing
+    // at nothing; folding a guess would hide the wrong rows.
+    if (found < 0) return { ...state, activeTurn: null };
+    start = found + 1;
+  }
+  const region = state.entries.slice(Math.min(start, state.entries.length));
+  const folded = foldRegion(region);
+  if (folded === null) return { ...state, activeTurn: null };
+  return {
+    ...state,
+    activeTurn: null,
+    turnProcesses: { ...state.turnProcesses, [active.id]: folded },
+  };
+}
+
+/**
+ * Turn boundaries reconstructed from a message list: a user message opens a
+ * turn, everything after it until the next user message belongs to it. Equal
+ * by construction to what the live reducer would have computed.
+ */
+function deriveTurnProcesses(entries: readonly TranscriptEntry[]): {
+  turnProcesses: Record<number, TurnProcess>;
+  turnSeq: number;
+} {
+  const turnProcesses: Record<number, TurnProcess> = {};
+  let turnSeq = 0;
+  let region: TranscriptEntry[] = [];
+  const commit = (): void => {
+    if (region.length === 0) return;
+    turnSeq += 1;
+    const folded = foldRegion(region);
+    if (folded !== null) turnProcesses[turnSeq] = folded;
+  };
+  for (const entry of entries) {
+    if (entry.kind === 'user') {
+      commit();
+      region = [entry];
+      continue;
+    }
+    region.push(entry);
+  }
+  commit();
+  return { turnProcesses, turnSeq };
+}
+
 /* --------------------------------------------------------------- snapshot */
 
 /**
@@ -884,7 +996,18 @@ export const applySnapshot: ApplySnapshot = (state, messages) => {
   });
 
   const derived = deriveLastError(entries);
-  return { ...state, entries, streamingEntryId: null, lastError: derived ?? state.lastError };
+  // Turn folds are re-derived from the rebuilt list, so a reopened session
+  // shows the same compact view the live stream produced.
+  const { turnProcesses, turnSeq } = deriveTurnProcesses(entries);
+  return {
+    ...state,
+    entries,
+    streamingEntryId: null,
+    turnProcesses,
+    turnSeq,
+    activeTurn: null,
+    lastError: derived ?? state.lastError,
+  };
 };
 
 /* ------------------------------------------------------------------ events */
@@ -902,17 +1025,26 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
     }
 
     case 'agent_settled':
-      return {
+      // `turn_end` normally closes the fold window; settle is the backstop for
+      // any path that ends a run without one.
+      return finalizeTurn({
         ...finishStreaming(state),
         running: false,
         streamingEntryId: null,
         retrying: null,
-      };
+      });
 
-    case 'turn_start':
+    case 'turn_start': {
+      const last = state.entries[state.entries.length - 1];
+      const id = state.turnSeq + 1;
+      return { ...state, turnSeq: id, activeTurn: { id, startId: last?.id ?? null } };
+    }
+
     case 'turn_end':
-      // Structural only: the message/tool events carry everything the UI shows.
-      return state;
+      // Both structural: the message/tool events carry everything shown, and
+      // the turn boundary decides what folds (dsh folds at turn end, never
+      // while the turn is still running).
+      return finalizeTurn(state);
 
     case 'message_start':
       return startMessage(state, event.message);

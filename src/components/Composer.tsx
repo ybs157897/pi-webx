@@ -281,7 +281,12 @@ export function Composer({
                 : '给 pi 派活…回车发送，Shift+回车换行'
           }
           autoSize={{ minRows: 2, maxRows: 14 }}
-          style={{ padding: '10px 12px' }}
+          // `outline: none`: antd's borderless variant paints a 1px focus
+          // outline on :focus-visible (the active-border color). The input sits
+          // at the top of the shell, so the outline's top/left/right edges hide
+          // under the shell's own border while its bottom edge cuts across the
+          // card — a stray divider line that appears the moment you click in.
+          style={{ padding: '10px 12px', outline: 'none' }}
         />
 
         {/* dsh's composer row: the left carries the attach action and whatever

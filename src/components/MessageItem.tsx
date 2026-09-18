@@ -88,11 +88,13 @@ function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: b
 export function UserMessageItem({ entry }: { entry: UserEntry }) {
   return (
     <ChatItem
+      className="pi-message-item"
       avatar={{ title: '你', avatar: <User size={18} /> }}
       placement="right"
       variant="bubble"
       showTitle={false}
-      time={entry.at}
+      // No `time` prop: LobeHub renders its timestamp row at opacity 0 (hover
+      // only), and the row's 12px + 6px reserves a visible blank line.
       message={entry.text || undefined}
       renderMessage={() => (
         <Markdown variant="chat" fontSize={14}>
@@ -120,10 +122,13 @@ export function AssistantMessageItem({
   entry,
   onAction,
   renderStyle = 'ours',
+  hideThinking = false,
 }: {
   entry: AssistantEntry;
   onAction?: UiActionHandler | undefined;
   renderStyle?: RenderStyle;
+  /** folded turn: the answer's own reasoning row is hidden with the process */
+  hideThinking?: boolean;
 }) {
   const { token } = theme.useToken();
   const { isDarkMode } = useThemeMode();
@@ -162,11 +167,17 @@ export function AssistantMessageItem({
 
   return (
     <ChatItem
+      // The avatar prop must stay: the lib reads avatar.title unconditionally.
+      // showAvatar={false} drops the whole leading column on desktop, so the
+      // body takes the full width and no empty avatar row can appear.
+      className="pi-message-item"
       avatar={{ title: 'pi', avatar: <Bot size={18} /> }}
+      showAvatar={false}
       placement="left"
       variant="docs"
       showTitle={false}
-      time={entry.at}
+      // No `time` prop: LobeHub renders its timestamp row at opacity 0 (hover
+      // only), and the row's 12px + 6px reserves a visible blank line.
       message={displayText || undefined}
       renderMessage={() =>
         displayText ? (
@@ -176,7 +187,7 @@ export function AssistantMessageItem({
         ) : undefined
       }
       aboveMessage={
-        entry.thinking.trim().length > 0 ? (
+        !hideThinking && entry.thinking.trim().length > 0 ? (
           <ThinkingBlock thinking={entry.thinking} streaming={entry.streaming} />
         ) : undefined
       }

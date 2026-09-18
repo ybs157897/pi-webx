@@ -143,6 +143,40 @@ export interface QueuedMessages {
   followUp: string[];
 }
 
+/**
+ * One completed turn whose process folds away — dsh's compact transcript
+ * view, adapted: the steps between the turn's start and its final answer are
+ * kept as ids the UI hides behind a summary row ("已思考 · N 次工具调用").
+ *
+ * Computed twice, from the same rule: live at `turn_end`, and from the
+ * message list when a snapshot rebuilds history (so reopening a stored
+ * session folds its turns too).
+ */
+export interface TurnProcess {
+  /** entries hidden while the turn is collapsed, in order */
+  hiddenIds: string[];
+  /** the final answer entry; its text is always visible */
+  anchorId: string;
+  /** assistant steps inside the process window */
+  messages: number;
+  /** tool runs those steps executed */
+  toolCalls: number;
+  /** whether any step (the answer included) carried a reasoning block */
+  thought: boolean;
+  /**
+   * The answer step carried reasoning of its own; like dsh, that reasoning
+   * folds with the process while the answer's text stays.
+   */
+  anchorThought: boolean;
+}
+
+/** The in-flight turn: the process window that will close at `turn_end`. */
+export interface ActiveTurn {
+  id: number;
+  /** id of the entry the turn's window starts after; null when it began on an empty transcript */
+  startId: string | null;
+}
+
 export interface TranscriptState {
   entries: TranscriptEntry[];
   /** id of the assistant entry currently receiving deltas, if any */
@@ -156,6 +190,12 @@ export interface TranscriptState {
   lastError: string | null;
   /** session title pushed by an extension via `setTitle` */
   title: string | null;
+  /** number of the newest turn; 0 before the first */
+  turnSeq: number;
+  /** the turn still open, folded into `turnProcesses` when it ends */
+  activeTurn: ActiveTurn | null;
+  /** completed turns whose process is collapsed; keyed by turn number */
+  turnProcesses: Record<number, TurnProcess>;
 }
 
 /* ------------------------------------------------------------------ reducer */
@@ -170,6 +210,9 @@ export function createTranscript(): TranscriptState {
     queued: { steering: [], followUp: [] },
     lastError: null,
     title: null,
+    turnSeq: 0,
+    activeTurn: null,
+    turnProcesses: {},
   };
 }
 

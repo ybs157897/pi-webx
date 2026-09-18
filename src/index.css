@@ -46,3 +46,39 @@ body {
 button {
   font-family: inherit;
 }
+
+/*
+ * Transcript spacing is the list's own gap (`.pi-transcript`, 8px) and nothing
+ * else. LobeHub's ChatItem reserves 24px top / 12px bottom padding plus a
+ * -16px bottom margin per item for its own message rhythm, and its Title row
+ * and empty message container keep their margins/padding even when they render
+ * nothing — together that reads as a stray blank line between flat rows (tool
+ * cards, reasoning rows). Overridden here by a two-class selector, which
+ * outranks the lib's single-class rules without `!important`.
+ */
+.pi-transcript .pi-message-item {
+  padding: 0;
+  margin: 0;
+}
+
+.pi-transcript .pi-message-item :empty {
+  margin-block-end: 0;
+  padding-block: 0;
+}
+
+/*
+ * A folded turn's hidden rows live in one wrapper. Inside it they stack like
+ * the list itself (column, 8px); collapsed it is a single zero-height flex
+ * child whose -4px block margins halve the two 8px gaps around it down to the
+ * one standard gap — a fold then costs exactly the summary row and nothing
+ * else.
+ */
+.pi-transcript .pi-turn-process {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.pi-transcript .pi-turn-process-collapsed {
+  margin-block: -4px;
+}

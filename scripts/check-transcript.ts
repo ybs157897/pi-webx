@@ -201,10 +201,11 @@ check('unknown event type is ignored and does not throw', () => {
   assert.deepStrictEqual(state, before);
   state = applyPiEvent(state, ev({ type: 'response', command: 'get_state', success: true }));
   assert.deepStrictEqual(state, before);
-  // Structural only: no entry, no throw.
+  // turn events add no entries, and a turn with no answer folds nothing.
   state = applyPiEvent(state, ev({ type: 'turn_start' }));
   state = applyPiEvent(state, ev({ type: 'turn_end', message: { role: 'assistant', content: [] } }));
-  assert.deepStrictEqual(state, before);
+  assert.deepStrictEqual(state.entries, before.entries, 'turn events add no entries');
+  assert.deepStrictEqual(state.turnProcesses, {}, 'a turn without an answer does not fold');
 });
 
 /* 5 ------------------------------------------------------------------------ */
@@ -712,6 +713,163 @@ check('echo survives unrelated events and is re-added after a snapshot rebuild',
   state = addEcho(state, { requestId: 'req-2', text: 'later', imageCount: 0 });
   assert.equal(entriesOfKind(state, 'user').length, 2, 'echo re-added after rebuild');
   assert.equal((entriesOfKind(state, 'user')[1] as UserEntry).echo?.requestId, 'req-2');
+});
+
+/* ------------------------------------------------------- turn fold (compact) */
+
+/** One step of a turn: thinking, a tool call, and its result. */
+function applyStep(state: TranscriptState, callId: string): TranscriptState {
+  let next = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  next = applyPiEvent(
+    next,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_delta', contentIndex: 0, delta: 'hmm ' } }),
+  );
+  next = applyPiEvent(
+    next,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'toolcall_start', contentIndex: 1, id: callId, toolName: 'bash' } }),
+  );
+  next = applyPiEvent(
+    next,
+    ev({
+      type: 'message_end',
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: 'hmm ' },
+          { type: 'toolCall', id: callId, name: 'bash', arguments: { command: 'ls' } },
+        ],
+        stopReason: 'toolUse',
+        timestamp: 10,
+      },
+    }),
+  );
+  next = applyPiEvent(
+    next,
+    ev({
+      type: 'message_end',
+      message: { role: 'toolResult', toolCallId: callId, toolName: 'bash', content: [{ type: 'text', text: 'out' }], isError: false, timestamp: 11 },
+    }),
+  );
+  return next;
+}
+
+/** The final answer step: text, no tool calls. */
+function applyAnswer(state: TranscriptState, text: string): TranscriptState {
+  let next = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  next = applyPiEvent(
+    next,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', contentIndex: 0, delta: text } }),
+  );
+  return applyPiEvent(
+    next,
+    ev({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text }], stopReason: 'stop', timestamp: 12 } }),
+  );
+}
+
+check('turn fold: turn_end folds the process and keeps the answer visible', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'agent_start' }));
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
+  state = applyStep(state, 'call_1');
+  state = applyStep(state, 'call_2');
+  state = applyAnswer(state, 'Done.');
+  state = applyPiEvent(state, ev({ type: 'turn_end' }));
+
+  const process = state.turnProcesses[1];
+  assert.ok(process, 'turn 1 is folded at turn_end');
+  assert.equal(process!.toolCalls, 2);
+  assert.equal(process!.messages, 2);
+  assert.equal(process!.thought, true);
+  assert.equal(process!.anchorThought, false, 'this answer carried no reasoning of its own');
+
+  const users = entriesOfKind(state, 'user');
+  const assistants = entriesOfKind(state, 'assistant') as AssistantEntry[];
+  const answer = assistants[assistants.length - 1]!;
+  assert.equal(process!.anchorId, answer.id, 'anchor is the final text step');
+  assert.ok(!process!.hiddenIds.includes(users[0]!.id), 'the user message never folds');
+  assert.ok(!process!.hiddenIds.includes(answer.id), 'the answer never folds');
+  assert.deepEqual(
+    process!.hiddenIds,
+    [assistants[0]!.id, assistants[1]!.id],
+    'both intermediate steps fold, in order',
+  );
+  assert.equal(state.activeTurn, null, 'the window is closed');
+});
+
+check('turn fold: agent_settled is the backstop when turn_end never fires', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
+  state = applyStep(state, 'call_x');
+  state = applyAnswer(state, 'ok');
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
+  assert.ok(state.turnProcesses[1], 'folded on settle');
+});
+
+check('turn fold: no textual answer means nothing folds', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
+  state = applyStep(state, 'call_only');
+  state = applyPiEvent(state, ev({ type: 'turn_end' }));
+  assert.deepStrictEqual(state.turnProcesses, {}, 'process with no answer stays inline');
+});
+
+check('turn fold: a history rebuild mid-turn skips folding instead of guessing', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
+  // Reconnect rebuild replaces every id the window marker pointed at.
+  state = applySnapshot(state, [{ role: 'assistant', content: [{ type: 'text', text: 'x' }], timestamp: 9 }]);
+  state = applyPiEvent(state, ev({ type: 'turn_end' }));
+  assert.deepStrictEqual(state.turnProcesses, {}, 'nothing folded after the marker vanished');
+});
+
+check('turn fold: history rebuilt from get_messages folds the same way', () => {
+  const messages: PiAgentMessage[] = [
+    { role: 'user', content: 'go', timestamp: 1 },
+    { role: 'assistant', content: [{ type: 'thinking', thinking: 't' }, { type: 'toolCall', id: 'c1', name: 'bash' }], stopReason: 'toolUse', timestamp: 2 },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [{ type: 'text', text: 'out' }], isError: false, timestamp: 3 },
+    { role: 'assistant', content: [{ type: 'text', text: 'Final answer.' }], stopReason: 'stop', timestamp: 4 },
+    { role: 'user', content: 'again', timestamp: 5 },
+    { role: 'assistant', content: [{ type: 'text', text: 'No steps.' }], stopReason: 'stop', timestamp: 6 },
+  ];
+  const state = applySnapshot(createTranscript(), messages);
+  assert.equal(state.turnSeq, 2, 'two turns derived from the message list');
+  const process = state.turnProcesses[1];
+  assert.ok(process, 'the stepful turn folds');
+  assert.equal(process!.toolCalls, 1);
+  assert.equal(process!.messages, 1);
+  assert.equal(process!.thought, true);
+  // The second turn is a single text message: nothing to fold.
+  assert.equal(state.turnProcesses[2], undefined);
+  // The folded entry is the intermediate step, not the answer.
+  const assistants = entriesOfKind(state, 'assistant') as AssistantEntry[];
+  assert.deepEqual(process!.hiddenIds, [assistants[0]!.id]);
+  assert.equal(process!.anchorId, assistants[1]!.id);
+});
+
+check('turn fold: a thinking-only answer folds just its reasoning', () => {
+  const state = applySnapshot(createTranscript(), [
+    { role: 'user', content: 'hi', timestamp: 1 },
+    {
+      role: 'assistant',
+      content: [
+        { type: 'thinking', thinking: 'thought about it' },
+        { type: 'text', text: 'Hello.' },
+      ],
+      stopReason: 'stop',
+      timestamp: 2,
+    },
+  ]);
+  const process = state.turnProcesses[1];
+  assert.ok(process, 'a turn whose only process is the answer reasoning folds too (dsh does)');
+  assert.deepEqual(process!.hiddenIds, [], 'no separate steps fold');
+  assert.equal(process!.anchorThought, true, 'the answer reasoning is hidden with the fold');
+  assert.equal(process!.thought, true);
+  assert.equal(process!.toolCalls, 0);
+  assert.equal(process!.messages, 0);
 });
 
 /* ------------------------------------------------------------------------ */
