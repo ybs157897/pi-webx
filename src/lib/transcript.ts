@@ -30,13 +30,16 @@
 
 import type { PiAgentMessage, PiEvent, PiToolCallBlock } from '../shared/protocol';
 import type {
+  AddEcho,
   ApplyPiEvent,
   ApplySnapshot,
   AssistantEntry,
   BashEntry,
   CompactionEntry,
+  EchoSubmission,
   NoticeEntry,
   NoticeLevel,
+  RetireEcho,
   RetryInfo,
   ToolResultEntry,
   ToolRun,
@@ -1143,4 +1146,32 @@ export const applyPiEvent: ApplyPiEvent = (state, event) => {
     // Defensive: a malformed event must not take down the UI's stream.
     return state;
   }
+};
+
+/* ------------------------------------------------------------ optimistic echo */
+
+const isEchoOf = (entry: TranscriptEntry, requestId: string): boolean =>
+  entry.kind === 'user' && entry.echo?.requestId === requestId;
+
+/**
+ * Show a submitted prompt immediately. Purely a display projection: the queue
+ * and the durable record are the server's truth, and a `get_messages` snapshot
+ * (which drops echoes) is reconciled by re-adding still-pending submissions.
+ */
+export const addEcho: AddEcho = (state, submission: EchoSubmission) => {
+  if (state.entries.some((entry) => isEchoOf(entry, submission.requestId))) return state;
+  const entry: UserEntry = {
+    kind: 'user',
+    id: `echo-${submission.requestId}`,
+    at: Date.now(),
+    text: submission.text,
+    imageCount: submission.imageCount,
+    echo: { requestId: submission.requestId },
+  };
+  return { ...state, entries: [...state.entries, entry] };
+};
+
+export const retireEcho: RetireEcho = (state, requestId) => {
+  if (!state.entries.some((entry) => isEchoOf(entry, requestId))) return state;
+  return { ...state, entries: state.entries.filter((entry) => !isEchoOf(entry, requestId)) };
 };

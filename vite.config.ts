@@ -1,7 +1,7 @@
 import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
-/** Backend that owns the `pi --mode rpc` child process. */
+/** Backend that hosts the in-process pi SDK and the multiplexed event socket. */
 const API_PORT = Number(process.env.PI_WEBX_PORT ?? 8787);
 const API_ORIGIN = `http://127.0.0.1:${API_PORT}`;
 
@@ -22,6 +22,8 @@ export default defineConfig({
             }
           });
         },
+        // The multiplexed event socket (`/api/ws`) rides the same proxy entry.
+        ws: true,
       },
     },
   },

@@ -51,6 +51,14 @@ export interface UserEntry {
   at: number;
   text: string;
   imageCount: number;
+  /**
+   * Present while the entry is an optimistic echo of a just-submitted prompt,
+   * not yet replaced by the durable user message. `requestId` correlates it
+   * with the submit; the echo is retired (removed) when the frame carrying
+   * `source.requestId` arrives, in the same update that appends the durable
+   * entry — so exactly one of the two is ever visible.
+   */
+  echo?: { requestId: string };
 }
 
 export interface AssistantEntry {
@@ -173,5 +181,18 @@ export type ApplySnapshot = (
 
 /** Fold one streaming pi event into the transcript. */
 export type ApplyPiEvent = (state: TranscriptState, event: PiEvent) => TranscriptState;
+
+/** What `addEcho` needs to render a just-submitted prompt immediately. */
+export interface EchoSubmission {
+  requestId: string;
+  text: string;
+  imageCount: number;
+}
+
+/** Show a submitted prompt before the server has echoed it back (optimistic). */
+export type AddEcho = (state: TranscriptState, submission: EchoSubmission) => TranscriptState;
+
+/** Remove the echo once the durable message with `source.requestId` arrived. */
+export type RetireEcho = (state: TranscriptState, requestId: string) => TranscriptState;
 
 export type { PiAgentMessage, PiEvent, PiModelCost };

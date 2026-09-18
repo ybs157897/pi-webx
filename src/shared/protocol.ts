@@ -2,8 +2,8 @@
  * Wire contract between the browser and the local pi bridge server.
  *
  * Mirrors the pi coding agent's RPC protocol (pi-coding-agent/docs/rpc.md):
- * commands are JSONL on the child's stdin, events are JSONL on its stdout.
- * The server relays both and wraps them in `ServerFrame`s for the browser.
+ * commands travel as HTTP POST bodies, events come back over one multiplexed
+ * WebSocket as journaled `ServerFrame`s (see "websocket multiplexed stream").
  *
  * Deliberately permissive: pi adds fields over time, so anything not load-bearing
  * is optional and open-ended maps are used for provider-specific payloads.
@@ -425,21 +425,59 @@ export interface PiToolsPayload {
 
 /* ------------------------------------------------- browser <-> server transport */
 
-/** Frames pushed to the browser over SSE (`GET /api/sessions/:id/events`). */
+/**
+ * One journaled frame for a session's event stream. Transport-agnostic: the
+ * WebSocket gateway wraps it in a `WsEvent` with the session id and the seq the
+ * host's journal assigned.
+ *
+ * `source.requestId` correlates a durable user message with the `prompt`
+ * command that produced it, so the browser can retire its optimistic echo.
+ */
 export type ServerFrame =
+  | { t: 'pi'; event: PiEvent; source?: { requestId: string } }
+  | { t: 'exit'; code: number | null; signal: string | null }
+  | { t: 'error'; message: string };
+
+/** One frame as the journal recorded it: the frame plus its sequence number. */
+export interface JournalEntry {
+  seq: number;
+  frame: ServerFrame;
+}
+
+/* ---------------------------------------------- websocket multiplexed stream */
+
+/**
+ * The shared WebSocket (`/api/ws`): one connection carries every subscribed
+ * session's event stream, dsh's remote-mux split — unary commands stay on HTTP
+ * POST, streams multiplex here. Ordering within the socket is the journal's
+ * ordering; `seq` is per session, dense, and starts at 1.
+ */
+export type WsClientMessage =
+  /** Start receiving a session's frames; `fromSeq` replays the journal tail. */
+  | { t: 'subscribe'; sessionId: string; fromSeq?: number }
+  | { t: 'unsubscribe'; sessionId: string }
+  | { t: 'resync'; sessionId: string };
+
+export type WsServerMessage =
+  | { t: 'welcome' }
   | {
-      t: 'hello';
+      t: 'subscribed';
       sessionId: string;
-      pid: number | null;
+      latestSeq: number;
       cwd: string;
       sessionFile: string | null;
       resumed: boolean;
+      streaming: boolean;
     }
-  | { t: 'pi'; event: PiEvent }
-  /** A stdout line that was not valid JSON — surfaced for debugging, never fatal. */
-  | { t: 'stdout'; line: string }
-  | { t: 'stderr'; chunk: string }
-  | { t: 'exit'; code: number | null; signal: string | null }
+  | { t: 'event'; sessionId: string; seq: number; frame: ServerFrame }
+  /**
+   * The journal cannot serve a contiguous replay from where the client is
+   * (gap, or the client asked too late): the client must rebuild from a
+   * `get_messages` snapshot instead.
+   */
+  | { t: 'resync-required'; sessionId: string }
+  /** The session is gone (killed, swept or unknown); no more frames follow. */
+  | { t: 'closed'; sessionId: string; reason: 'unknown' | 'killed' | 'swept' }
   | { t: 'error'; message: string };
 
 export interface SessionSummary {
@@ -453,8 +491,18 @@ export interface SessionSummary {
   provider: string | null;
   model: string | null;
   streaming: boolean;
-  /** subscribers currently attached to this session's SSE stream */
+  /** subscribers currently attached to this session's event stream */
   clients: number;
+}
+
+/**
+ * `get_messages` result payload: the message list plus `throughSeq`, the
+ * journal seq the list already reflects. Frames with `seq <= throughSeq` are
+ * covered by the snapshot; the client applies only newer ones.
+ */
+export interface MessagesPayload {
+  messages: PiAgentMessage[];
+  throughSeq: number;
 }
 
 export interface CreateSessionRequest {

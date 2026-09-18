@@ -6,6 +6,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { resolvePiVersion } from './config';
 import { PiHost } from './pi/host';
 import { JSON_BODY_LIMIT, createApiRouter } from './routes';
+import { attachWebSocketGateway } from './ws';
 
 /** Default port; override with PI_WEBX_PORT. */
 const DEFAULT_PORT = 8787;
@@ -57,6 +58,8 @@ async function main(): Promise<void> {
     console.log(`[pi-webx] pi SDK ${resolvePiVersion()} (agent runs in-process)`);
   });
 
+  const disposeWebSocket = attachWebSocketGateway(server, manager);
+
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {
       console.error(`[pi-webx] port ${port} is already in use; set PI_WEBX_PORT to another port`);
@@ -66,7 +69,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
 
-  installSignalHandlers(server, manager);
+  installSignalHandlers(server, manager, disposeWebSocket);
 }
 
 /**
@@ -95,7 +98,11 @@ function serveProductionAssets(app: express.Express): void {
   });
 }
 
-function installSignalHandlers(server: ReturnType<express.Express['listen']>, manager: PiHost): void {
+function installSignalHandlers(
+  server: ReturnType<express.Express['listen']>,
+  manager: PiHost,
+  disposeWebSocket: () => void,
+): void {
   let shuttingDown = false;
 
   const shutdown = (signal: string): void => {
@@ -103,7 +110,10 @@ function installSignalHandlers(server: ReturnType<express.Express['listen']>, ma
     shuttingDown = true;
     console.log(`[pi-webx] received ${signal}; shutting down`);
 
-    // SSE clients hold connections open, so close() alone would hang.
+    // WebSocket clients hold connections open, so close() alone would hang:
+    // the gateway is torn down first so sockets close instead of keeping the
+    // http server alive through open upgrades.
+    disposeWebSocket();
     const httpClosed = new Promise<void>((resolve) => {
       server.close(() => {
         console.log('[pi-webx] http server closed');

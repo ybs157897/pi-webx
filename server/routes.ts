@@ -12,7 +12,6 @@ import {
   type PickDirectoryResponse,
   type PiCommandEnvelope,
   type PiThinkingLevel,
-  type ServerFrame,
 } from '../src/shared/protocol';
 import { buildServerConfig } from './config';
 import { DirectoryPickerUnsupportedError, pickNativeDirectory } from './directory-picker';
@@ -27,11 +26,7 @@ import {
   upsertProvider as upsertProviderEntry,
 } from './models-config';
 import { GitError, checkoutBranch, readGitBranches } from './git';
-import {
-  HostError,
-  PiHost,
-  type HostSubscriber,
-} from './pi/host';
+import { HostError, PiHost } from './pi/host';
 import {
   ProviderError,
   listProviders,
@@ -41,8 +36,6 @@ import {
 import type { CredentialWriteResponse, ListProvidersResponse } from '../src/shared/providers';
 import { clampStoredLimit, listStoredSessions, recentStoredCwds, sessionsRoot } from './stored-sessions';
 
-/** SSE keep-alive cadence. */
-const HEARTBEAT_MS = 15_000;
 /** Upper bound on a request body; large enough for pasted images. */
 export const JSON_BODY_LIMIT = '1mb';
 
@@ -515,69 +508,6 @@ export function createApiRouter(manager: PiHost): Router {
       };
       res.json(payload);
     }
-  });
-
-  router.get('/sessions/:id/events', (req: Request, res: Response) => {
-    const id = paramId(req);
-    const session = manager.get(id);
-    if (!session) {
-      return sendError(res, 404, `unknown session: ${id}`);
-    }
-
-    res.status(200);
-    res.setHeader('Content-Type', 'text/event-stream');
-    res.setHeader('Cache-Control', 'no-cache, no-transform');
-    res.setHeader('Connection', 'keep-alive');
-    res.setHeader('X-Accel-Buffering', 'no');
-    res.flushHeaders();
-    res.socket?.setNoDelay(true);
-
-    const hello: ServerFrame = {
-      t: 'hello',
-      sessionId: session.id,
-      pid: null,
-      cwd: session.cwd,
-      sessionFile: session.sessionFile,
-      resumed: session.resumed,
-    };
-    res.write(`data: ${JSON.stringify(hello)}\n\n`);
-
-    let heartbeat: NodeJS.Timeout | null = null;
-    let detached = false;
-
-    const detach = (): void => {
-      if (detached) return;
-      detached = true;
-      if (heartbeat) {
-        clearInterval(heartbeat);
-        heartbeat = null;
-      }
-      manager.unsubscribe(session, subscriber);
-    };
-
-    const subscriber: HostSubscriber = {
-      frame: (frame) => {
-        if (!res.writableEnded) res.write(`data: ${JSON.stringify(frame)}\n\n`);
-      },
-      close: () => {
-        detach();
-        if (!res.writableEnded) res.end();
-      },
-    };
-
-    manager.subscribe(session, subscriber);
-
-    // Both events fire when the client goes away; detach() is idempotent.
-    req.on('close', detach);
-    res.on('close', detach);
-
-    heartbeat = setInterval(() => {
-      if (res.writableEnded) {
-        detach();
-        return;
-      }
-      res.write(': ping\n\n');
-    }, HEARTBEAT_MS);
   });
 
   return router;

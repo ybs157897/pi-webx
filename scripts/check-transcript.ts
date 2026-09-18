@@ -14,9 +14,11 @@ import assert from 'node:assert/strict';
 
 import type { PiAgentMessage, PiEvent } from '../src/shared/protocol';
 import {
+  addEcho,
   applyPiEvent,
   applySnapshot,
   createTranscript,
+  retireEcho,
 } from '../src/lib/transcript';
 import type {
   AssistantEntry,
@@ -670,6 +672,46 @@ check('end-to-end turn: prompt -> thinking/text/tool stream -> result -> settle'
   assert.equal(run.output, 'a.txt\nb.txt\n');
   assert.deepEqual(run.args, { command: 'ls' });
   assert.equal(entriesOfKind(state, 'toolResult').length, 0, 'no orphan entry for the tool result');
+});
+
+check('echo: add shows the submit immediately, retire removes it, no duplicates', () => {
+  let state = createTranscript();
+  state = addEcho(state, { requestId: 'req-1', text: 'go', imageCount: 1 });
+  // Adding the same submission twice must not render two bubbles.
+  state = addEcho(state, { requestId: 'req-1', text: 'go', imageCount: 1 });
+  const echo = only(state, 'user') as UserEntry;
+  assert.equal(echo.text, 'go');
+  assert.equal(echo.imageCount, 1);
+  assert.equal(echo.echo?.requestId, 'req-1');
+
+  // The durable frame retires the echo and appends the real message in the
+  // same update: retire first, then apply the message_start.
+  state = retireEcho(state, 'req-1');
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 10 } }));
+  const users = entriesOfKind(state, 'user');
+  assert.equal(users.length, 1, 'exactly one of echo/durable is visible');
+  assert.equal(users[0]!.echo, undefined);
+  assert.equal(users[0]!.text, 'go');
+
+  // Retiring an unknown or already-retired id is a no-op.
+  const before = structuredClone(state);
+  state = retireEcho(state, 'req-unknown');
+  assert.deepStrictEqual(state, before);
+});
+
+check('echo survives unrelated events and is re-added after a snapshot rebuild', () => {
+  let state = createTranscript();
+  state = addEcho(state, { requestId: 'req-2', text: 'later', imageCount: 0 });
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  assert.equal(entriesOfKind(state, 'user').length, 1, 'echo unaffected by other events');
+
+  // A snapshot (reconnect rebuild) drops echoes; the caller re-adds pending ones.
+  state = applySnapshot(state, [{ role: 'user', content: 'earlier', timestamp: 1 }]);
+  assert.equal(entriesOfKind(state, 'user').length, 1);
+  assert.equal((entriesOfKind(state, 'user')[0] as UserEntry).echo, undefined);
+  state = addEcho(state, { requestId: 'req-2', text: 'later', imageCount: 0 });
+  assert.equal(entriesOfKind(state, 'user').length, 2, 'echo re-added after rebuild');
+  assert.equal((entriesOfKind(state, 'user')[1] as UserEntry).echo?.requestId, 'req-2');
 });
 
 /* ------------------------------------------------------------------------ */

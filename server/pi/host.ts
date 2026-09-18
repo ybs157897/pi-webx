@@ -30,7 +30,9 @@ import {
 } from '@earendil-works/pi-coding-agent';
 
 import type {
+  JournalEntry,
   PiCommandEnvelope,
+  PiEvent,
   PiExtensionUiRequest,
   PiExtensionUiResponse,
   PiModel,
@@ -40,6 +42,7 @@ import type {
   ServerFrame,
   SessionSummary,
 } from '../../src/shared/protocol';
+import { PromptRequests, SessionJournal } from './session-journal';
 import {
   appendToolSelection,
   readToolSelection,
@@ -51,8 +54,11 @@ const MAX_SESSIONS = 12;
 /** Sweep dead sessions with no subscribers after this long. */
 const SWEEP_AFTER_MS = 10 * 60_000;
 
+/** Commands whose submit is idempotent by requestId, like dsh's prompt path. */
+const PROMPT_COMMANDS = new Set(['prompt', 'steer', 'follow_up']);
+
 export interface HostSubscriber {
-  frame: (frame: ServerFrame) => void;
+  frame: (entry: JournalEntry) => void;
   close: () => void;
 }
 
@@ -93,6 +99,10 @@ export interface HostedSession {
    * selection is known.
    */
   toolSelection: string[] | null;
+  /** Ordered in-memory log every subscriber's stream is cut from. */
+  journal: SessionJournal;
+  /** requestId ledger: duplicate-submit guard + echo-retire annotation. */
+  promptRequests: PromptRequests;
   subscribers: Set<HostSubscriber>;
   unsubscribe: (() => void) | null;
   lastSeen: number;
@@ -204,6 +214,8 @@ export class PiHost {
       extensionsResult,
       pendingDialogs: new Map(),
       toolSelection: options.toolNames ?? null,
+      journal: new SessionJournal(),
+      promptRequests: new PromptRequests(),
       subscribers: new Set(),
       unsubscribe: null,
       lastSeen: Date.now(),
@@ -319,6 +331,8 @@ export class PiHost {
       // A fork keeps pi's default tool set until someone chooses otherwise; the
       // source session's selection describes that session, not this one.
       toolSelection: null,
+      journal: new SessionJournal(),
+      promptRequests: new PromptRequests(),
       subscribers: new Set(),
       unsubscribe: null,
       lastSeen: Date.now(),
@@ -523,7 +537,7 @@ export class PiHost {
           method,
           ...payload,
           ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-        } as unknown as ServerFrame extends { t: 'pi'; event: infer E } ? E : never,
+        } as unknown as PiEvent,
       });
     });
   }
@@ -536,7 +550,7 @@ export class PiHost {
         type: 'extension_ui_request',
         id: crypto.randomUUID(),
         ...payload,
-      } as unknown as ServerFrame extends { t: 'pi'; event: infer E } ? E : never,
+      } as unknown as PiEvent,
     });
   }
 
@@ -560,11 +574,34 @@ export class PiHost {
     if (event.type === 'agent_settled' || event.type === 'agent_end') hosted.streaming = false;
     // SDK events are a superset of the RPC-mode union the client models; the
     // transcript reducer ignores the extras (entry_appended, …) safely.
-    this.broadcast(hosted, { t: 'pi', event: event as unknown as ServerFrame extends { t: 'pi'; event: infer E } ? E : never });
+    const source = this.claimPromptSource(hosted, event);
+    this.broadcast(hosted, {
+      t: 'pi',
+      event: event as unknown as PiEvent,
+      ...(source === undefined ? {} : { source }),
+    });
+  }
+
+  /**
+   * Correlate a durable user message with the prompt command that produced it.
+   *
+   * pi has no requestId on its own events, so the host is the adapter: the
+   * oldest still-pending requestId claims the next user message, and the frame
+   * carries it as `source.requestId` for the browser's echo retire.
+   */
+  private claimPromptSource(hosted: HostedSession, event: AgentSessionEvent): { requestId: string } | undefined {
+    if (event.type !== 'message_start') return undefined;
+    const message = (event as { message?: { role?: unknown } }).message;
+    if (message === undefined || message.role !== 'user') return undefined;
+    const requestId = hosted.promptRequests.consumePending();
+    return requestId === null ? undefined : { requestId };
   }
 
   private broadcast(hosted: HostedSession, frame: ServerFrame): void {
-    for (const subscriber of hosted.subscribers) subscriber.frame(frame);
+    // Everything a subscriber can see passes through the journal first, so a
+    // reconnecting client's replay and a live client's stream share one order.
+    const entry = hosted.journal.append(frame);
+    for (const subscriber of hosted.subscribers) subscriber.frame(entry);
   }
 
   private broadcastError(hosted: HostedSession, message: string): void {
@@ -652,149 +689,181 @@ export class PiHost {
 
   async command(id: string, command: PiCommandEnvelope): Promise<PiRpcResponse> {
     const hosted = this.sessions.get(id);
-    if (!hosted) return fail(command.type, 'unknown session');
-    if (!hosted.alive) return fail(command.type, 'session is not running');
+    if (!hosted) return fail(command.type, 'unknown session', command.id);
+    if (!hosted.alive) return fail(command.type, 'session is not running', command.id);
     hosted.lastSeen = Date.now();
-    const session = hosted.session;
+
+    // Business-level idempotency, independent of the HTTP transport: a prompt
+    // the host has already seen (pending or settled) is acknowledged without
+    // being submitted to pi again — a retried submit must not double-send.
+    const requestId = command.id;
+    const idempotent = requestId !== undefined && PROMPT_COMMANDS.has(command.type);
+    if (idempotent && !hosted.promptRequests.add(requestId)) {
+      return ok(command.type, { accepted: true, deduplicated: true }, requestId);
+    }
 
     try {
-      switch (command.type) {
-        case 'prompt': {
-          const accepted = new Promise<boolean>((resolve) => {
-            void session
-              .prompt(command.message, {
-                ...(command.images && command.images.length > 0
-                  ? { images: command.images as unknown as ImageContent[] }
-                  : {}),
-                ...(command.streamingBehavior
-                  ? { streamingBehavior: command.streamingBehavior }
-                  : {}),
-                preflightResult: resolve,
-              })
-              .catch((error: unknown) => this.broadcastError(hosted, errorText(error)));
-          });
-          const success = await accepted;
-          return ok(command.type, { accepted: success });
-        }
-        case 'steer':
-          await session.steer(command.message);
-          return ok(command.type);
-        case 'follow_up':
-          await session.followUp(command.message);
-          return ok(command.type);
-        case 'abort':
-          await session.abort();
-          return ok(command.type);
-        case 'clear_queue':
-          return { type: 'response', command: command.type, success: true, data: session.clearQueue() };
-        case 'new_session': {
-          await this.resetInPlace(hosted);
-          return { type: 'response', command: command.type, success: true, data: { cancelled: false } };
-        }
-        case 'get_state':
-          return { type: 'response', command: command.type, success: true, data: this.stateOf(hosted) };
-        case 'get_messages':
-          return { type: 'response', command: command.type, success: true, data: { messages: session.messages } };
-        case 'set_model': {
-          const runtime = await this.runtime();
-          const resolved = resolveCliModel({
-            cliModel: `${command.provider}/${command.modelId}`,
-            modelRuntime: runtime,
-          });
-          if (resolved.error) return fail(command.type, resolved.error);
-          if (!resolved.model) return fail(command.type, 'model not found');
-          await session.setModel(resolved.model);
-          return { type: 'response', command: command.type, success: true, data: asModel(session.model) };
-        }
-        case 'cycle_model': {
-          const result = await session.cycleModel();
-          return { type: 'response', command: command.type, success: true, data: result ?? null };
-        }
-        case 'get_available_models': {
-          const runtime = await this.runtime();
-          const models = await runtime.getAvailable();
-          return { type: 'response', command: command.type, success: true, data: { models } };
-        }
-        case 'set_thinking_level':
-          session.setThinkingLevel(command.level);
-          return ok(command.type);
-        case 'cycle_thinking_level':
-          return { type: 'response', command: command.type, success: true, data: { level: session.cycleThinkingLevel() ?? session.thinkingLevel } };
-        case 'get_available_thinking_levels':
-          return { type: 'response', command: command.type, success: true, data: { levels: this.thinkingLevels(hosted) } };
-        case 'set_steering_mode':
-          session.setSteeringMode(command.mode);
-          return ok(command.type);
-        case 'set_follow_up_mode':
-          session.setFollowUpMode(command.mode);
-          return ok(command.type);
-        case 'compact':
-          return { type: 'response', command: command.type, success: true, data: await session.compact(command.customInstructions) };
-        case 'get_session_stats':
-          return { type: 'response', command: command.type, success: true, data: this.statsOf(hosted) };
-        case 'set_session_name':
-          session.setSessionName(command.name);
-          hosted.sessionName = command.name;
-          return ok(command.type);
-        case 'get_tools': {
-          // pi-web's shape: every tool, each flagged with whether it is active, so
-          // a panel can show what a preset turned off.
-          const active = new Set(hosted.session.getActiveToolNames());
-          return {
-            type: 'response',
-            command: command.type,
-            success: true,
-            data: {
-              tools: hosted.session.getAllTools().map((tool) => ({
-                name: tool.name,
-                description: tool.description,
-                active: active.has(tool.name),
-              })),
-              selection: hosted.toolSelection ?? hosted.session.getActiveToolNames(),
-            },
-          };
-        }
-        case 'set_tools': {
-          const requested = validateToolSelection((command as unknown as { toolNames?: unknown }).toolNames);
-          if (requested === undefined) {
-            return fail(command.type, 'toolNames 必须是内置工具名数组');
-          }
-          this.setToolSelection(hosted, requested, { persist: true });
-          return { type: 'response', command: command.type, success: true, data: { toolNames: requested } };
-        }
-        case 'get_commands':
-          return {
-            type: 'response',
-            command: command.type,
-            success: true,
-            // The merged list: extension commands, prompt templates and skills.
-            // pi built it while loading resources, and its runtime is the only
-            // public accessor — the runner that assembles it is private to
-            // `createAgentSession`.
-            data: { commands: this.commandsOf(hosted) },
-          };
-        case 'extension_ui_response': {
-          const answered = this.respondToDialog(command.id, {
-            type: 'extension_ui_response',
-            id: command.id,
-            ...(command.value === undefined ? {} : { value: command.value }),
-            ...(command.confirmed === undefined ? {} : { confirmed: command.confirmed }),
-            ...(command.cancelled === undefined ? {} : { cancelled: command.cancelled }),
-          });
-          if (!answered) return fail(command.type, `no extension dialog is waiting on id ${command.id}`);
-          return ok(command.type);
-        }
-        case 'set_auto_compaction':
-        case 'set_auto_retry':
-        case 'export_html':
-        case 'bash':
-        case 'abort_bash':
-          return fail(command.type, `${command.type} is not supported by the SDK host yet`);
-        default:
-          return fail(command.type, `unknown command: ${(command as { type: string }).type}`);
-      }
+      const response = await this.dispatch(hosted, command);
+      return command.id === undefined ? response : { ...response, id: command.id };
     } catch (error) {
-      return fail(command.type, errorText(error));
+      if (idempotent && requestId !== undefined) hosted.promptRequests.forget(requestId);
+      return fail(command.type, errorText(error), command.id);
+    }
+  }
+
+  private async dispatch(hosted: HostedSession, command: PiCommandEnvelope): Promise<PiRpcResponse> {
+    const session = hosted.session;
+
+    // Every case returns; errors propagate to command(), which releases the
+    // requestId and echoes the correlation id on the response.
+    switch (command.type) {
+      case 'prompt': {
+        const accepted = new Promise<boolean>((resolve) => {
+          void session
+            .prompt(command.message, {
+              ...(command.images && command.images.length > 0
+                ? { images: command.images as unknown as ImageContent[] }
+                : {}),
+              ...(command.streamingBehavior
+                ? { streamingBehavior: command.streamingBehavior }
+                : {}),
+              preflightResult: resolve,
+            })
+            .catch((error: unknown) => this.broadcastError(hosted, errorText(error)));
+        });
+        const success = await accepted;
+        // A rejected preflight never becomes a durable user message: release
+        // the requestId so retrying the same submit re-attempts it.
+        if (!success && command.id !== undefined) hosted.promptRequests.forget(command.id);
+        return ok(command.type, { accepted: success });
+      }
+      case 'steer':
+        await session.steer(command.message);
+        return ok(command.type);
+      case 'follow_up':
+        await session.followUp(command.message);
+        return ok(command.type);
+      case 'abort':
+        await session.abort();
+        return ok(command.type);
+      case 'clear_queue':
+        return { type: 'response', command: command.type, success: true, data: session.clearQueue() };
+      case 'new_session': {
+        await this.resetInPlace(hosted);
+        return { type: 'response', command: command.type, success: true, data: { cancelled: false } };
+      }
+      case 'get_state':
+        return { type: 'response', command: command.type, success: true, data: this.stateOf(hosted) };
+      case 'get_messages': {
+        const messages = session.messages;
+        // Captured after the list was read: pi appends to its log and emits
+        // the event in the same synchronous turn, so everything the snapshot
+        // reflects is already journaled and covered by `throughSeq`.
+        const throughSeq = hosted.journal.latestSeq;
+        return {
+          type: 'response',
+          command: command.type,
+          success: true,
+          data: { messages, throughSeq },
+        };
+      }
+      case 'set_model': {
+        const runtime = await this.runtime();
+        const resolved = resolveCliModel({
+          cliModel: `${command.provider}/${command.modelId}`,
+          modelRuntime: runtime,
+        });
+        if (resolved.error) return fail(command.type, resolved.error);
+        if (!resolved.model) return fail(command.type, 'model not found');
+        await session.setModel(resolved.model);
+        return { type: 'response', command: command.type, success: true, data: asModel(session.model) };
+      }
+      case 'cycle_model': {
+        const result = await session.cycleModel();
+        return { type: 'response', command: command.type, success: true, data: result ?? null };
+      }
+      case 'get_available_models': {
+        const runtime = await this.runtime();
+        const models = await runtime.getAvailable();
+        return { type: 'response', command: command.type, success: true, data: { models } };
+      }
+      case 'set_thinking_level':
+        session.setThinkingLevel(command.level);
+        return ok(command.type);
+      case 'cycle_thinking_level':
+        return { type: 'response', command: command.type, success: true, data: { level: session.cycleThinkingLevel() ?? session.thinkingLevel } };
+      case 'get_available_thinking_levels':
+        return { type: 'response', command: command.type, success: true, data: { levels: this.thinkingLevels(hosted) } };
+      case 'set_steering_mode':
+        session.setSteeringMode(command.mode);
+        return ok(command.type);
+      case 'set_follow_up_mode':
+        session.setFollowUpMode(command.mode);
+        return ok(command.type);
+      case 'compact':
+        return { type: 'response', command: command.type, success: true, data: await session.compact(command.customInstructions) };
+      case 'get_session_stats':
+        return { type: 'response', command: command.type, success: true, data: this.statsOf(hosted) };
+      case 'set_session_name':
+        session.setSessionName(command.name);
+        hosted.sessionName = command.name;
+        return ok(command.type);
+      case 'get_tools': {
+        // pi-web's shape: every tool, each flagged with whether it is active, so
+        // a panel can show what a preset turned off.
+        const active = new Set(hosted.session.getActiveToolNames());
+        return {
+          type: 'response',
+          command: command.type,
+          success: true,
+          data: {
+            tools: hosted.session.getAllTools().map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+              active: active.has(tool.name),
+            })),
+            selection: hosted.toolSelection ?? hosted.session.getActiveToolNames(),
+          },
+        };
+      }
+      case 'set_tools': {
+        const requested = validateToolSelection((command as unknown as { toolNames?: unknown }).toolNames);
+        if (requested === undefined) {
+          return fail(command.type, 'toolNames 必须是内置工具名数组');
+        }
+        this.setToolSelection(hosted, requested, { persist: true });
+        return { type: 'response', command: command.type, success: true, data: { toolNames: requested } };
+      }
+      case 'get_commands':
+        return {
+          type: 'response',
+          command: command.type,
+          success: true,
+          // The merged list: extension commands, prompt templates and skills.
+          // pi built it while loading resources, and its runtime is the only
+          // public accessor — the runner that assembles it is private to
+          // `createAgentSession`.
+          data: { commands: this.commandsOf(hosted) },
+        };
+      case 'extension_ui_response': {
+        const answered = this.respondToDialog(command.id, {
+          type: 'extension_ui_response',
+          id: command.id,
+          ...(command.value === undefined ? {} : { value: command.value }),
+          ...(command.confirmed === undefined ? {} : { confirmed: command.confirmed }),
+          ...(command.cancelled === undefined ? {} : { cancelled: command.cancelled }),
+        });
+        if (!answered) return fail(command.type, `no extension dialog is waiting on id ${command.id}`);
+        return ok(command.type);
+      }
+      case 'set_auto_compaction':
+      case 'set_auto_retry':
+      case 'export_html':
+      case 'bash':
+      case 'abort_bash':
+        return fail(command.type, `${command.type} is not supported by the SDK host yet`);
+      default:
+        return fail(command.type, `unknown command: ${(command as { type: string }).type}`);
     }
   }
 
@@ -956,10 +1025,22 @@ export class PiHost {
   }
 }
 
-function ok(command: string, data?: unknown): PiRpcResponse {
-  return { type: 'response', command, success: true, ...(data === undefined ? {} : { data }) };
+function ok(command: string, data?: unknown, id?: string): PiRpcResponse {
+  return {
+    type: 'response',
+    ...(id === undefined ? {} : { id }),
+    command,
+    success: true,
+    ...(data === undefined ? {} : { data }),
+  };
 }
 
-function fail(command: string, error: string): PiRpcResponse {
-  return { type: 'response', command, success: false, error };
+function fail(command: string, error: string, id?: string): PiRpcResponse {
+  return {
+    type: 'response',
+    ...(id === undefined ? {} : { id }),
+    command,
+    success: false,
+    error,
+  };
 }
