@@ -6,6 +6,7 @@ import { ImagePlus } from 'lucide-react';
 import type { ClipboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { failureCopy } from '../lib/failure';
 import { formatTokens } from '../lib/format';
 import { IconSendOutline16, IconStopFill16 } from '../ui/primitives/icons';
 import {
@@ -169,12 +170,22 @@ export function Composer({
     async (steer: boolean) => {
       const value = text.trim();
       if (value.length === 0 || disabled) return;
-      const response = await api.prompt(value, {
-        ...(images.length > 0 ? { images } : {}),
-        ...(steer ? { behavior: 'steer' as const } : {}),
-      });
-      if (!response.success) {
-        flash(response.error ?? '发送失败');
+      try {
+        const response = await api.prompt(value, {
+          ...(images.length > 0 ? { images } : {}),
+          ...(steer ? { behavior: 'steer' as const } : {}),
+        });
+        if (!response.success) {
+          flash(response.error ?? '发送失败');
+          return;
+        }
+      } catch (error) {
+        /**
+         * 发送在 HTTP 层就失败了：桥接没回 `success:false`，而是直接抛（最常见的是
+         * 请求体超限的 413）。这里必须接住——不接就是一个未处理的 rejection，界面好
+         * 好的什么都不说、草稿还留在输入框里，用户只会以为按钮坏了。
+         */
+        flash(failureCopy(error).title);
         return;
       }
       setText('');

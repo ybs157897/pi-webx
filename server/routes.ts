@@ -37,11 +37,25 @@ import {
 } from './providers';
 import type { CredentialWriteResponse, ListProvidersResponse } from '../src/shared/providers';
 import { clampStoredLimit, listStoredSessions, recentStoredCwds, sessionsRoot } from './stored-sessions';
-import { AttachmentError } from './attachment/normalize';
+import { AttachmentError, DEFAULT_ATTACHMENT_LIMITS } from './attachment/normalize';
 import { readImage } from './attachment/store';
 
-/** Upper bound on a request body; large enough for pasted images. */
-export const JSON_BODY_LIMIT = '1mb';
+/**
+ * Upper bound on a request body.
+ *
+ * The prompt command carries images inline, base64 and all (pi's `prompt` takes
+ * them that way), so this bound is the real ceiling on what a message can
+ * attach — and it has to cover what the attachment pipeline *admits*, or the
+ * admission limits are decorative: a body over this bound is thrown out by
+ * express before any route runs, so `prepareIncomingImages` never gets to say
+ * which limit was hit. It used to be `1mb` "large enough for pasted images",
+ * which quietly capped every attachment at ~750KB of image bytes while the
+ * pipeline advertised 20MiB.
+ *
+ * Derived from the message budget rather than written as a number, so the two
+ * cannot drift apart again; see `scripts/check-image-transport.ts`.
+ */
+export const JSON_BODY_LIMIT = `${Math.ceil((DEFAULT_ATTACHMENT_LIMITS.maxMessageImageBytes * 4) / 3 / (1024 * 1024)) + 1}mb`;
 
 /**
  * Optional defaults applied to sessions created without an explicit provider or

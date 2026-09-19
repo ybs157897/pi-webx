@@ -11,7 +11,7 @@
     "build": "vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts"
+    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.4",

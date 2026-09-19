@@ -7,7 +7,7 @@
  * 备查。
  */
 
-export type FailureKind = 'offline' | 'upstream' | 'timeout' | 'unknown';
+export type FailureKind = 'offline' | 'upstream' | 'timeout' | 'too-large' | 'unknown';
 
 export interface FailureCopy {
   kind: FailureKind;
@@ -29,12 +29,22 @@ const OFFLINE = /failed to fetch|networkerror|network error|econnrefused|econnre
  */
 const UPSTREAM = /upstream|server_error|bad gateway from|temporarily unavailable|rate limit|429|overloaded/i;
 const TIMEOUT = /timed?\s*out|etimeout|timeout|超时/i;
+/**
+ * 单次请求体超限。
+ *
+ * 这句人话是**服务端**写的（`server/http-errors.ts` 的
+ * `PAYLOAD_TOO_LARGE_MESSAGE`）：express 在 JSON 解析阶段就把请求丢了，还没进任何
+ * 路由，所以原文只有 `request entity too large` 这种英文短语，用户看不出超的是
+ * 图片还是别的。两个模式都认——管线自己的拒绝说明里也会带「上限」字样。
+ */
+const TOO_LARGE = /超过了单次上限|payload too large|entity too large|request entity too large/i;
 
 /** 先看网络层，再看上游，再看超时——顺序决定归因，越靠前的越具体。 */
 export function classifyFailure(error: unknown): FailureKind {
   const text = typeof error === 'string' ? error : error === undefined || error === null ? '' : String(error);
   if (text.trim().length === 0) return 'unknown';
   if (GATEWAY.test(text) || OFFLINE.test(text)) return 'offline';
+  if (TOO_LARGE.test(text)) return 'too-large';
   if (TIMEOUT.test(text)) return 'timeout';
   if (UPSTREAM.test(text)) return 'upstream';
   return 'upstream';
@@ -64,6 +74,12 @@ export function failureCopy(error: unknown): FailureCopy {
         kind: 'timeout',
         title: '这次等太久了',
         detail: '换个说法或把问题拆小一点再发一次。',
+      };
+    case 'too-large':
+      return {
+        kind: 'too-large',
+        title: '这次发得太大了',
+        detail: '换一张小一点的图片，或者分几次发。',
       };
     default:
       return {

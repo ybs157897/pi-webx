@@ -6,6 +6,7 @@ import type { NextFunction, Request, Response } from 'express';
 import { resolvePiVersion } from './config';
 import { PiHost } from './pi/host';
 import { JSON_BODY_LIMIT, createApiRouter } from './routes';
+import { responseErrorMessage, statusFromError } from './http-errors';
 import { attachWebSocketGateway } from './ws';
 
 /** Default port; override with PI_WEBX_PORT. */
@@ -47,9 +48,7 @@ async function main(): Promise<void> {
       res.end();
       return;
     }
-    const message =
-      status >= 500 && isProduction ? 'internal server error' : errorMessage(error);
-    res.status(status).json({ error: message });
+    res.status(status).json({ error: responseErrorMessage(error, isProduction) });
   });
 
   const port = readPort();
@@ -156,20 +155,6 @@ function readPort(): number {
     return DEFAULT_PORT;
   }
   return parsed;
-}
-
-function statusFromError(error: unknown): number {
-  if (typeof error === 'object' && error !== null) {
-    const candidate = (error as { status?: unknown; statusCode?: unknown });
-    for (const value of [candidate.status, candidate.statusCode]) {
-      if (typeof value === 'number' && value >= 400 && value <= 599) return value;
-    }
-  }
-  return 500;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // Never die silently: a local tool that exits without a word is impossible to debug.
