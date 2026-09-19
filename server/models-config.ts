@@ -13,8 +13,9 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { mkdir, rename, writeFile } from 'node:fs/promises';
-import os from 'node:os';
 import path from 'node:path';
+
+import { getAgentDir } from '@earendil-works/pi-coding-agent';
 
 import type {
   ModelConfigResponse,
@@ -26,7 +27,15 @@ import type {
 } from '../src/shared/models-config';
 import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../src/shared/protocol';
 
-const CONFIG_PATH = path.join(os.homedir(), '.pi', 'agent', 'models.json');
+/**
+ * The file pi itself loads, derived from pi's own `getAgentDir()`.
+ *
+ * It used to be spelled out as `~/.pi/agent/models.json`, which quietly stopped
+ * being the same file the moment `PI_AGENT_DIR` was set: the drawer wrote one
+ * models.json and the runtime read another, with every symptom of a save that
+ * does not take effect.
+ */
+const CONFIG_PATH = path.join(getAgentDir(), 'models.json');
 const BACKUP_SUFFIX = '.bak-piwebx';
 
 const API_KINDS = [

@@ -168,8 +168,9 @@ export function createApiRouter(manager: PiHost): Router {
    */
   async function reloadModelsConfig(): Promise<void> {
     try {
-      const runtime = await manager.getModelRuntime();
-      await runtime.refresh({ allowNetwork: false });
+      // Same entry point as the read paths, so a write and a read agree on when
+      // the runtime is stale.
+      await manager.syncModelConfig(true);
     } catch (error) {
       // The file is already written. A runtime that cannot be re-read is a stale
       // catalog, not a failed save, so it is reported and stepped over rather
@@ -181,7 +182,10 @@ export function createApiRouter(manager: PiHost): Router {
     }
   }
 
-  router.get('/models-config', (_req: Request, res: Response) => {
+  router.get('/models-config', async (_req: Request, res: Response) => {
+    // models.json is shared with every other pi front end; this is the edit made
+    // in an editor or by the CLI since we last looked.
+    await manager.syncModelConfig();
     res.json(describeModelConfig());
   });
 
@@ -304,6 +308,7 @@ export function createApiRouter(manager: PiHost): Router {
       return sendError(res, 400, 'query parameter "cwd" must be an absolute path');
     }
     try {
+      await manager.syncModelConfig();
       const runtime = await manager.getModelRuntime();
       res.json(await buildModelCatalog(runtime, cwdRaw.length > 0 ? cwdRaw : process.cwd()));
     } catch (error) {
@@ -347,6 +352,7 @@ export function createApiRouter(manager: PiHost): Router {
    */
   router.get('/providers', async (_req: Request, res: Response) => {
     try {
+      await manager.syncModelConfig();
       const runtime = await manager.getModelRuntime();
       const payload: ListProvidersResponse = {
         providers: await listProviders(runtime, declaredProviderIds()),

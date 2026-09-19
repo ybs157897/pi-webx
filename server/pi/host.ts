@@ -10,6 +10,9 @@
  * so the client needs no protocol changes.
  */
 
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
+
 import {
   type ImageContent,
   type Model,
@@ -147,9 +150,40 @@ function asModel(model: Model<any> | undefined | null): PiModel | null {
   return model as unknown as PiModel;
 }
 
+/**
+ * A cheap identity for a config file: size and modification time.
+ *
+ * Size is in the stamp as well as the time because a same-second rewrite that
+ * changes the length would otherwise look unchanged to a coarse-grained clock.
+ * A missing file stamps as `gone`, which is a state worth reloading for: the
+ * runtime should drop providers the config no longer declares.
+ */
+async function fileStamp(path: string): Promise<string> {
+  try {
+    const info = await stat(path);
+    return `${info.size}:${info.mtimeMs}`;
+  } catch {
+    return 'gone';
+  }
+}
+
 export class PiHost {
   private modelRuntime: ModelRuntime | null = null;
   private modelRuntimePromise: Promise<ModelRuntime> | null = null;
+  /**
+   * The file the runtime loads models from, and its stamp at the last load.
+   *
+   * `ModelRuntime.create()` reads models.json once and keeps the result; nothing
+   * in pi watches the file. So a config edited by anything other than this app —
+   * the user in an editor, the `pi` CLI, a script — was invisible until the
+   * process restarted: sessions reported the old `contextWindow` and the model
+   * picker offered the old catalogue. `syncModelConfig` is the way back to the
+   * file, and these two fields are how it knows whether it has to. The path is
+   * derived from pi's own `getAgentDir()` rather than hardcoded, so an agent dir
+   * moved by `PI_AGENT_DIR` is followed rather than missed.
+   */
+  private readonly modelsPath = join(getAgentDir(), 'models.json');
+  private configStamp: string | null = null;
   private readonly sessions = new Map<string, HostedSession>();
   private readonly sweeper: NodeJS.Timeout;
 
@@ -160,11 +194,70 @@ export class PiHost {
 
   private runtime(): Promise<ModelRuntime> {
     if (this.modelRuntime) return Promise.resolve(this.modelRuntime);
-    this.modelRuntimePromise ??= ModelRuntime.create().then((runtime) => {
+    this.modelRuntimePromise ??= (async () => {
+      const runtime = await ModelRuntime.create();
       this.modelRuntime = runtime;
+      // Stamped at load, so the first freshness check is a stat rather than a
+      // second reload of a file that was just read.
+      this.configStamp = await fileStamp(this.modelsPath);
       return runtime;
-    });
+    })();
     return this.modelRuntimePromise;
+  }
+
+  /**
+   * Re-read models.json if it changed on disk, and carry the change into the
+   * sessions that are already open.
+   *
+   * Callers are the points where a stale answer is visible: creating a session,
+   * reading the catalogue, and reading a session's stats (which is where the
+   * context-window percentage comes from). A `stat` that reports no change costs
+   * nothing, so this can sit on a hot path; the reload only happens once per
+   * actual edit. Returns true when a reload happened.
+   *
+   * Deliberately not an `fs.watch`: a request-scoped check cannot miss an event,
+   * needs no lifecycle of its own, and survives the atomic-rename save that
+   * editors do (which silently detaches a watch on the file inode).
+   */
+  async syncModelConfig(force = false): Promise<boolean> {
+    const runtime = await this.runtime();
+    const stamp = await fileStamp(this.modelsPath);
+    if (!force && stamp === this.configStamp) return false;
+    this.configStamp = stamp;
+    // Local re-read: a file edit is not a request to refetch catalogues over the
+    // network, and this bridge does not do that to the user.
+    await runtime.refresh({ allowNetwork: false });
+    await this.readoptSessions(runtime);
+    return true;
+  }
+
+  /**
+   * Re-point open sessions at their own model as the config now describes it.
+   *
+   * A session holds the model object it was created with, so a corrected
+   * `contextWindow` reached new sessions only: the open one kept reporting the
+   * old window, which is the number the composer's percentage and pi's own
+   * compaction threshold are both computed from. Only sessions whose model
+   * actually changed are touched, and a model the new config no longer offers is
+   * left alone — a running session must not be broken by an edit to a file.
+   */
+  private async readoptSessions(runtime: ModelRuntime): Promise<void> {
+    for (const hosted of this.sessions.values()) {
+      const current = hosted.session.model;
+      if (!current) continue;
+      try {
+        const resolved = resolveCliModel({
+          cliModel: `${current.provider}/${current.id}`,
+          modelRuntime: runtime,
+        });
+        if (resolved.error || !resolved.model) continue;
+        if (JSON.stringify(resolved.model) === JSON.stringify(current)) continue;
+        await hosted.session.setModel(resolved.model);
+      } catch {
+        // Best effort: a session that could not be re-adopted keeps working with
+        // the model it has, which is what it was doing a moment ago.
+      }
+    }
   }
 
   /**
@@ -185,6 +278,9 @@ export class PiHost {
       throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
     }
     const cwd = options.cwd ?? process.cwd();
+    // Before the model is resolved, so a config edited since the last session is
+    // what this one is built from.
+    await this.syncModelConfig();
     const runtime = await this.runtime();
 
     let model: Model<any> | undefined;
@@ -881,8 +977,12 @@ export class PiHost {
         return ok(command.type);
       case 'compact':
         return { type: 'response', command: command.type, success: true, data: await session.compact(command.customInstructions) };
-      case 'get_session_stats':
+      case 'get_session_stats': {
+        // The context-window percentage is this command's answer, so a config
+        // edited under a running session must be picked up before it is computed.
+        await this.syncModelConfig();
         return { type: 'response', command: command.type, success: true, data: this.statsOf(hosted) };
+      }
       case 'set_session_name':
         session.setSessionName(command.name);
         hosted.sessionName = command.name;

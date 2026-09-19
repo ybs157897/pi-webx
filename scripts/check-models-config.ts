@@ -31,8 +31,8 @@ function check(name: string, fn: () => void | Promise<void>): Promise<void> {
     });
 }
 
-// The config path is resolved from `os.homedir()` at module load, so HOME must
-// move before the first import of the module under test.
+// The config path follows pi's own agent dir, which is resolved at module load,
+// so HOME must move before the first import of the module under test.
 const sandbox = mkdtempSync(path.join(os.tmpdir(), 'piwebx-models-'));
 process.env['HOME'] = sandbox;
 const agentDir = path.join(sandbox, '.pi', 'agent');
@@ -170,6 +170,59 @@ async function main(): Promise<void> {
         `demo present: ${String(providers.includes('demo'))} (${providers.length} providers)`,
       ].join(' · '),
     );
+  });
+
+  await check('an external edit to models.json is picked up without a restart', async () => {
+    const { PiHost } = await import('../server/pi/host');
+    const { resolveCliModel } = await import('@earendil-works/pi-coding-agent');
+
+    // Written straight to the file, the way an editor or the `pi` CLI does it:
+    // nothing in this process is told about the change.
+    const writeConfig = (contextWindow: number): void => {
+      writeFileSync(
+        configPath,
+        JSON.stringify(
+          {
+            providers: {
+              reload: {
+                baseUrl: 'https://api.example.com/v1',
+                api: 'openai-completions',
+                apiKey: 'sk-test',
+                models: [{ id: 'sized', contextWindow }],
+              },
+            },
+          },
+          null,
+          2,
+        ),
+      );
+    };
+    writeConfig(1000);
+
+    const host = new PiHost();
+    try {
+      // Stamps the file as loaded (the runtime already exists at this point).
+      await host.syncModelConfig();
+      const runtime = await host.getModelRuntime();
+      const before = resolveCliModel({ cliModel: 'reload/sized', modelRuntime: runtime });
+      assert.equal(before.model?.contextWindow, 1000, 'the declared window is what pi resolved');
+
+      // The new value is a different *length*, so the stamp differs even if the
+      // rewrite lands inside the same clock tick — which is why size is in it.
+      writeConfig(123456);
+
+      assert.equal(await host.syncModelConfig(), true, 'a changed file must trigger a reload');
+      const after = resolveCliModel({ cliModel: 'reload/sized', modelRuntime: runtime });
+      assert.equal(
+        after.model?.contextWindow,
+        123456,
+        'the runtime must serve the new value without a restart',
+      );
+
+      assert.equal(await host.syncModelConfig(), false, 'an unchanged file must not reload');
+    } finally {
+      await host.disposeAll();
+    }
   });
 
   if (failures > 0) {
