@@ -20,6 +20,7 @@ import {
 } from '../src/components/settings/model-extension';
 import type { ExtensionSelection } from '../src/components/settings/model-extension';
 import { t } from '../src/components/settings/copy';
+import { IconLockOutline16 } from '../src/ui/primitives/icons';
 import type { ModelExtension } from '../src/shared/models-config';
 
 /** A selection with every chip off and an empty map — the "cleared everything" form. */
@@ -106,5 +107,11 @@ assert.ok(
   !t('extensionInputHint').includes('音频'),
   `输入类型的提示不该再提音频（那一行没有音频 chip）：${t('extensionInputHint')}`,
 );
+
+// 文本 chip 的锁：这个字形是照参考手绘的（vendored 图标集里原本没有 lock），
+// 所以它得真的被导出、真的能渲染，而不是只写在注释里。
+assert.equal(typeof IconLockOutline16, 'function', '锁定态要有一个能用的锁字形');
+const lockSvg = IconLockOutline16({ size: 13 });
+assert.ok(lockSvg && lockSvg.props && lockSvg.props.viewBox === '0 0 16 16', '锁字形要是 16 格画布');
 
 console.log('PASS 模型编辑器：输入类型只有 视频/PDF（无音频），保存只动表单画出来的键、其余原样继承');

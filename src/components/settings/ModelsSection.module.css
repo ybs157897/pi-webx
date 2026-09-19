@@ -894,6 +894,37 @@ select.input {
 
 .chip input {
   margin: 0;
+  /*
+   * The reference draws a checked chip's box in its own ink, not the browser's
+   * blue accent, and 文本's locked box in the same ink rather than the grey a
+   * disabled control normally fades to — the padlock is what says "locked", so
+   * the box must not also look switched off.
+   */
+  accent-color: var(--dsw-alias-label-primary);
+}
+
+/*
+ * 文本 chip 的锁死勾选框。尺寸照着同一行原生 checkbox 的 13×13 画，
+ * 免得锁定态和活动态并排放着不一样大。
+ */
+.lockedBox {
+  width: 13px;
+  height: 13px;
+  border-radius: 3px;
+  background: var(--dsw-alias-label-primary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+
+.lockedBox::after {
+  content: '';
+  width: 7px;
+  height: 3.5px;
+  border-left: 1.6px solid #fff;
+  border-bottom: 1.6px solid #fff;
+  transform: rotate(-45deg) translate(0.5px, -1px);
 }
 
 .chipOn {

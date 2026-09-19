@@ -1026,3 +1026,29 @@ export const IconEyeOffOutline16 = ({ size = 16, className }: IconProps) => (
     />
   </svg>
 )
+
+/**
+ * Padlock — marks a field whose value the form cannot change (hand-authored
+ * product glyph, traced from the reference's locked 输入类型 chip: an open
+ * shackle over a rounded body with a keyhole dot).
+ */
+export const IconLockOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M5.7 7.1V5.4a2.3 2.3 0 0 1 4.6 0v1.7"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinecap="round"
+    />
+    <rect
+      x="4.1"
+      y="7.1"
+      width="7.8"
+      height="5.6"
+      rx="1.4"
+      stroke="currentColor"
+      strokeWidth="1.3"
+    />
+    <circle cx="8" cy="9.9" r="0.85" fill="currentColor" />
+  </svg>
+)

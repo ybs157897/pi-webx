@@ -18,7 +18,7 @@
 
 import { useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, IconQuestionOutline14, Modal, Tooltip } from '../../ui/primitives/index.ts'
+import { Button, IconLockOutline16, IconQuestionOutline14, Modal, Tooltip } from '../../ui/primitives/index.ts'
 import type { ModelExtension } from '../../shared/models-config'
 import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../../shared/protocol'
 import { errorMessage, modelsConfigApi } from '../../lib/modelsConfig'
@@ -350,16 +350,24 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
           <FieldLabel text={t('inputTypes')} hint={t('extensionInputHint')} />
           <div className={styles['chipRow']}>
             {/* Text is the one kind pi cannot do without, and the reference draws
-                that as a checked-but-dead box inside the chip rather than as a
-                word appended to the label: the row then reads as one shape
-                repeated, and the reason lives in the tooltip. */}
-            <label
+                that as a checked-but-dead box plus a padlock inside the chip
+                rather than as a word appended to the label: the row then reads as
+                one shape repeated, and the padlock is what says "you cannot turn
+                this off" (the tooltip spells it out). */}
+            <span
               className={`${styles['chip']} ${styles['chipOn']} ${styles['chipLocked']}`}
               title={t('textAlwaysOn')}
             >
-              <input type="checkbox" checked readOnly disabled />
+              {/* A drawn box rather than a `disabled` input: the browser fades a
+                  disabled checkbox to grey whatever the accent colour, and the
+                  reference's locked chip keeps the same ink as the live ones —
+                  the padlock is what says it cannot be turned off. Drawn also
+                  means there is no control to click, so the label has nothing to
+                  forward a click to. */}
+              <span className={styles['lockedBox']} aria-hidden />
               {t('textInput')}
-            </label>
+              <IconLockOutline16 size={13} />
+            </span>
             <label className={`${styles['chip']} ${images ? styles['chipOn'] : ''}`}>
               <input
                 type="checkbox"
