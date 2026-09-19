@@ -39,7 +39,7 @@ import type {
   ServerFrame,
   WsServerMessage,
 } from '../shared/protocol';
-import { PI_DIALOG_METHODS } from '../shared/protocol';
+import { PI_DIALOG_METHODS, PI_THINKING_LEVELS } from '../shared/protocol';
 import type { TranscriptState } from '../shared/transcript';
 import { addEcho, applyPiEvent, applySnapshot, retireEcho } from './transcript';
 import { createTranscript } from '../shared/transcript';
@@ -315,6 +315,12 @@ export class PiSessionClient {
 
     if (event.type === 'extension_ui_request') {
       this.handleExtensionUi(event);
+    }
+
+    // The session's own state, not the transcript's: a level changed by an
+    // extension or a slash command would otherwise only show up on a reload.
+    if (event.type === 'thinking_level_changed' && PI_THINKING_LEVELS.includes(event.level) && this.snapshot.piState) {
+      this.update({ piState: { ...this.snapshot.piState, thinkingLevel: event.level } });
     }
 
     transcript = applyPiEvent(transcript, event);

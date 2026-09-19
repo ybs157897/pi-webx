@@ -189,6 +189,7 @@ export type PiEvent =
   | { type: 'agent_start' }
   | { type: 'agent_end'; messages?: PiAgentMessage[]; willRetry?: boolean }
   | { type: 'agent_settled' }
+  | { type: 'thinking_level_changed'; level: PiThinkingLevel }
   | { type: 'turn_start' }
   | { type: 'turn_end'; message?: PiAgentMessage; toolResults?: PiAgentMessage[] }
   | { type: 'message_start'; message: PiAgentMessage }
