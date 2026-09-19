@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -18,10 +18,26 @@ import sharp from 'sharp';
 const home = await mkdtemp(join(tmpdir(), 'piwebx-attachments-'));
 process.env['PI_WEBX_HOME'] = home;
 
-const { corruptForTest, listObjects, objectPath, prepareIncomingImages, readImage, resolveAttachmentRoot, saveImage } =
+const { objectPath, prepareIncomingImages, readImage, resolveAttachmentRoot, saveImage } =
   await import('../server/attachment/store');
 
 const sha256 = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
+
+
+/**
+ * 对象计数与「把对象写坏」都由检查脚本自己用 fs 做，而不是让生产模块导出
+ * `listObjects` / `corruptForTest` 这类只有测试会调的东西——存储层的公开面
+ * 应该是「存/取」，不是「方便测试」。
+ */
+async function countObjects(root: string): Promise<number> {
+  const objects = join(root, 'objects');
+  const shards = await readdir(objects, { withFileTypes: true }).catch(() => []);
+  let total = 0;
+  for (const shard of shards) {
+    if (shard.isDirectory()) total += (await readdir(join(objects, shard.name))).length;
+  }
+  return total;
+}
 
 /** 一张纯色 PNG。 */
 function solid(width: number, height: number, color: { r: number; g: number; b: number }): Promise<Buffer> {
@@ -48,15 +64,15 @@ try {
   const onDisk = await readFile(path);
   assert.deepEqual(onDisk, first.data, '盘上的对象就是返回的产物字节');
 
-  const afterFirst = await listObjects();
-  assert.equal(afterFirst.length, 1, `第一次保存应当只有一个对象，实际 ${afterFirst.length}`);
+  const afterFirst = await countObjects(root);
+  assert.equal(afterFirst, 1, `第一次保存应当只有一个对象，实际 ${afterFirst}`);
 
   // ---- 去重：同一张图再存一遍，不多一个对象 ------------------------------
   const again = await saveImage(source, 'image/png');
   assert.equal(again.ref.id, first.ref.id, '同一张图必须得到同一个 id');
   assert.deepEqual(again.data, first.data, '复用时产物字节一致');
   assert.equal(
-    (await listObjects()).length,
+    await countObjects(root),
     1,
     '重复保存不该多出对象——去重靠内容寻址，不靠索引表',
   );
@@ -64,7 +80,7 @@ try {
   // ---- 不同内容 → 不同对象 ----------------------------------------------
   const other = await saveImage(await solid(320, 240, { r: 200, g: 20, b: 20 }), 'image/png');
   assert.notEqual(other.ref.id, first.ref.id, '不同内容必须是不同对象');
-  assert.equal((await listObjects()).length, 2, '第二张图应当新增一个对象');
+  assert.equal(await countObjects(root), 2, '第二张图应当新增一个对象');
 
   // ---- 跨进程读回：换一个进程照样读得到（"重启后仍在"） ------------------
   const probe = execFileSync(
@@ -86,7 +102,7 @@ try {
   assert.deepEqual(readBack.data, first.data, '读回的就是存进去的字节');
   assert.equal(readBack.mediaType, 'image/jpeg', '媒体类型从字节头部认得出来');
 
-  await corruptForTest(first.ref.id);
+  await writeFile(objectPath(root, sha), Buffer.from('corrupted'));
   let rejected = false;
   try {
     await readImage(first.ref.id);
@@ -105,7 +121,7 @@ try {
   assert.ok(badRef, '不合法的引用要被拒');
 
   // ---- 入站入口：base64 进 → 规范化后的 base64 出 + 引用 ------------------
-  const beforeInbound = (await listObjects()).length;
+  const beforeInbound = await countObjects(root);
   const prepared = await prepareIncomingImages([
     { type: 'image', data: source.toString('base64'), mimeType: 'image/png' },
   ]);
@@ -114,7 +130,7 @@ try {
   assert.equal(prepared.images[0]!.mimeType, 'image/jpeg', '交给 pi 的媒体类型是规范化后的');
   assert.equal(prepared.refs[0]!.id, first.ref.id, '同一张图复用同一个对象');
   assert.equal(
-    (await listObjects()).length,
+    await countObjects(root),
     beforeInbound,
     '入站再存一遍也不该多出对象（内容寻址去重）',
   );

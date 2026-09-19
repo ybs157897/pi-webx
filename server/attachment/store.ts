@@ -17,7 +17,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, link, mkdir, open, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, mkdir, open, readFile, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -199,24 +199,6 @@ async function exists(path: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** 已存对象的摘要列表（诊断与去重验证用；顺序不保证）。 */
-export async function listObjects(): Promise<string[]> {
-  const root = join(resolveAttachmentRoot(), 'objects');
-  const shards = await readdir(root, { withFileTypes: true }).catch(() => []);
-  const out: string[] = [];
-  for (const shard of shards) {
-    if (!shard.isDirectory()) continue;
-    for (const entry of await readdir(join(root, shard.name))) out.push(entry);
-  }
-  return out;
-}
-
-/** 测试与诊断用：把一个对象直接写坏，验证读路径确实会拒绝。 */
-export async function corruptForTest(id: string): Promise<void> {
-  const sha = digestOf(id);
-  await writeFile(objectPath(resolveAttachmentRoot(), sha), Buffer.from('corrupted'));
 }
 
 /** 入站图片的线上形状（与 `src/shared/protocol.ts` 的 `PiImage` 一致）。 */
