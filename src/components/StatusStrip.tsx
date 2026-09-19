@@ -1,9 +1,10 @@
-import { Alert, Flexbox, Highlighter, Icon, Text } from '@lobehub/ui';
+import { Flexbox, Highlighter, Icon, Text } from '@lobehub/ui';
 import { Progress, Tag, theme } from 'antd';
-import { LoaderCircle, RotateCw } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
 
 import type { PiSessionApi, WidgetState } from '../lib/usePiSession';
 import { formatTokens } from '../lib/format';
+import { RetryNotice } from './RetryNotice';
 
 /** Extension-pushed widgets, rendered as preformatted blocks near the composer. */
 export function WidgetStrip({
@@ -56,20 +57,7 @@ export function StatusStrip({ api }: { api: PiSessionApi }) {
 
   return (
     <Flexbox gap={8} paddingBlock={6} style={{ flex: 'none', minWidth: 0 }}>
-      {retrying && (
-        <Alert
-          type="warning"
-          variant="borderless"
-          showIcon
-          icon={<RotateCw size={14} />}
-          message={`请求失败，正在重试${
-            retrying.attempt !== undefined && retrying.maxAttempts !== undefined
-              ? `（第 ${retrying.attempt}/${retrying.maxAttempts} 次）`
-              : ''
-          }`}
-          {...(retrying.error === undefined ? {} : { description: retrying.error })}
-        />
-      )}
+      {retrying && <RetryNotice retry={retrying} />}
 
       {compacting && (
         <Flexbox horizontal align="center" gap={8} style={{ color: token.colorTextSecondary }}>
