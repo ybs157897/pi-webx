@@ -184,7 +184,20 @@ function leadingGlyph(status: ToolRun['status'], toolName: string): ReactNode {
   return toolGlyph(toolName);
 }
 
-/** One labelled block inside the expanded card body. */
+/**
+ * One labelled block inside the expanded card body — the reference's IN/OUT shape.
+ *
+ * dsh lays a section out as a two-column grid (caption in the left gutter,
+ * payload beside it) and caps the *section* at 150px with its own scrollport,
+ * making the caption sticky inside it. A long output then scrolls underneath a
+ * caption that stays put, instead of pushing the caption and the rest of the
+ * transcript off screen. The caption owning its own column is also why
+ * stickiness needs no background: the payload never passes beneath it.
+ *
+ * The caption used to sit above the payload, outside the scrollport. That also
+ * kept it visible, but it charged a line per section and did not match the
+ * reference's geometry.
+ */
 function Section({
   label,
   children,
@@ -193,23 +206,17 @@ function Section({
   label: string;
   children: ReactNode;
   /**
-   * Cap the payload and scroll it on its own (dsh caps its IN/OUT sections at
-   * 150px with an independent scrollport): a long output must neither bury the
-   * caption nor push the rest of the transcript off screen. The caption sits
-   * outside the scrollport, so it stays put while the payload moves.
-   *
-   * A diff opts out: it is the result itself and is read line by line, the way
-   * dsh draws it as its own card rather than as an IN/OUT section.
+   * A diff or a set of thumbnails opts out of the cap: those are the result
+   * itself, read or looked at directly, and dsh draws them as their own card
+   * rather than as an IN/OUT section. The caption gutter still applies.
    */
   scroll?: boolean;
 }) {
   return (
-    <Flexbox gap={4}>
-      <Text fontSize={11} type="secondary">
-        {label}
-      </Text>
-      <div className={scroll ? css.scrollBody : undefined}>{children}</div>
-    </Flexbox>
+    <div className={scroll ? css['section'] : css['sectionPlain']}>
+      <span className={css['sectionLabel']}>{label}</span>
+      <div className={css['sectionBody']}>{children}</div>
+    </div>
   );
 }
 

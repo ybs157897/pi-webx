@@ -52,10 +52,13 @@ const bash = render(run({ toolName: 'bash', args: { command: 'seq 1 40' }, outpu
 assert.ok(bash.includes('输出'), 'bash 卡要有输出区');
 assert.ok(!bash.includes('命令'), `bash 卡不该再渲染「命令」区块：${bash.slice(0, 200)}`);
 
-// The payload sits inside the capped scrollport, not loose in the card.
-assert.ok(
-  bash.includes('scrollBody'),
-  '输出要挂在 scrollBody 里（那个有 150px 上限的滚动容器）',
+// The caption and its payload live inside ONE section element, and that element
+// is the scrollport: that is what makes the caption sticky against the scroll
+// rather than merely sitting above it.
+assert.match(
+  bash,
+  /class="section"[^>]*>\s*<span class="sectionLabel">输出<\/span>/,
+  '「输出」必须是 section 里的 sectionLabel，和 payload 同处一个滚动容器',
 );
 
 // A file read: the path is the row summary, so no 「参数」 JSON block either.
@@ -77,10 +80,22 @@ assert.ok(other.includes('参数'), '摘要里没有的工具仍要显示参数'
  * is the reference — 150px, its own scrollport.
  */
 const css = readFileSync(new URL('../src/components/ToolCard.module.css', import.meta.url), 'utf8');
-const rule = /\.scrollBody\s*\{([^}]*)\}/.exec(css);
-assert.ok(rule, 'ToolCard.module.css 里要有 .scrollBody 规则');
-assert.match(rule[1]!, /max-height:\s*150px/, '.scrollBody 的高度上限要是 150px（对齐 dsh ioSection）');
-assert.match(rule[1]!, /overflow-y:\s*auto/, '.scrollBody 要自己滚动');
+const cap = /\.section\s*\{([^}]*)\}/.exec(css);
+assert.ok(cap, 'ToolCard.module.css 里要有 .section 规则');
+assert.match(cap[1]!, /max-height:\s*150px/, '.section 的高度上限要是 150px（对齐 dsh ioSection）');
+assert.match(cap[1]!, /overflow-y:\s*auto/, '.section 要自己滚动');
+
+// 「sticky 标签」是 objective 明确点名的形态：caption 必须在滚动容器**内部**粘住，
+// 而不是待在容器外面靠"不跟着滚"达到类似效果。
+const label = /\.sectionLabel\s*\{([^}]*)\}/.exec(css);
+assert.ok(label, 'ToolCard.module.css 里要有 .sectionLabel 规则');
+assert.match(label[1]!, /position:\s*sticky/, '.sectionLabel 要 sticky');
+assert.match(label[1]!, /top:\s*0/, '.sectionLabel 粘在滚动容器的顶边');
+
+// caption 独占左栏（dsh 的两列网格）——这也是 sticky 不需要背景色的原因。
+const grid = /\.section,\s*\n?\.sectionPlain\s*\{([^}]*)\}/.exec(css);
+assert.ok(grid, '两个 section 变体要共用一套几何');
+assert.match(grid[1]!, /grid-template-columns:\s*max-content\s+1fr/, 'caption 左栏 + payload 右栏');
 
 // A tool that returned images renders its own section, and the thumbnails are
 // NOT put behind the section scrollport: an image is content to look at, so
@@ -101,11 +116,16 @@ assert.match(
   /<img[^>]+src="data:image\/png;base64,AAAA"/,
   '服务端渲染时缩略图走内联回退（摘要还没算出来），不能是裂图',
 );
-// 图片区块不套滚动容器：数一下 scrollBody 的出现次数，只该有「输出」那一个。
+// 图片区块用 sectionPlain：数一下带滚动上限的那个 class 出现几次，
+// 只该有「输出」那一个（sectionLabel / sectionBody / sectionPlain 都不该被误计）。
 assert.equal(
-  (withImages.match(/scrollBody/g) ?? []).length,
+  (withImages.match(/class="section"/g) ?? []).length,
   1,
-  '只有输出区该被 150px 滚动容器包住，图片区块不套',
+  '只有输出区该被 150px 滚动容器包住，图片区块走 sectionPlain',
+);
+assert.ok(
+  withImages.includes('sectionPlain'),
+  '图片区块要有自己的（不封顶的）section 变体',
 );
 
-console.log('PASS 工具卡：bash/read 只渲染结果、结果区走 150px 滚动容器，摘要里没有的仍显示参数');
+console.log('PASS 工具卡：bash/read 只渲染结果、结果区是 150px 独立滚动容器且 caption sticky，摘要里没有的仍显示参数');
