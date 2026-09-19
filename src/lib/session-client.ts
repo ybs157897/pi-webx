@@ -43,6 +43,7 @@ import { PI_DIALOG_METHODS, PI_THINKING_LEVELS } from '../shared/protocol';
 import type { TranscriptState } from '../shared/transcript';
 import { addEcho, applyPiEvent, retireEcho } from './transcript';
 import { restoreSessionMessages, type SessionMessageSnapshot } from './session-snapshot';
+import { shouldRetryAsSteer } from './session-send';
 import { createTranscript } from '../shared/transcript';
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'exited' | 'error';
@@ -483,15 +484,30 @@ export class PiSessionClient {
     this.pendingSubmissions.set(requestId, submission);
     this.update({ transcript: addEcho(this.snapshot.transcript, submission) });
 
-    const response = await this.send({
-      type: 'prompt',
-      message: text,
-      id: requestId,
-      ...(options?.images && options.images.length > 0 ? { images: options.images } : {}),
-      ...(options?.behavior ? { streamingBehavior: options.behavior } : {}),
-    });
+    const deliver = (behavior?: 'steer' | 'followUp') =>
+      this.send({
+        type: 'prompt',
+        message: text,
+        id: requestId,
+        ...(options?.images && options.images.length > 0 ? { images: options.images } : {}),
+        ...(behavior ? { streamingBehavior: behavior } : {}),
+      });
 
-    if (!response.success && !this.disposed) {
+    let response = await deliver(options?.behavior);
+    /**
+     * 竞态自愈：界面以为空闲，pi 却还在这一轮里。换成 steer 用同一个 requestId
+     * 重发一次——用户点「接着说」的本意就是排进当前这轮，不该看到一条红色报错。
+     * 判定与理由见 `lib/session-send.ts`。
+     */
+    if (!this.disposed && shouldRetryAsSteer(response, options?.behavior)) {
+      response = await deliver('steer');
+    }
+
+    const accepted =
+      response.data && typeof response.data === 'object' && 'accepted' in response.data
+        ? (response.data as { accepted?: unknown }).accepted
+        : undefined;
+    if ((!response.success || accepted === false) && !this.disposed) {
       // The durable message will never come: drop the echo and say why.
       this.pendingSubmissions.delete(requestId);
       this.update({ transcript: retireEcho(this.snapshot.transcript, requestId) });

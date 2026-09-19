@@ -77,6 +77,8 @@ export interface HostedSession {
   resumed: boolean;
   alive: boolean;
   streaming: boolean;
+  /** A prompt is mid-preflight; a second one would race the first. */
+  preparing?: boolean;
   sessionFile: string | null;
   sessionName: string | null;
   session: AgentSession;
@@ -748,24 +750,50 @@ export class PiHost {
     // requestId and echoes the correlation id on the response.
     switch (command.type) {
       case 'prompt': {
+        if (hosted.preparing) return fail(command.type, '正在准备上一轮，请稍后再发送。');
+        hosted.preparing = true;
+        /**
+         * 投递方式由**服务端自己的运行状态**决定，不用客户端的「正在执行」。
+         *
+         * 客户端的 running 是派生视图（transcript + 快照），轮次收尾的一瞬间会
+         * 落后于 pi 的 `isStreaming`；此时裸 prompt 会被 SDK 直接拒掉，用户看到
+         * 一条红色「Agent is already processing」。DSH 的做法是客户端必须显式声明
+         * `mode: 'queue' | 'steer'`，服务端从不因为「正忙」而拒绝一条用户消息。
+         * 这里取同一立场：调用方显式指定就照办，没指定就按服务端此刻的真实状态补上
+         * ——忙则 steer（排进当前这轮，用户的本意就是「接着说」）。
+         */
+        const behavior = command.streamingBehavior ?? (session.isStreaming ? 'steer' : undefined);
+        /** Why the preflight said no — the client needs it to tell a race from a real refusal. */
+        let reason: string | null = null;
         const accepted = new Promise<boolean>((resolve) => {
           void session
             .prompt(command.message, {
               ...(command.images && command.images.length > 0
                 ? { images: command.images as unknown as ImageContent[] }
                 : {}),
-              ...(command.streamingBehavior
-                ? { streamingBehavior: command.streamingBehavior }
-                : {}),
+              ...(behavior ? { streamingBehavior: behavior } : {}),
               preflightResult: resolve,
             })
-            .catch((error: unknown) => this.broadcastError(hosted, errorText(error)));
+            .catch((error: unknown) => {
+              reason = errorText(error);
+              this.broadcastError(hosted, reason);
+            });
         });
-        const success = await accepted;
+        const success = await accepted.finally(() => {
+          hosted.preparing = false;
+        });
         // A rejected preflight never becomes a durable user message: release
         // the requestId so retrying the same submit re-attempts it.
         if (!success && command.id !== undefined) hosted.promptRequests.forget(command.id);
-        return ok(command.type, { accepted: success });
+        /**
+         * `accepted: false` 一定是「这一轮起不来」。把原因一起带回去，客户端才能
+         * 分辨竞态与真正的拒绝——少了这个字段，前端只能猜。
+         */
+        return ok(command.type, {
+          accepted: success,
+          ...(success || reason === null ? {} : { reason }),
+          ...(behavior === undefined ? {} : { deliveredAs: behavior }),
+        });
       }
       case 'steer':
         await session.steer(command.message);
