@@ -347,9 +347,17 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
         <div className={styles['modalField']}>
           <FieldLabel text={t('inputTypes')} hint={t('extensionInputHint')} />
           <div className={styles['chipRow']}>
-            <span className={`${styles['chip']} ${styles['chipLocked']}`} title={t('textAlwaysOn')}>
-              {t('textInput')}（必选）
-            </span>
+            {/* Text is the one kind pi cannot do without, and the reference draws
+                that as a checked-but-dead box inside the chip rather than as a
+                word appended to the label: the row then reads as one shape
+                repeated, and the reason lives in the tooltip. */}
+            <label
+              className={`${styles['chip']} ${styles['chipOn']} ${styles['chipLocked']}`}
+              title={t('textAlwaysOn')}
+            >
+              <input type="checkbox" checked readOnly disabled />
+              {t('textInput')}
+            </label>
             <label className={`${styles['chip']} ${images ? styles['chipOn'] : ''}`}>
               <input
                 type="checkbox"
