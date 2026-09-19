@@ -24,6 +24,17 @@ function socketUrl(): string {
   return `${scheme}://${window.location.host}/api/ws`;
 }
 
+/**
+ * Whether this page is served from the same machine as the bridge.
+ *
+ * `navigator.onLine` describes internet reachability, which has nothing to do
+ * with whether a loopback server is up: developing on localhost with the machine
+ * offline would otherwise park the UI at "未连接" and never dial.
+ */
+function localBridge(): boolean {
+  return ['localhost', '127.0.0.1', '[::1]', '::1'].includes(window.location.hostname);
+}
+
 type MessageListener = (message: WsServerMessage) => void;
 type StatusListener = (status: WireStatus) => void;
 
@@ -100,8 +111,9 @@ export class ConnectionController {
 
   private connect(): void {
     this.teardownSocket();
-    this.setWireStatus(navigator.onLine ? 'connecting' : 'offline');
-    if (!navigator.onLine) return; // the 'online' event triggers the attempt
+    const reachable = navigator.onLine || localBridge();
+    this.setWireStatus(reachable ? 'connecting' : 'offline');
+    if (!reachable) return; // the 'online' event triggers the attempt
 
     const generation = ++this.generation;
     const socket = new WebSocket(socketUrl());
@@ -140,7 +152,7 @@ export class ConnectionController {
       this.setWireStatus('connecting');
       return;
     }
-    if (!navigator.onLine) {
+    if (!navigator.onLine && !localBridge()) {
       this.setWireStatus('offline');
       return;
     }
@@ -156,6 +168,8 @@ export class ConnectionController {
 
   private readonly onNetworkOnline = (): void => {
     if (this.desired.size === 0) return;
+    // Already dialing or connected: the network coming back changes nothing.
+    if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) return;
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
@@ -164,6 +178,10 @@ export class ConnectionController {
   };
 
   private readonly onNetworkOffline = (): void => {
+    // A loopback bridge is still reachable with the network down, and a socket
+    // that is already open was not delivered by the network state this event
+    // reports.
+    if (localBridge() || this.socket?.readyState === WebSocket.OPEN) return;
     if (this.retryTimer !== null) {
       clearTimeout(this.retryTimer);
       this.retryTimer = null;
