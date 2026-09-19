@@ -829,8 +829,28 @@ select.input {
 }
 
 .modalFieldLabel {
+  display: inline-flex;
+  align-items: center;
   font-size: 13px;
   color: var(--dsw-alias-label-secondary);
+}
+
+/*
+ * The reference's `?` help glyph: an inline affordance beside a caption, sized to
+ * the label's own line so adding it never changes the row's height. Explanations
+ * live here instead of as permanent small print.
+ */
+.fieldHelp {
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: help;
+}
+
+.fieldHelp:focus-visible {
+  outline: 1px solid var(--dsw-alias-border-l2);
+  border-radius: 3px;
 }
 
 .modalHint {

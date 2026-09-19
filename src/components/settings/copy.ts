@@ -62,7 +62,7 @@ export const copy = {
   modelAdvanced: '高级设置',
   removeModel: '移除模型',
   modelContextWindow: '上下文窗口',
-  modelMaxTokens: '最大输出',
+  modelMaxTokens: '最大输出 Token',
   modelImageInput: '图片输入',
   modelImageInputHint: '可发送图片',
   modelIdRequired: '模型 ID 不能为空',

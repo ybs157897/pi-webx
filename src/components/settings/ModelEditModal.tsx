@@ -16,7 +16,7 @@
 
 import { useCallback, useState } from 'react'
 import type { ReactNode } from 'react'
-import { Button, Modal } from '../../ui/primitives/index.ts'
+import { Button, IconQuestionOutline14, Modal, Tooltip } from '../../ui/primitives/index.ts'
 import type { ModelExtension } from '../../shared/models-config'
 import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../../shared/protocol'
 import { errorMessage, modelsConfigApi } from '../../lib/modelsConfig'
@@ -68,6 +68,29 @@ const CAPABILITY_LABELS: Record<CapabilityKey, string> = {
 /** Capacity text for a stored count, '' when unset. */
 function capacityText(value: number | undefined): string {
   return value === undefined ? '' : formatCapacity(value)
+}
+
+/**
+ * A field caption with the reference's `?` help affordance.
+ *
+ * The reference keeps every explanation behind this glyph rather than as
+ * permanent small print, which is what lets a form of this length read as a
+ * form. The text is the same either way — only its resting place moves — so the
+ * pi-specific caveats (which fields pi does not consume yet) stay reachable
+ * without pushing every control down the modal.
+ */
+function FieldLabel({ text, hint }: { text: string; hint?: string | undefined }): ReactNode {
+  if (hint === undefined) return <span className={styles['modalFieldLabel']}>{text}</span>
+  return (
+    <span className={styles['modalFieldLabel']}>
+      {text}
+      <Tooltip label={hint} side="right" maxWidth={320}>
+        <span className={styles['fieldHelp']} role="img" aria-label={hint} tabIndex={0}>
+          <IconQuestionOutline14 size={14} />
+        </span>
+      </Tooltip>
+    </span>
+  )
 }
 
 /**
@@ -259,7 +282,14 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       )}
     >
       <label className={styles['modalSwitchRow']}>
-        <span className={styles['modalSwitchLabel']}>{t('smartConfig')}</span>
+        <span className={styles['modalSwitchLabel']}>
+          {t('smartConfig')}
+          <Tooltip label={t('smartConfigHint')} side="right" maxWidth={320}>
+            <span className={styles['fieldHelp']} role="img" aria-label={t('smartConfigHint')} tabIndex={0}>
+              <IconQuestionOutline14 size={14} />
+            </span>
+          </Tooltip>
+        </span>
         <input
           type="checkbox"
           role="switch"
@@ -268,7 +298,6 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
           aria-label={t('smartConfig')}
           onChange={(event) => { toggleSmart(event.target.checked) }}
         />
-        <span className={styles['modalHint']}>{t('smartConfigHint')}</span>
       </label>
       {smartNote === undefined ? null : <p className={styles['modalHint']}>{smartNote}</p>}
 
@@ -324,7 +353,7 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
         </label>
 
         <div className={styles['modalField']}>
-          <span className={styles['modalFieldLabel']}>{t('inputTypes')}</span>
+          <FieldLabel text={t('inputTypes')} hint={t('extensionInputHint')} />
           <div className={styles['chipRow']}>
             <span className={`${styles['chip']} ${styles['chipLocked']}`} title={t('textAlwaysOn')}>
               {t('textInput')}（必选）
@@ -353,11 +382,10 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
               </label>
             ))}
           </div>
-          <p className={styles['modalHint']}>{t('extensionInputHint')}</p>
         </div>
 
         <div className={styles['modalField']}>
-          <span className={styles['modalFieldLabel']}>{t('modelCapabilities')}</span>
+          <FieldLabel text={t('modelCapabilities')} hint={t('capabilityHint')} />
           <div className={styles['chipRow']}>
             {(Object.keys(CAPABILITY_LABELS) as CapabilityKey[]).map((key) => (
               <label key={key} className={`${styles['chip']} ${capabilities[key] ? styles['chipOn'] : ''}`}>
@@ -372,11 +400,10 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
               </label>
             ))}
           </div>
-          <p className={styles['modalHint']}>{t('capabilityHint')}</p>
         </div>
 
         <div className={styles['modalField']}>
-          <span className={styles['modalFieldLabel']}>{t('reasoningLevels')}</span>
+          <FieldLabel text={t('reasoningLevels')} hint={t('reasoningLevelsHint')} />
           <div className={styles['chipRow']}>
             {levels.map((level) => (
               <button
@@ -406,11 +433,10 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
               </select>
             ) : null}
           </div>
-          <p className={styles['modalHint']}>{t('reasoningLevelsHint')}</p>
         </div>
 
         <div className={styles['modalField']}>
-          <span className={styles['modalFieldLabel']}>{t('reasoningMap')}</span>
+          <FieldLabel text={t('reasoningMap')} hint={t('reasoningMapHint')} />
           <textarea
             className={styles['modalCode']}
             rows={4}
@@ -419,7 +445,6 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
             placeholder={'reasoningLevel == "off" ? { enabled: false } : {}'}
             onChange={(event) => { setMapText(event.target.value) }}
           />
-          <p className={styles['modalHint']}>{t('reasoningMapHint')}</p>
         </div>
       </details>
 
