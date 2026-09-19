@@ -13,3 +13,25 @@
 .errorOutput pre code {
   color: var(--dsw-alias-state-error-primary) !important;
 }
+
+/*
+ * dsh's `.ioSection`: the payload is capped and scrolls on its own, so a long
+ * output never pushes the rest of the transcript off screen. The thumb carries a
+ * transparent border with `background-clip: padding-box` so it floats inside the
+ * rounded card edge instead of hugging it, and the track keeps end-margins out
+ * of the corners — both taken from the same rule.
+ */
+.scrollBody {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.scrollBody::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 6px;
+}
+
+.scrollBody::-webkit-scrollbar-track {
+  margin: 6px 0;
+}

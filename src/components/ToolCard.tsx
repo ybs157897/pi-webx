@@ -185,18 +185,38 @@ function leadingGlyph(status: ToolRun['status'], toolName: string): ReactNode {
 }
 
 /** One labelled block inside the expanded card body. */
-function Section({ label, children }: { label: string; children: ReactNode }) {
+function Section({
+  label,
+  children,
+  scroll = true,
+}: {
+  label: string;
+  children: ReactNode;
+  /**
+   * Cap the payload and scroll it on its own (dsh caps its IN/OUT sections at
+   * 150px with an independent scrollport): a long output must neither bury the
+   * caption nor push the rest of the transcript off screen. The caption sits
+   * outside the scrollport, so it stays put while the payload moves.
+   *
+   * A diff opts out: it is the result itself and is read line by line, the way
+   * dsh draws it as its own card rather than as an IN/OUT section.
+   */
+  scroll?: boolean;
+}) {
   return (
     <Flexbox gap={4}>
       <Text fontSize={11} type="secondary">
         {label}
       </Text>
-      {children}
+      <div className={scroll ? css.scrollBody : undefined}>{children}</div>
     </Flexbox>
   );
 }
 
 /* ------------------------------------------------------------------ component */
+
+/** Tools whose row summary already spells out everything worth saying about the call. */
+const RESULT_ONLY_TOOLS = new Set(['bash', 'powershell', 'read', 'write', 'edit']);
 
 export function ToolCard({ run }: { run: ToolRun }) {
   const { token } = theme.useToken();
@@ -211,9 +231,13 @@ export function ToolCard({ run }: { run: ToolRun }) {
   const summary = summarizeToolCall(run.toolName, run.args);
   const failed = run.status === 'error';
 
-  const command = run.toolName === 'bash' || run.toolName === 'powershell'
-    ? text(run.args['command']) ?? text(run.args['script'])
-    : null;
+  // A tool whose arguments the row summary already spells out shows only its
+  // result when expanded. dsh draws its single-file tools this way — the row is
+  // the only args interaction — because repeating the command or the path as an
+  // input block pushed the output, the thing the caller actually wants, down the
+  // card. Shell calls carry their whole command in the summary; read/write/edit
+  // carry the path (and, for a mutation, the byte count).
+  const resultOnly = RESULT_ONLY_TOOLS.has(run.toolName);
   const change = useMemo(() => changeView(run), [run]);
 
   return (
@@ -273,21 +297,11 @@ export function ToolCard({ run }: { run: ToolRun }) {
           // a flat line in the flow.
           style={{ margin: '4px 0 4px 4px' }}
         >
-          {/* A shell call's whole argument is its command, so it is shown as one
-              line of shell rather than as JSON that wraps that same string. */}
-          {command !== null && (
-            <Section label="命令">
-              <Highlighter language="bash" variant="outlined" wrap showLanguage={false}>
-                {command}
-              </Highlighter>
-            </Section>
-          )}
-
           {change !== null ? (
-            <Section label="变更">{change}</Section>
+            <Section label="变更" scroll={false}>{change}</Section>
           ) : (
             <>
-              {command === null && Object.keys(run.args).length > 0 && (
+              {!resultOnly && Object.keys(run.args).length > 0 && (
                 <Section label="参数">
                   <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
                     {formatArgs(run.args)}
