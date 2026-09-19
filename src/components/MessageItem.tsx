@@ -123,12 +123,19 @@ export function AssistantMessageItem({
   onAction,
   renderStyle = 'ours',
   hideThinking = false,
+  hideActions = false,
 }: {
   entry: AssistantEntry;
   onAction?: UiActionHandler | undefined;
   renderStyle?: RenderStyle;
   /** folded turn: the answer's own reasoning row is hidden with the process */
   hideThinking?: boolean;
+  /**
+   * This step is not the turn's answer, so it offers nothing to copy. True for
+   * every step of a turn in flight — until the turn ends there is no answer, only
+   * a process — and for the intermediate steps of a finished one.
+   */
+  hideActions?: boolean;
 }) {
   const { token } = theme.useToken();
   const { isDarkMode } = useThemeMode();
@@ -237,7 +244,7 @@ export function AssistantMessageItem({
                 </Text>
               </Flexbox>
             )}
-            {displayText.length > 0 && (
+            {displayText.length > 0 && !hideActions && (
               <Flexbox horizontal align="center" gap={4}>
                 <Tooltip title={copied ? '已复制' : '复制'}>
                   <ActionIcon icon={Copy} size="small" onClick={onCopy} />

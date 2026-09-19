@@ -786,18 +786,20 @@ function makeNotice(
 /* ---------------------------------------------------------------- turn fold */
 
 /**
- * Fold one turn's region into a summary — the single rule both live turns
- * (`turn_end`) and rebuilt history (a snapshot) go through.
+ * The entry a turn's answer was written in: the last step that ended with text
+ * and no tool calls (dsh's `latestAnswer`).
  *
- * The anchor is the last step that ended with text and no tool calls (dsh's
- * `latestAnswer`): the answer the reader wants to keep. Everything before it
- * that is step-shaped folds, and the answer's own reasoning folds with them
- * (dsh hides the answer's reasoning in its compact view too); the user's
- * message and session-level rows (notices, compaction) never fold. A region
- * with neither steps nor answer reasoning folds nothing.
+ * Exported because more than the fold needs to know it. A turn is a *process* —
+ * narration, tool calls, more narration — and only its last prose step is the
+ * answer; everything before it is machinery the reader did not ask for. The
+ * transcript uses that to decide which rows fold away, and the message view uses
+ * it to decide which message offers to be copied. Both must agree: a copy button
+ * on a step that is about to be folded into a summary row is an offer to copy
+ * something that will not be on screen a second later.
+ *
+ * Returns the index within `region`, or -1 when the region holds no answer.
  */
-function foldRegion(region: readonly TranscriptEntry[]): TurnProcess | null {
-  let anchorIndex = -1;
+export function answerIndexOf(region: readonly TranscriptEntry[]): number {
   for (let index = region.length - 1; index >= 0; index -= 1) {
     const entry = region[index];
     if (
@@ -806,10 +808,24 @@ function foldRegion(region: readonly TranscriptEntry[]): TurnProcess | null {
       entry.tools.length === 0 &&
       entry.text.trim().length > 0
     ) {
-      anchorIndex = index;
-      break;
+      return index;
     }
   }
+  return -1;
+}
+
+/**
+ * Fold one turn's region into a summary — the single rule both live turns
+ * (`turn_end`) and rebuilt history (a snapshot) go through.
+ *
+ * The anchor is the turn's answer (see `answerIndexOf`). Everything before it
+ * that is step-shaped folds, and the answer's own reasoning folds with them
+ * (dsh hides the answer's reasoning in its compact view too); the user's
+ * message and session-level rows (notices, compaction) never fold. A region
+ * with neither steps nor answer reasoning folds nothing.
+ */
+function foldRegion(region: readonly TranscriptEntry[]): TurnProcess | null {
+  const anchorIndex = answerIndexOf(region);
   if (anchorIndex < 0) return null;
   const anchor = region[anchorIndex];
   if (!anchor || anchor.kind !== 'assistant') return null;

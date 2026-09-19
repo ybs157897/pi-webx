@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 
 import { formatTokens } from '../lib/format';
+import { answerIndexOf } from '../lib/transcript';
 import type { TranscriptEntry, TranscriptState, TurnProcess } from '../shared/transcript';
 import { AssistantMessageItem, UserMessageItem } from './MessageItem';
 import { ToolCard } from './ToolCard';
@@ -68,11 +69,13 @@ function EntryView({
   onAction,
   renderStyle,
   suppressThinking = false,
+  suppressActions = false,
 }: {
   entry: TranscriptEntry;
   onAction?: ((action: string) => void) | undefined;
   renderStyle?: 'ours' | 'tokui';
   suppressThinking?: boolean;
+  suppressActions?: boolean;
 }) {
   const { token } = theme.useToken();
 
@@ -87,6 +90,7 @@ function EntryView({
           onAction={onAction}
           renderStyle={renderStyle}
           hideThinking={suppressThinking}
+          hideActions={suppressActions}
         />
       );
 
@@ -177,6 +181,38 @@ export function TranscriptView({
   }, []);
 
   /**
+   * The entry each finished turn's answer lives in — the only rows that offer to
+   * be copied.
+   *
+   * A turn is a process: narration, tool calls, more narration. Each of those
+   * steps is its own assistant message, so a copy button under every message
+   * scatters them through the middle of the answer being written. The copy
+   * belongs to what the reader asked for: the turn's last prose step — the same
+   * entry the fold keeps as its anchor, from the same rule.
+   *
+   * A turn still in flight contributes nothing. Until it ends there is no answer,
+   * only a process, and a button on whichever step happens to be last would move
+   * as the turn went on and then vanish into the fold.
+   */
+  const answerIds = useMemo(() => {
+    const ids = new Set<string>();
+    let segment: TranscriptEntry[] = [];
+    const flush = (open: boolean): void => {
+      const index = answerIndexOf(segment);
+      const answer = index >= 0 ? segment[index] : undefined;
+      if (answer !== undefined && !open) ids.add(answer.id);
+      segment = [];
+    };
+    for (const entry of transcript.entries) {
+      // A user message opens the next turn, so it ends the current one.
+      if (entry.kind === 'user') flush(false);
+      segment.push(entry);
+    }
+    flush(transcript.activeTurn !== null);
+    return ids;
+  }, [transcript.entries, transcript.activeTurn]);
+
+  /**
    * Everything a collapsed turn hides, mapped back to its turn, plus the rows
    * to render: the summary row sits where the process began. While a turn is
    * running nothing is folded (folds are computed at turn end), so live
@@ -247,6 +283,7 @@ export function TranscriptView({
                   entry={hiddenEntry}
                   onAction={onAction}
                   renderStyle={renderStyle}
+                  suppressActions={!answerIds.has(hiddenEntry.id)}
                 />
               ))}
             </div>,
@@ -272,11 +309,12 @@ export function TranscriptView({
           onAction={onAction}
           renderStyle={renderStyle}
           suppressThinking={suppressThinking}
+          suppressActions={!answerIds.has(entry.id)}
         />,
       );
     }
     return out;
-  }, [transcript.entries, transcript.turnProcesses, expandedTurns, toggleTurn, onAction, renderStyle]);
+  }, [transcript.entries, transcript.turnProcesses, expandedTurns, toggleTurn, onAction, renderStyle, answerIds]);
 
   const onScroll = useCallback(() => {
     const node = containerRef.current;
@@ -285,13 +323,36 @@ export function TranscriptView({
     setStick(distance < 120);
   }, []);
 
-  // Follow new output only while the user is already at the bottom, so reading
-  // back through history is not yanked away by streaming deltas.
+  /**
+   * Follow new output only while the user is already at the bottom, so reading
+   * back through history is not yanked away by streaming deltas.
+   *
+   * Batched to one scroll per animation frame: a streaming turn rebuilds
+   * `entries` on every delta, and reading `scrollHeight` forces a synchronous
+   * layout, so the naive effect did one forced reflow per token. Scroll position
+   * is applied at the end of the frame instead of mid-commit.
+   */
+  const scrollFrame = useRef<number | null>(null);
   useEffect(() => {
+    if (!stick) return;
     const node = containerRef.current;
-    if (!node || !stick) return;
-    node.scrollTop = node.scrollHeight;
+    if (!node) return;
+    if (scrollFrame.current !== null) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = null;
+      // Reading scrollHeight is unavoidable to compose the position; this is
+      // once per frame rather than once per delta.
+      node.scrollTop = node.scrollHeight;
+    });
   }, [transcript.entries, stick]);
+
+  useEffect(
+    () => () => {
+      if (scrollFrame.current !== null) cancelAnimationFrame(scrollFrame.current);
+      scrollFrame.current = null;
+    },
+    [],
+  );
 
   const scrollToBottom = useCallback(() => {
     const node = containerRef.current;

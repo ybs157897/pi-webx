@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import type { PiAgentMessage, PiEvent } from '../src/shared/protocol';
 import {
   addEcho,
+  answerIndexOf,
   applyPiEvent,
   applySnapshot,
   createTranscript,
@@ -870,6 +871,73 @@ check('turn fold: a thinking-only answer folds just its reasoning', () => {
   assert.equal(process!.thought, true);
   assert.equal(process!.toolCalls, 0);
   assert.equal(process!.messages, 0);
+});
+
+/* -------------------------------------------------------------- answers */
+
+/** A step that ended with prose and, optionally, tool calls. */
+function stepEntry(id: string, text: string, toolCalls = 0): AssistantEntry {
+  return {
+    kind: 'assistant',
+    id,
+    at: 1,
+    text,
+    thinking: '',
+    streaming: false,
+    tools: Array.from({ length: toolCalls }, (_, index) => ({
+      toolCallId: `${id}-t${index}`,
+      toolName: 'bash',
+      args: {},
+      output: '',
+      status: 'success' as const,
+      startedAt: 1,
+    })),
+  };
+}
+
+function resultEntry(id: string): ToolResultEntry {
+  return {
+    kind: 'toolResult',
+    id,
+    at: 1,
+    run: {
+      toolCallId: `${id}-t0`,
+      toolName: 'bash',
+      args: {},
+      output: '',
+      status: 'success',
+      startedAt: 1,
+    },
+  };
+}
+
+check('answers: the answer is the last prose step that called no tools', () => {
+  // A turn narrates, reaches for a tool, narrates again. Only the last step is
+  // what the reader asked to keep: the message view offers to copy that one and
+  // nothing else, which is why this rule must not drift from the fold's.
+  const region = [
+    stepEntry('a1', '先看看有什么。', 1),
+    resultEntry('r1'),
+    stepEntry('a2', '看完了，接着写。', 1),
+    resultEntry('r2'),
+    stepEntry('a3', '这是最终答案。'),
+  ];
+  assert.equal(answerIndexOf(region), 4, 'the closing prose step is the answer');
+});
+
+check('answers: a turn whose every step called a tool has no answer', () => {
+  // A step that reached for a tool is not a candidate even when it carries
+  // prose: the reader's answer is the step that *closed* the turn in words. A
+  // turn that never did — it stopped on a tool call — has nothing to offer, and
+  // the fold agrees, which is the point of the rule living in one place.
+  const region = [stepEntry('a1', '中间说明。', 1), resultEntry('r1')];
+  assert.equal(answerIndexOf(region), -1);
+});
+
+check('answers: tool steps and empty prose are never the answer', () => {
+  assert.equal(answerIndexOf([stepEntry('a1', '', 1)]), -1, 'a tool-only step');
+  assert.equal(answerIndexOf([stepEntry('a1', '   ')]), -1, 'whitespace is not prose');
+  assert.equal(answerIndexOf([]), -1, 'an empty region');
 });
 
 /* ------------------------------------------------------------------------ */
