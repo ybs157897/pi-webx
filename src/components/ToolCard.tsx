@@ -222,8 +222,29 @@ function Section({
 
 /* ------------------------------------------------------------------ component */
 
-/** Tools whose row summary already spells out everything worth saying about the call. */
-const RESULT_ONLY_TOOLS = new Set(['bash', 'powershell', 'read', 'write', 'edit']);
+/**
+ * Tools whose expanded body is the result alone: every field of their arguments
+ * is already on screen somewhere else.
+ *
+ * The rule is duplication, not brevity — a shell call's `command` is the row
+ * summary verbatim, `read`'s path likewise, `write`/`edit` print the path and
+ * byte count in the summary and the payload itself through the diff above, so
+ * their args JSON restates what the card already shows and only pushes the
+ * output down. The search family (`grep`/`find`/`ls`) keeps its args block
+ * because its summary is an *abbreviation* of the call (the pattern clipped to
+ * 90 chars, the scope to 50) while args carry fields the summary drops
+ * entirely (`glob`, `ignoreCase`, `type`).
+ *
+ * `powershell` is pi's Windows twin of `bash` and shares its shape; the names
+ * are pi's own builtins, per `src/shared/tool-presets.ts`.
+ */
+export const RESULT_ONLY_TOOLS: ReadonlySet<string> = new Set([
+  'bash',
+  'powershell',
+  'read',
+  'write',
+  'edit',
+]);
 
 export function ToolCard({ run }: { run: ToolRun }) {
   const { token } = theme.useToken();
@@ -304,50 +325,62 @@ export function ToolCard({ run }: { run: ToolRun }) {
           // a flat line in the flow.
           style={{ margin: '4px 0 4px 4px' }}
         >
-          {change !== null ? (
+          {/* The call's own description and the change it made are
+              alternatives: once a diff is drawn, the path and bytes it was
+              built from are already on screen. */}
+          {change !== null && !failed ? (
             <Section label="变更" scroll={false}>{change}</Section>
           ) : (
-            <>
-              {!resultOnly && Object.keys(run.args).length > 0 && (
-                <Section label="参数">
-                  <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
-                    {formatArgs(run.args)}
-                  </Highlighter>
-                </Section>
-              )}
+            !resultOnly && Object.keys(run.args).length > 0 && (
+              <Section label="参数">
+                <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
+                  {formatArgs(run.args)}
+                </Highlighter>
+              </Section>
+            )
+          )}
 
-              {run.output.length > 0 && (
-                <Section label="输出">
-                  {/* dsh colours the expanded OUT text of a failed call
-                      (`.ioText[data-error]`); the class carries that override,
-                      since Shiki writes its palette as inline styles. */}
-                  <div className={failed ? css.errorOutput : undefined}>
-                    <Highlighter
-                      language={toolOutputLanguage(run.toolName, run.args)}
-                      variant="outlined"
-                      wrap
-                      showLanguage={false}
-                    >
-                      {run.output}
-                    </Highlighter>
-                  </div>
-                </Section>
-              )}
+          {/* The result text is NOT an alternative to the change, but it yields
+              to it on a call that landed: pi's mutation output restates the diff
+              ("Successfully replaced 1 block(s) in …"). A *failed* mutation is
+              the exception, and it is the reason this section cannot live in the
+              else-branch above: pi reports the failure in the result text
+              ("Could not find edits[14] in …", an isError result with an empty
+              patch), so the diff would be the never-applied request drawn over
+              the error that explains it. The failure outranks the attempt —
+              dsh's own error row replaces its summary with the failure line. */}
+          {run.output.length > 0 && (change === null || failed) && (
+            <Section label="输出">
+              {/* dsh colours the expanded OUT text of a failed call
+                  (`.ioText[data-error]`); the class carries that override,
+                  since Shiki writes its palette as inline styles. */}
+              <div className={failed ? css.errorOutput : undefined}>
+                <Highlighter
+                  language={toolOutputLanguage(run.toolName, run.args)}
+                  variant="outlined"
+                  wrap
+                  showLanguage={false}
+                >
+                  {run.output}
+                </Highlighter>
+              </div>
+            </Section>
+          )}
 
-              {run.images !== undefined && run.images.length > 0 && (
-                // Thumbnails are content to look at, not text to scan: capping
-                // them at the section scrollport would clip the picture itself.
-                <Section label="图片" scroll={false}>
-                  <MessageImages images={run.images} label={`${run.toolName} 返回`} />
-                </Section>
-              )}
+          {/* Images belong to neither branch: a call can carry a diff and still
+              have returned a picture, and the picture is the result either way. */}
+          {run.images !== undefined && run.images.length > 0 && (
+            // Thumbnails are content to look at, not text to scan: capping
+            // them at the section scrollport would clip the picture itself.
+            <Section label="图片" scroll={false}>
+              <MessageImages images={run.images} label={`${run.toolName} 返回`} />
+            </Section>
+          )}
 
-              {run.output.length === 0 && run.status === 'running' && (
-                <Text fontSize={12} type="secondary">
-                  等待输出…
-                </Text>
-              )}
-            </>
+          {run.output.length === 0 && run.status === 'running' && (
+            <Text fontSize={12} type="secondary">
+              等待输出…
+            </Text>
           )}
         </Flexbox>
       )}

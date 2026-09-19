@@ -16,7 +16,9 @@ import { motion } from 'motion/react';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
-import { ToolCard } from '../src/components/ToolCard';
+import { ToolCard, RESULT_ONLY_TOOLS } from '../src/components/ToolCard';
+import { summarizeToolCall } from '../src/lib/format';
+import { BUILTIN_TOOL_NAMES } from '../src/shared/tool-presets';
 import type { ToolRun } from '../src/shared/transcript';
 
 /**
@@ -43,6 +45,13 @@ function run(over: Partial<ToolRun>): ToolRun {
  */
 const render = (r: ToolRun): string =>
   renderToStaticMarkup(h(ConfigProvider, { motion }, h(ToolCard, { run: r })));
+
+/**
+ * The marked-up body as plain text. The result payload is syntax-highlighted,
+ * so a sentence arrives split across Shiki's token spans; dropping the tags
+ * puts it back together for a `includes` assertion.
+ */
+const textOf = (markup: string): string => markup.replace(/<[^>]*>/g, '');
 
 const longOutput = Array.from({ length: 40 }, (_, i) => i + 1).join('\n');
 
@@ -128,4 +137,71 @@ assert.ok(
   '图片区块要有自己的（不封顶的）section 变体',
 );
 
-console.log('PASS 工具卡：bash/read 只渲染结果、结果区是 150px 独立滚动容器且 caption sticky，摘要里没有的仍显示参数');
+/**
+ * The classification, checked as a set rather than name by name.
+ *
+ * Two ways it can be wrong and stay invisible: a name that is not a pi builtin
+ * (a typo — the card would silently keep its args block for the real tool), and
+ * a name whose row summary is empty (dropping the args block would leave the
+ * call with no description at all). Requiring a representative payload per
+ * classified tool means adding a name to the set forces proving both.
+ */
+const REPRESENTATIVE_ARGS: Record<string, Record<string, unknown>> = {
+  bash: { command: 'seq 1 40' },
+  powershell: { command: 'Get-ChildItem' },
+  read: { path: '/tmp/example.ts' },
+  write: { path: '/tmp/example.ts', content: 'export const x = 1\n' },
+  edit: { path: '/tmp/example.ts', edits: [{ oldText: 'a', newText: 'b' }] },
+};
+
+for (const name of RESULT_ONLY_TOOLS) {
+  assert.ok(BUILTIN_TOOL_NAMES.has(name), `${name} 不是 pi 的内建工具名（拼错了？）`);
+  const args = REPRESENTATIVE_ARGS[name];
+  assert.ok(args, `${name} 要有一条代表性参数，用来证明「行摘要已经说清这次调用」`);
+  assert.notEqual(
+    summarizeToolCall(name, args),
+    '',
+    `${name} 的行摘要是空的——去掉参数区后这次调用就没有任何描述了`,
+  );
+  const markup = render(run({ toolName: name, args, output: longOutput }));
+  assert.ok(!markup.includes('参数'), `${name} 卡不该渲染「参数」区块`);
+  // 「只显示结果」= 卡里得有结果：命令类的结果是输出，写文件类的结果是那份变更。
+  assert.ok(
+    textOf(markup).includes('变更') || textOf(markup).includes('输出'),
+    `${name} 卡要显示结果（变更或输出）`,
+  );
+}
+
+// A mutation that landed: the diff IS the result. pi's result text restates it
+// ("Successfully wrote 2 bytes to …"), so giving it its own section would only
+// push the card down — the thing this whole card was changed to stop doing.
+const wrote = render(
+  run({
+    toolName: 'write',
+    args: { path: '/tmp/example.ts', content: 'export const x = 1\n' },
+    output: 'Successfully wrote 22 bytes to /tmp/example.ts',
+  }),
+);
+assert.ok(wrote.includes('变更'), '落地的 write 要画变更');
+assert.ok(!wrote.includes('输出'), '落地 write 的结果文本是变更的复述，不单列');
+
+// A mutation that FAILED. pi reports it in the result text with an empty patch
+// ("Could not find edits[14] in …", isError), so the args-derived diff is the
+// never-applied request drawn over the error that explains it.
+const failedEdit = render(
+  run({
+    toolName: 'edit',
+    args: { path: '/tmp/example.ts', edits: [{ oldText: 'a', newText: 'b' }] },
+    output: 'Could not find edits[0] in /tmp/example.ts.',
+    status: 'error',
+  }),
+);
+assert.ok(
+  textOf(failedEdit).includes('Could not find edits[0]'),
+  '失败的 edit 要显示失败原因',
+);
+assert.ok(!failedEdit.includes('变更'), '失败的 edit 不该把没落地的改动画成变更');
+
+console.log(
+  'PASS 工具卡：bash/read 只渲染结果、结果区是 150px 独立滚动容器且 caption sticky，摘要里没有的仍显示参数',
+);
