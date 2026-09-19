@@ -17,7 +17,7 @@
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { chmod, link, mkdir, open, readFile, unlink } from 'node:fs/promises';
+import { chmod, link, mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -191,10 +191,15 @@ export async function readImage(id: string): Promise<{ data: Buffer; mediaType: 
   return { data, mediaType };
 }
 
-/** 对象是否已经在盘上。 */
+/**
+ * 对象是否已经在盘上。
+ *
+ * 只看元数据，不读内容：这条路径在去重时每次都要走，而对象可以到几 MB——
+ * 用 `readFile` 判存在等于为了回答「在不在」把整张图读进内存。
+ */
 async function exists(path: string): Promise<boolean> {
   try {
-    await readFile(path, { flag: constants.O_RDONLY });
+    await stat(path);
     return true;
   } catch {
     return false;
@@ -237,15 +242,18 @@ export async function prepareIncomingImages(
   if (list.length > limits.maxImagesPerMessage) {
     throw new AttachmentError('一条消息里的图片太多了。', 'IMAGE_TOO_LARGE');
   }
-  const total = list.reduce((sum, image) => sum + image.data.length, 0);
-  if (total > limits.maxMessageImageBytes) {
-    throw new AttachmentError('这条消息的图片总量超过上限。', 'IMAGE_TOO_LARGE');
-  }
-
   const out: IncomingImage[] = [];
   const refs: ImageRef[] = [];
+  // 累计的是**解码后的字节**。此前累加 base64 文本长度，等于把每条消息的体积
+  // 上限偷偷调紧了三分之一（base64 比原字节多 4/3），与参考实现的「编码源字节」
+  // 口径不一致：一组合法的图会被拒。
+  let total = 0;
   for (const image of list) {
     const raw = Buffer.from(image.data, 'base64');
+    total += raw.byteLength;
+    if (total > limits.maxMessageImageBytes) {
+      throw new AttachmentError('这条消息的图片总量超过上限。', 'IMAGE_TOO_LARGE');
+    }
     const saved = await saveImage(raw, image.mimeType, limits);
     refs.push(saved.ref);
     out.push({

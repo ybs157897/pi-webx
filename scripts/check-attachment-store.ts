@@ -20,6 +20,7 @@ process.env['PI_WEBX_HOME'] = home;
 
 const { objectPath, prepareIncomingImages, readImage, resolveAttachmentRoot, saveImage } =
   await import('../server/attachment/store');
+const { DEFAULT_ATTACHMENT_LIMITS } = await import('../server/attachment/normalize');
 
 const sha256 = (b: Uint8Array): string => createHash('sha256').update(b).digest('hex');
 
@@ -139,6 +140,38 @@ try {
   // 空输入是合法的：没有图的消息不该因此报错。
   const none = await prepareIncomingImages(undefined);
   assert.deepEqual(none, { images: [], refs: [] }, '没有图片时应当安静地返回空');
+
+  // ---- 单条消息的体积上限按**解码后的字节**算，不按 base64 文本长度 ---------
+  // base64 比原字节多 4/3；累加文本长度等于把上限偷偷调紧三分之一，一组合法的图
+  // 会被误拒。把上限卡在「解码总量」与「base64 总量」之间来分辨这两种口径。
+  const second = await solid(320, 240, { r: 30, g: 200, b: 90 });
+  const decodedTotal = source.byteLength + second.byteLength;
+  const b64Total = Math.ceil(source.byteLength / 3) * 4 + Math.ceil(second.byteLength / 3) * 4;
+  assert.ok(b64Total > decodedTotal, '构造前提：base64 确实比原字节长');
+  const between = Math.floor((decodedTotal + b64Total) / 2);
+  const pair = [
+    { type: 'image' as const, data: source.toString('base64'), mimeType: 'image/png' },
+    { type: 'image' as const, data: second.toString('base64'), mimeType: 'image/png' },
+  ];
+  const accepted = await prepareIncomingImages(pair, {
+    ...DEFAULT_ATTACHMENT_LIMITS,
+    maxMessageImageBytes: between,
+  });
+  assert.equal(
+    accepted.images.length,
+    2,
+    `上限卡在解码总量(${decodedTotal})与 base64 总量(${b64Total})之间时应当放行——按文本长度算就会误拒`,
+  );
+  let overAggregate = false;
+  try {
+    await prepareIncomingImages(pair, {
+      ...DEFAULT_ATTACHMENT_LIMITS,
+      maxMessageImageBytes: decodedTotal - 1,
+    });
+  } catch {
+    overAggregate = true;
+  }
+  assert.ok(overAggregate, '解码总量超过上限时要拒');
 
   // ---- 临时目录不留垃圾 --------------------------------------------------
   const leftover = await readdir(join(root, 'tmp')).catch(() => []);
