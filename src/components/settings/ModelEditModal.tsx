@@ -413,7 +413,12 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
                 title={t('removeLevel')}
                 onClick={() => { setLevels((current) => current.filter((entry) => entry !== level)) }}
               >
-                {LEVEL_LABELS[level]} ✕
+                {LEVEL_LABELS[level]}
+                {/* The reference's level chips are the bare name — the ✕ is an
+                    addition of ours, so it waits for a hover (the same
+                    rest-vs-hover swap dsh's tool rows do with their glyph), and
+                    it stays out of the accessible name, which is the level. */}
+                <span className={styles['chipClose']} aria-hidden>✕</span>
               </button>
             ))}
             {remainingLevels.length > 0 ? (

@@ -910,6 +910,22 @@ select.input {
   font-size: 13px;
 }
 
+/*
+ * The removal mark on a selected reasoning-level chip. The reference's chips
+ * are the bare level name, so the mark only appears while the pointer is on the
+ * chip (or the chip is focused, so it is reachable by keyboard) — at rest the
+ * row reads exactly like the reference's.
+ */
+.chipClose {
+  opacity: 0;
+  transition: opacity 0.12s ease;
+}
+
+.chipButton:hover .chipClose,
+.chipButton:focus-visible .chipClose {
+  opacity: 1;
+}
+
 .chipAdd {
   color: var(--dsw-alias-label-secondary);
 }
