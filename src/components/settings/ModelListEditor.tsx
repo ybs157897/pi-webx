@@ -74,7 +74,9 @@ function badgesOf(model: ModelDraft): string[] {
   if (Array.isArray(model.input) && model.input.includes('image')) badges.push(t('badgeVision'))
   const extension = model.piWebx?.inputFormat
   if (extension?.video === true) badges.push(t('badgeVideo'))
-  if (extension?.audio === true) badges.push(t('badgeAudio'))
+  // No audio badge: the editor's input row has no audio chip (the reference's
+  // row is 文本 / 图片 / 视频 / PDF), so badging a key nobody can set would
+  // advertise a capability the app has no surface for.
   if (extension?.pdf === true) badges.push(t('badgePdf'))
   return badges
 }

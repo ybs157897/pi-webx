@@ -21,6 +21,13 @@ import type { ModelExtension } from '../../shared/models-config'
 import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../../shared/protocol'
 import { errorMessage, modelsConfigApi } from '../../lib/modelsConfig'
 import { parseCapacity } from './capacity.ts'
+import {
+  CAPABILITY_LABELS,
+  EXTENSION_CHIPS,
+  buildModelExtension,
+  type CapabilityKey,
+  type ExtensionChip,
+} from './model-extension.ts'
 import type { ModelDraft } from './capacity.ts'
 import { t } from './copy.ts'
 import styles from './ModelsSection.module.css'
@@ -53,17 +60,6 @@ const LEVEL_LABELS: Record<PiThinkingLevel, string> = {
   max: 'max',
 }
 
-/** The extension input kinds the modal edits (text/image ride pi's `input`). */
-type ExtensionInput = 'audio' | 'video' | 'pdf'
-
-/** Capability flags the modal edits; `toolCall` is preserved but not shown. */
-type CapabilityKey = 'jsonSchemaOutput' | 'nativeWebSearch' | 'midConversationSystem'
-
-const CAPABILITY_LABELS: Record<CapabilityKey, string> = {
-  jsonSchemaOutput: '结构化输出',
-  nativeWebSearch: '原生联网搜索',
-  midConversationSystem: '对话中系统消息',
-}
 
 /**
  * Capacity text for a stored count, '' when unset.
@@ -119,8 +115,7 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
   const [images, setImages] = useState(
     Array.isArray(existing?.input) && existing.input.includes('image'),
   )
-  const [extensionInputs, setExtensionInputs] = useState<Record<ExtensionInput, boolean>>({
-    audio: ext.inputFormat?.audio === true,
+  const [extensionInputs, setExtensionInputs] = useState<Record<ExtensionChip, boolean>>({
     video: ext.inputFormat?.video === true,
     pdf: ext.inputFormat?.pdf === true,
   })
@@ -200,25 +195,12 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
     ? '容量必须是数字，可带 K/M 后缀（如 256K、1M）'
     : undefined
 
-  const buildExtension = (): ModelExtension | undefined => {
-    const next: ModelExtension = { ...ext }
-    delete next.inputFormat
-    delete next.capabilities
-    delete next.reasoningLevelMap
-    const inputFormat: NonNullable<ModelExtension['inputFormat']> = {}
-    for (const kind of ['audio', 'video', 'pdf'] as const) {
-      if (extensionInputs[kind]) inputFormat[kind] = true
-    }
-    if (Object.keys(inputFormat).length > 0) next.inputFormat = inputFormat
-    const capabilityFlags: NonNullable<ModelExtension['capabilities']> = { ...ext.capabilities }
-    for (const key of Object.keys(CAPABILITY_LABELS) as CapabilityKey[]) {
-      if (capabilities[key]) capabilityFlags[key] = true
-      else delete capabilityFlags[key]
-    }
-    if (Object.keys(capabilityFlags).length > 0) next.capabilities = capabilityFlags
-    if (mapText.trim().length > 0) next.reasoningLevelMap = mapText.trim()
-    return Object.keys(next).length === 0 ? undefined : next
-  }
+  const buildExtension = (): ModelExtension | undefined =>
+    buildModelExtension(ext, {
+      inputs: extensionInputs,
+      capabilities,
+      reasoningLevelMap: mapText,
+    })
 
   const submit = (): void => {
     if (idFailure !== undefined || capacityFailure !== undefined) {
@@ -250,7 +232,6 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
     setMaxTokens(capacityText(existing?.maxTokens))
     setImages(Array.isArray(existing?.input) && existing.input.includes('image'))
     setExtensionInputs({
-      audio: ext.inputFormat?.audio === true,
       video: ext.inputFormat?.video === true,
       pdf: ext.inputFormat?.pdf === true,
     })
@@ -377,7 +358,7 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
               />
               {t('imageInput')}
             </label>
-            {(['video', 'audio', 'pdf'] as ExtensionInput[]).map((kind) => (
+            {EXTENSION_CHIPS.map((kind) => (
               <label
                 key={kind}
                 className={`${styles['chip']} ${extensionInputs[kind] ? styles['chipOn'] : ''}`}
@@ -389,7 +370,7 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
                     setExtensionInputs((current) => ({ ...current, [kind]: event.target.checked }))
                   }}
                 />
-                {kind === 'video' ? t('videoInput') : kind === 'audio' ? t('audioInput') : t('pdfInput')}
+                {kind === 'video' ? t('videoInput') : t('pdfInput')}
               </label>
             ))}
           </div>
