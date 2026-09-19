@@ -82,4 +82,30 @@ assert.ok(rule, 'ToolCard.module.css 里要有 .scrollBody 规则');
 assert.match(rule[1]!, /max-height:\s*150px/, '.scrollBody 的高度上限要是 150px（对齐 dsh ioSection）');
 assert.match(rule[1]!, /overflow-y:\s*auto/, '.scrollBody 要自己滚动');
 
+// A tool that returned images renders its own section, and the thumbnails are
+// NOT put behind the section scrollport: an image is content to look at, so
+// capping it at 150px would clip the picture rather than trim a long log.
+const withImages = render(
+  run({
+    toolName: 'render',
+    args: {},
+    output: 'ok',
+    images: [{ type: 'image', data: 'AAAA', mimeType: 'image/png' }],
+    imageCount: 1,
+  }),
+);
+assert.ok(withImages.includes('图片'), '工具返回的图要有自己的区块');
+assert.ok(withImages.includes('输出'), '同一张卡仍有输出区');
+assert.match(
+  withImages,
+  /<img[^>]+src="data:image\/png;base64,AAAA"/,
+  '服务端渲染时缩略图走内联回退（摘要还没算出来），不能是裂图',
+);
+// 图片区块不套滚动容器：数一下 scrollBody 的出现次数，只该有「输出」那一个。
+assert.equal(
+  (withImages.match(/scrollBody/g) ?? []).length,
+  1,
+  '只有输出区该被 150px 滚动容器包住，图片区块不套',
+);
+
 console.log('PASS 工具卡：bash/read 只渲染结果、结果区走 150px 滚动容器，摘要里没有的仍显示参数');

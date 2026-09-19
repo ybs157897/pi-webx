@@ -328,7 +328,9 @@ export function ToolCard({ run }: { run: ToolRun }) {
               )}
 
               {run.images !== undefined && run.images.length > 0 && (
-                <Section label="图片">
+                // Thumbnails are content to look at, not text to scan: capping
+                // them at the section scrollport would clip the picture itself.
+                <Section label="图片" scroll={false}>
                   <MessageImages images={run.images} label={`${run.toolName} 返回`} />
                 </Section>
               )}
