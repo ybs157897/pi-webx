@@ -940,6 +940,131 @@ check('answers: tool steps and empty prose are never the answer', () => {
   assert.equal(answerIndexOf([]), -1, 'an empty region');
 });
 
+/* ------------------------------------------------- inserted / custom messages */
+
+/** A pi `custom` message: what an extension inserts into the conversation. */
+function customMessage(display: boolean, text: string, at = 1): PiAgentMessage {
+  return {
+    role: 'custom',
+    customType: 'demo',
+    content: [{ type: 'text', text }],
+    display,
+    timestamp: at,
+  } as PiAgentMessage;
+}
+
+check('custom: a visible inserted message lands in the transcript exactly once', () => {
+  // pi emits message_start *and* message_end for the same inserted message, so
+  // the second delivery must not append a duplicate row.
+  let state = applyPiEvent(createTranscript(), ev({ type: 'message_start', message: customMessage(true, '插入的一句') }));
+  state = applyPiEvent(state, ev({ type: 'message_end', message: customMessage(true, '插入的一句') }));
+  const entry = only(state, 'custom');
+  assert.equal(entry.text, '插入的一句');
+  assert.equal(entry.customType, 'demo');
+});
+
+check('custom: display:false stays out of the transcript', () => {
+  // These are model context (pi keeps them in the conversation), not something
+  // the reader asked to see. Rendering them would put internal notes on screen.
+  const state = applyPiEvent(createTranscript(), ev({ type: 'message_start', message: customMessage(false, '内部约定') }));
+  assert.equal(entriesOfKind(state, 'custom').length, 0);
+});
+
+check('custom: rebuilding history keeps a visible insertion and drops a hidden one', () => {
+  const state = applySnapshot(createTranscript(), [
+    { role: 'user', content: 'hi', timestamp: 1 },
+    customMessage(true, '插入的一句', 2),
+    customMessage(false, '内部约定', 3),
+  ] as PiAgentMessage[]);
+  const custom = entriesOfKind(state, 'custom');
+  assert.equal(custom.length, 1, 'exactly the visible insertion survives the rebuild');
+  assert.equal(custom[0]!.text, '插入的一句');
+});
+
+check('custom: an inserted message is not a fold step', () => {
+  // Folding hides the machinery of a turn. An insertion is not machinery the
+  // reader should lose, so it must not appear in hiddenIds.
+  const state = applySnapshot(createTranscript(), [
+    { role: 'user', content: 'hi', timestamp: 1 },
+    customMessage(true, '插入的一句', 2),
+    {
+      role: 'assistant',
+      content: [{ type: 'text', text: 'answer' }],
+      stopReason: 'stop',
+      timestamp: 3,
+    },
+  ] as PiAgentMessage[]);
+  const inserted = only(state, 'custom');
+  for (const process of Object.values(state.turnProcesses)) {
+    assert.ok(
+      !process!.hiddenIds.includes(inserted.id),
+      'an inserted message must never be folded away',
+    );
+  }
+});
+
+/* -------------------------------------------------------------- images */
+
+const pngBlock = (data: string) => ({ type: 'image', data, mimeType: 'image/png' });
+
+check('images: an attached image is carried, not just counted', () => {
+  // The count alone left the reader looking at "1 张图片" with no picture.
+  const state = applySnapshot(createTranscript(), [
+    { role: 'user', content: [pngBlock('AAAA'), { type: 'text', text: '看这张' }], timestamp: 1 },
+  ] as PiAgentMessage[]);
+  const user = only(state, 'user');
+  assert.equal(user.imageCount, 1);
+  assert.equal(user.images?.length, 1);
+  assert.equal(user.images?.[0]!.mimeType, 'image/png');
+  assert.equal(user.images?.[0]!.data, 'AAAA');
+});
+
+check('images: an unsupported media type or an oversized payload is dropped', () => {
+  // Content comes from a model or a tool; it reaches an <img>, so it is
+  // validated rather than trusted.
+  const state = applySnapshot(createTranscript(), [
+    {
+      role: 'user',
+      content: [
+        { type: 'image', data: 'AAAA', mimeType: 'image/svg+xml' },
+        { type: 'image', data: 'A'.repeat(8_000_001), mimeType: 'image/png' },
+        { type: 'image', data: 'AAAA', mimeType: 'image/png' },
+        { type: 'text', text: 'ok' },
+      ],
+      timestamp: 1,
+    },
+  ] as PiAgentMessage[]);
+  const user = only(state, 'user');
+  assert.equal(user.images?.length, 1, 'only the well-formed PNG is kept');
+});
+
+check('images: a tool result carries the images it returned', () => {
+  const state = applySnapshot(createTranscript(), [
+    {
+      role: 'assistant',
+      content: [
+        { type: 'text', text: 'generating' },
+        { type: 'toolCall', id: 'c1', name: 'render', arguments: {} },
+      ],
+      stopReason: 'toolUse',
+      timestamp: 1,
+    },
+    {
+      role: 'toolResult',
+      toolCallId: 'c1',
+      toolName: 'render',
+      content: [pngBlock('BBBB')],
+      isError: false,
+      timestamp: 2,
+    },
+  ] as PiAgentMessage[]);
+  // A snapshot attaches the result to the call that produced it, so the run
+  // lives on the assistant entry rather than in an entry of its own.
+  const run = only(state, 'assistant').tools[0]!;
+  assert.equal(run.imageCount, 1);
+  assert.equal(run.images?.[0]!.data, 'BBBB');
+});
+
 /* ------------------------------------------------------------------------ */
 
 if (failures > 0) {

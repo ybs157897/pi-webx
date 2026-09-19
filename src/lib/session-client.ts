@@ -141,7 +141,7 @@ export class PiSessionClient {
   private closed = false;
   private disposed = false;
   private buffer: Array<{ seq: number; frame: ServerFrame }> = [];
-  private readonly pendingSubmissions = new Map<string, { requestId: string; text: string; imageCount: number }>();
+  private readonly pendingSubmissions = new Map<string, { requestId: string; text: string; imageCount: number; images?: PiImage[] }>();
   private readonly dialogTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private readonly listeners = new Set<() => void>();
   private detachConnection: (() => void) | null = null;
@@ -456,7 +456,7 @@ export class PiSessionClient {
   ): Promise<PiRpcResponse> => {
     const requestId = crypto.randomUUID();
     const imageCount = options?.images?.length ?? 0;
-    const submission = { requestId, text, imageCount };
+    const submission = { requestId, text, imageCount, ...(options?.images ? { images: options.images } : {}) };
     this.pendingSubmissions.set(requestId, submission);
     this.update({ transcript: addEcho(this.snapshot.transcript, submission) });
 

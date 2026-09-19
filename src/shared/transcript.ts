@@ -8,7 +8,7 @@
  * Both are pure: they return a new state and never mutate the input.
  */
 
-import type { PiAgentMessage, PiEvent, PiModelCost } from './protocol';
+import type { PiAgentMessage, PiEvent, PiImage, PiModelCost } from './protocol';
 
 /* -------------------------------------------------------------------- usage */
 
@@ -35,6 +35,9 @@ export interface ToolRun {
    * cumulative, so updates replace this rather than append.
    */
   output: string;
+  /** Images a multimodal tool returned, kept so the reader can see them. */
+  images?: PiImage[];
+  imageCount?: number;
   details?: unknown;
   status: ToolRunStatus;
   startedAt: number;
@@ -51,6 +54,8 @@ export interface UserEntry {
   at: number;
   text: string;
   imageCount: number;
+  /** The attached images themselves, so the reader sees what was sent. */
+  images?: PiImage[];
   /**
    * Present while the entry is an optimistic echo of a just-submitted prompt,
    * not yet replaced by the durable user message. `requestId` correlates it
@@ -121,7 +126,22 @@ export interface CompactionEntry {
   aborted?: boolean;
 }
 
+/**
+ * A message an extension inserted into the conversation. `display: false` ones
+ * never reach this state: they are model context, not something the reader
+ * asked to see.
+ */
+export interface CustomEntry {
+  kind: 'custom';
+  id: string;
+  at: number;
+  customType: string;
+  text: string;
+  details?: unknown;
+}
+
 export type TranscriptEntry =
+  | CustomEntry
   | UserEntry
   | AssistantEntry
   | ToolResultEntry
@@ -230,6 +250,8 @@ export interface EchoSubmission {
   requestId: string;
   text: string;
   imageCount: number;
+  /** Carried so the optimistic bubble shows the same thumbnails as the durable one. */
+  images?: PiImage[];
 }
 
 /** Show a submitted prompt before the server has echoed it back (optimistic). */

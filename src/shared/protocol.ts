@@ -149,7 +149,22 @@ export interface PiBashExecutionMessage {
   timestamp?: number;
 }
 
+/**
+ * A message an extension inserted into the conversation rather than the user or
+ * the model authoring it. `display` decides whether it belongs in the
+ * transcript; `display: false` still reaches the model as context.
+ */
+export interface PiCustomMessage {
+  role: 'custom';
+  customType: string;
+  content: string | PiContentBlock[];
+  display: boolean;
+  details?: unknown;
+  timestamp?: number;
+}
+
 export type PiAgentMessage =
+  | PiCustomMessage
   | PiUserMessage
   | PiAssistantMessage
   | PiToolResultMessage

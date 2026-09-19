@@ -7,7 +7,7 @@ import type { ReactNode } from 'react';
 import { formatTokens } from '../lib/format';
 import { answerIndexOf } from '../lib/transcript';
 import type { TranscriptEntry, TranscriptState, TurnProcess } from '../shared/transcript';
-import { AssistantMessageItem, UserMessageItem } from './MessageItem';
+import { AssistantMessageItem, CustomMessageItem, UserMessageItem } from './MessageItem';
 import { ToolCard } from './ToolCard';
 
 type NoticeLevel = 'info' | 'warning' | 'error';
@@ -80,6 +80,9 @@ function EntryView({
   const { token } = theme.useToken();
 
   switch (entry.kind) {
+    case 'custom':
+      return <CustomMessageItem entry={entry} />;
+
     case 'user':
       return <UserMessageItem entry={entry} />;
 

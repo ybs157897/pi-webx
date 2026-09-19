@@ -28,7 +28,7 @@
  * exception would take the UI down with it.
  */
 
-import type { PiAgentMessage, PiEvent, PiToolCallBlock } from '../shared/protocol';
+import type { PiAgentMessage, PiEvent, PiImage, PiToolCallBlock } from '../shared/protocol';
 import type {
   AddEcho,
   ApplyPiEvent,
@@ -145,6 +145,39 @@ function contentImageCount(content: unknown): number {
     if (isImageBlock(block)) count += 1;
   }
   return count;
+}
+
+/** Media types the transcript will render; anything else is left alone. */
+const RENDERABLE_IMAGE = /^image\/(png|jpeg|webp|gif)$/;
+/** Ceiling on one embedded image, so a hostile payload cannot wedge the view. */
+const MAX_IMAGE_CHARS = 8_000_000;
+/** A turn rarely needs more than a few; more is payload, not evidence. */
+const MAX_IMAGES = 4;
+
+/**
+ * The image blocks of a message, normalised to `PiImage`.
+ *
+ * Blocks are validated rather than trusted: content arrives from a model or a
+ * tool, and an unsupported media type or an oversized payload must be dropped
+ * instead of reaching an `<img>`.
+ */
+function contentImages(content: unknown): PiImage[] {
+  if (!Array.isArray(content)) return [];
+  return content
+    .flatMap((block): PiImage[] => {
+      const item = asRecord(block);
+      if (
+        item?.type !== 'image' ||
+        typeof item.data !== 'string' ||
+        item.data.length > MAX_IMAGE_CHARS ||
+        typeof item.mimeType !== 'string' ||
+        !RENDERABLE_IMAGE.test(item.mimeType)
+      ) {
+        return [];
+      }
+      return [{ type: 'image', data: item.data, mimeType: item.mimeType }];
+    })
+    .slice(0, MAX_IMAGES);
 }
 
 function contentToolCalls(content: unknown): PiToolCallBlock[] {
@@ -354,6 +387,8 @@ function attachToolResultIn(
   const toolCallId = asString(rec.toolCallId) ?? '';
   const toolName = asString(rec.toolName) ?? 'unknown';
   const output = contentText(rec.content);
+  const images = contentImages(rec.content);
+  const imageCount = contentImageCount(rec.content);
   const status: ToolRunStatus = (asBoolean(rec.isError) ?? false) ? 'error' : 'success';
   const hasDetails = 'details' in rec;
 
@@ -364,6 +399,7 @@ function attachToolResultIn(
         ...run,
         toolName: toolName || run.toolName,
         output,
+        ...(imageCount > 0 ? { images, imageCount } : {}),
         status,
         endedAt: at,
       };
@@ -379,6 +415,7 @@ function attachToolResultIn(
     toolName,
     args: {},
     output,
+    ...(imageCount > 0 ? { images, imageCount } : {}),
     status,
     startedAt: at,
     endedAt: at,
@@ -491,6 +528,33 @@ function startMessage(state: TranscriptState, message: PiAgentMessage | undefine
   const at = timestampOf(rec, Date.now());
 
   switch (role) {
+    case 'custom': {
+      // An inserted message the extension asked to be visible. `display: false`
+      // ones stay in the conversation as model context but are not the reader's.
+      if (rec.display !== true) return state;
+      const customType = asString(rec.customType) ?? 'custom';
+      const text = contentText(rec.content);
+      // Re-delivered on both message_start and message_end; append once.
+      if (
+        state.entries.some(
+          (entry) =>
+            entry.kind === 'custom' &&
+            entry.at === at &&
+            entry.customType === customType &&
+            entry.text === text,
+        )
+      ) {
+        return state;
+      }
+      return appendEntry(state, {
+        kind: 'custom',
+        id: liveEntryId('custom', at, state.entries.length),
+        at,
+        customType,
+        text,
+        details: rec.details,
+      });
+    }
     case 'user': {
       // Also covers prompts echoed back to us (initial prompt + injected steering).
       const entry: UserEntry = {
@@ -499,6 +563,7 @@ function startMessage(state: TranscriptState, message: PiAgentMessage | undefine
         at,
         text: contentText(rec.content),
         imageCount: contentImageCount(rec.content),
+        images: contentImages(rec.content),
       };
       return appendEntry(state, entry);
     }
@@ -547,6 +612,10 @@ function endMessage(state: TranscriptState, message: PiAgentMessage | undefined)
     const at = timestampOf(rec, Date.now());
     return attachToolResult(state, rec, at, liveEntryId('toolResult', at, state.entries.length), false);
   }
+  // A custom message is appended by its `message_start`, and pi emits the same
+  // message again on `message_end`; re-running start keeps that path idempotent
+  // instead of dropping a message seen only at the end.
+  if (role === 'custom') return startMessage(state, message);
   // A user message was appended by its `message_start`; `bashExecution` output
   // arrives whole (and via `bash_execution_update`), so neither ends here.
   if (role !== 'assistant') return state;
@@ -945,6 +1014,19 @@ export const applySnapshot: ApplySnapshot = (state, messages) => {
 
     const fallbackAt = lastEntryAt(entries, 0);
     switch (role) {
+      case 'custom': {
+        // Same rule as the live path: only what the extension marked visible.
+        if (rec.display !== true) break;
+        entries.push({
+          kind: 'custom',
+          id: `snap-${index}`,
+          at: timestampOf(rec, fallbackAt),
+          customType: asString(rec.customType) ?? 'custom',
+          text: contentText(rec.content),
+          details: rec.details,
+        });
+        break;
+      }
       case 'user': {
         const at = timestampOf(rec, fallbackAt);
         entries.push({
@@ -953,6 +1035,7 @@ export const applySnapshot: ApplySnapshot = (state, messages) => {
           at,
           text: contentText(rec.content),
           imageCount: contentImageCount(rec.content),
+          images: contentImages(rec.content),
         });
         break;
       }
@@ -1110,11 +1193,17 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
       const replacesContent = payload !== null && 'content' in payload;
       const replacesDetails = payload !== null && 'details' in payload;
       const output = replacesContent && payload ? contentText(payload.content) : undefined;
+      const images = replacesContent && payload ? contentImages(payload.content) : undefined;
+      const imageCount = replacesContent && payload ? contentImageCount(payload.content) : undefined;
       const toolName = asString(event.toolName);
       const args = asRecord(event.args);
       return updateToolRun(state, toolCallId, (run) => {
         const next: ToolRun = { ...run };
         if (output !== undefined) next.output = output;
+        if (images !== undefined) {
+          next.images = images;
+          next.imageCount = imageCount;
+        }
         if (replacesDetails && payload) next.details = payload.details;
         if (toolName) next.toolName = toolName;
         if (args) next.args = { ...run.args, ...args };
@@ -1129,6 +1218,8 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
       const replacesContent = result !== null && 'content' in result;
       const replacesDetails = result !== null && 'details' in result;
       const output = replacesContent && result ? contentText(result.content) : undefined;
+      const images = replacesContent && result ? contentImages(result.content) : undefined;
+      const imageCount = replacesContent && result ? contentImageCount(result.content) : undefined;
       const isError = asBoolean(event.isError) ?? false;
       const toolName = asString(event.toolName);
       const args = asRecord(event.args);
@@ -1141,6 +1232,7 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
           toolName: toolName ?? 'unknown',
           args: args ? { ...args } : {},
           output: output ?? '',
+          ...(imageCount ? { images, imageCount } : {}),
           status: isError ? 'error' : 'success',
           startedAt: at,
           endedAt: at,
@@ -1158,6 +1250,10 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
       return updateToolRun(state, toolCallId, (run) => {
         const next: ToolRun = { ...run };
         if (output !== undefined) next.output = output;
+        if (images !== undefined) {
+          next.images = images;
+          next.imageCount = imageCount;
+        }
         if (replacesDetails && result) next.details = result.details;
         if (toolName) next.toolName = toolName;
         if (args) next.args = { ...run.args, ...args };
@@ -1314,6 +1410,7 @@ export const addEcho: AddEcho = (state, submission: EchoSubmission) => {
     at: Date.now(),
     text: submission.text,
     imageCount: submission.imageCount,
+    images: submission.images,
     echo: { requestId: submission.requestId },
   };
   return { ...state, entries: [...state.entries, entry] };

@@ -6,7 +6,7 @@ import { useCallback, useMemo, useState } from 'react';
 import { useThemeMode } from 'antd-style';
 
 import { specToTokDsl } from '../lib/tokui-dsl';
-import type { AssistantEntry, UserEntry } from '../shared/transcript';
+import type { AssistantEntry, CustomEntry, UserEntry } from '../shared/transcript';
 import {
   extractA2uiBlocks,
   parseA2uiBlock,
@@ -15,6 +15,7 @@ import {
   type UiSpec,
 } from '../shared/uikit';
 import { IconThinkOutline14 } from '../ui/primitives/index.ts';
+import { MessageImages } from './MessageImages';
 import { LeadingGlyph } from './LeadingGlyph';
 import { ToolCard } from './ToolCard';
 import { TokUIView } from './tokui/TokUIView';
@@ -102,13 +103,43 @@ export function UserMessageItem({ entry }: { entry: UserEntry }) {
         </Markdown>
       )}
       belowMessage={
-        entry.imageCount > 0 ? (
+        entry.images && entry.images.length > 0 ? (
+          <MessageImages images={entry.images} label="提问附件" />
+        ) : entry.imageCount > 0 ? (
+          // An entry rebuilt without its payload still knows how many there were.
           <Text fontSize={11} type="secondary">
             {entry.imageCount} 张图片
           </Text>
         ) : undefined
       }
     />
+  );
+}
+
+/**
+ * A message an extension inserted into the conversation.
+ *
+ * It is neither the user nor the model, so it wears neither avatar: a labelled
+ * row keeps it from reading as something the model said. The `customType` is
+ * shown because it is the only way to tell two kinds of insertion apart.
+ */
+export function CustomMessageItem({ entry }: { entry: CustomEntry }) {
+  const { token } = theme.useToken();
+  return (
+    <div
+      style={{
+        border: `1px dashed ${token.colorBorderSecondary}`,
+        borderRadius: 8,
+        padding: '8px 12px',
+      }}
+    >
+      <Text fontSize={11} type="secondary">
+        {entry.customType}
+      </Text>
+      <Markdown variant="chat" fontSize={13}>
+        {entry.text}
+      </Markdown>
+    </div>
   );
 }
 

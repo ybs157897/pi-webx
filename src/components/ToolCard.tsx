@@ -22,6 +22,7 @@ import {
   StateDot,
 } from '../ui/primitives/index.ts';
 import { LeadingGlyph } from './LeadingGlyph';
+import { MessageImages } from './MessageImages';
 import type { ToolRun } from '../shared/transcript';
 import css from './ToolCard.module.css';
 
@@ -309,6 +310,12 @@ export function ToolCard({ run }: { run: ToolRun }) {
                       {run.output}
                     </Highlighter>
                   </div>
+                </Section>
+              )}
+
+              {run.images !== undefined && run.images.length > 0 && (
+                <Section label="图片">
+                  <MessageImages images={run.images} label={`${run.toolName} 返回`} />
                 </Section>
               )}
 
