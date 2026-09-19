@@ -120,7 +120,11 @@ function Shell({
   const boot = useMemo(() => loadPrefs(), []);
   const [config, setConfig] = useState<ServerConfigResponse | null>(null);
   const [cwd, setCwd] = useState(boot.cwd ?? '');
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(
+    // The address bar is this session's address: a reload, a bookmark, or a
+    // restart of the bridge all land back on the same conversation.
+    () => new URLSearchParams(window.location.search).get('session'),
+  );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
@@ -152,6 +156,27 @@ function Shell({
   const [pendingModel, setPendingModel] = useState<ModelSelection | null>(null);
 
   const session = usePiSession(sessionId);
+
+  /** Keep the URL in step with the open session, without a history entry. */
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    if (sessionId !== null) url.searchParams.set('session', sessionId);
+    else url.searchParams.delete('session');
+    window.history.replaceState(null, '', url);
+  }, [sessionId]);
+
+  /**
+   * 「地址里有 id，但服务端已经不认这个会话」时自动把它捞回来。
+   *
+   * 桥接服务重启会结束所有内存中的会话，而页面地址栏里只有 `?session=<id>`。
+   * 以前这种情况下正文直接空掉、提示去会话列表手动重新打开；其实转写就在磁盘上，
+   * `POST /api/sessions { sessionId }` 自己会去找文件（见 `findStoredSessionById`）。
+   * 这里只负责在确认这个会话确实不在内存里之后发一次请求。
+   *
+   * 只在「已连接但会话不在列表里」时动手：连接还没建立时的空列表不代表会话不在，
+   * 那样会在启动瞬间白捞一次。每个 id 只试一次，避免和轮询互相触发成环。
+   */
+  const resumeAttempted = useRef<string | null>(null);
 
   /**
    * The model a new session starts from: the user's in-flight pick, else the
@@ -208,6 +233,33 @@ function Shell({
       setAllStored([]);
     }
   }, []);
+
+  /**
+   * 「地址里有 id，但服务端已经不认这个会话」时自动把它捞回来。
+   *
+   * 桥接服务重启会结束所有内存中的会话，而页面地址栏里只有 `?session=<id>`。
+   * 以前这种情况下正文直接空掉、提示去会话列表手动重新打开；其实转写就在磁盘上，
+   * `POST /api/sessions { sessionId }` 自己会去找文件（见 `findStoredSessionById`）。
+   * 这里只负责在确认这个会话确实不在内存里之后发一次请求。
+   *
+   * 只在「已连接但会话不在列表里」时动手：连接还没建立时的空列表不代表会话不在，
+   * 那样会在启动瞬间白捞一次。每个 id 只试一次，避免和轮询互相触发成环。
+   */
+  useEffect(() => {
+    if (sessionId === null || session.status !== 'live') return;
+    if (sessions.some((entry) => entry.id === sessionId)) return;
+    if (resumeAttempted.current === sessionId) return;
+    resumeAttempted.current = sessionId;
+    void (async () => {
+      try {
+        const result = await bridge.createSession({ sessionId });
+        setCwd(result.session.cwd);
+        await refreshSessions();
+      } catch {
+        // 磁盘上也没有这个 id：保留现场提示，不打扰用户。
+      }
+    })();
+  }, [refreshSessions, session.status, sessionId, sessions]);
 
   const pickWorkspace = useCallback((path: string) => {
     setSavedWorkspaces((prev) => {

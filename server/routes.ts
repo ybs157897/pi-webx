@@ -410,6 +410,29 @@ export function createApiRouter(manager: PiHost): Router {
       }
     }
 
+    /**
+     * `sessionId` 是「我只要这个会话，文件在哪你去找」。
+     *
+     * 桥接服务重启会结束所有内存中的会话，而页面的地址栏里只有 `?session=<id>`。
+     * 这里按 id 找到磁盘上的转写文件再走正常的恢复路径，用户刷新一下就能接着上，
+     * 不必回会话列表手动挑。
+     */
+    if (parsed.value.sessionId !== undefined) {
+      const wanted = parsed.value.sessionId;
+      const hosted = manager.list().find((session) => session.id === wanted);
+      if (hosted !== undefined) {
+        const payload: CreateSessionResponse = { session: manager.summary(hosted) };
+        return res.json(payload);
+      }
+      const stored = await findStoredSessionById(wanted, parsed.value.cwd);
+      if (stored === null) {
+        return sendError(res, 404, `no stored session with id ${wanted}`);
+      }
+      parsed.value.sessionPath = stored.path;
+      parsed.value.cwd = parsed.value.cwd ?? stored.cwd;
+      delete parsed.value.sessionId;
+    }
+
     try {
       const session = await manager.create(parsed.value);
       const payload: CreateSessionResponse = { session: manager.summary(session) };
@@ -530,6 +553,27 @@ type ParseResult =
   | { ok: true; value: CreateSessionRequest }
   | { ok: false; error: string };
 
+/**
+ * 按 pi 的会话 id 在磁盘上找转写文件。
+ *
+ * `listStoredSessions` 已经带 mtime+size 缓存地解析过每个文件的头部，这里复用它
+ * 而不是自己再扫一遍目录。id 是文件头里那个稳定标识，与桥接层的 hosted id 相同
+ * （见 `PiHost.create`），所以恢复出来的会话就是原来那个。
+ */
+async function findStoredSessionById(
+  id: string,
+  cwd: string | undefined,
+): Promise<{ path: string; cwd: string } | null> {
+  const sessions = await listStoredSessions({ limit: STORED_LOOKUP_LIMIT });
+  const match = sessions.find((entry) => entry.id === id);
+  if (match === undefined) return null;
+  // 会话记录里带着它自己的工作目录；调用方没指定 cwd 时以文件为准。
+  return { path: match.path, cwd: cwd ?? match.cwd };
+}
+
+/** 按 id 查恢复目标时扫描的文件上限：够覆盖一个工作区的历史，又不会变成全盘遍历。 */
+const STORED_LOOKUP_LIMIT = 200;
+
 function parseCreateSessionRequest(raw: unknown): ParseResult {
   if (!isRecord(raw)) {
     return { ok: false, error: 'request body must be a JSON object' };
@@ -554,7 +598,7 @@ function parseCreateSessionRequest(raw: unknown): ParseResult {
     value.noSession = raw.noSession;
   }
 
-  for (const key of ['name', 'provider', 'model', 'sessionPath'] as const) {
+  for (const key of ['name', 'provider', 'model', 'sessionPath', 'sessionId'] as const) {
     const candidate = raw[key];
     if (candidate === undefined) continue;
     const checked = requireString(candidate, key);

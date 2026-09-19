@@ -22,12 +22,14 @@ function DialogBody({
   onCancel: () => void;
 }) {
   const [value, setValue] = useState(request.method === 'editor' ? (request.prefill ?? '') : '');
-  const [selected, setSelected] = useState<string | undefined>(request.options?.[0]);
+  // Nothing is preselected: a select that opens with option 1 highlighted lets a
+  // user confirm an answer they never read. `确定` stays disabled until they pick.
+  const [selected, setSelected] = useState<string | undefined>();
 
   useEffect(() => {
     setValue(request.method === 'editor' ? (request.prefill ?? '') : '');
-    setSelected(request.options?.[0]);
-  }, [request]);
+    setSelected(undefined);
+  }, [request.id, request.method, request.prefill]);
 
   switch (request.method) {
     case 'select':
@@ -36,10 +38,17 @@ function DialogBody({
           {request.title && <Text>{request.title}</Text>}
           <Select
             autoFocus
+            placeholder="请选择一个选项"
+            // Long option text is the norm here (a model's proposed answers);
+            // virtualising them breaks the wrapping the popup needs.
+            virtual={false}
             value={selected}
             onChange={setSelected}
             style={{ width: '100%' }}
-            options={(request.options ?? []).map((option) => ({ value: option, label: option }))}
+            options={(request.options ?? []).map((option) => ({
+              value: option,
+              label: <span style={{ whiteSpace: 'normal', lineHeight: 1.5 }}>{option}</span>,
+            }))}
           />
           <Flexbox horizontal justify="flex-end" gap={8}>
             <Button onClick={onCancel}>取消</Button>
@@ -150,6 +159,9 @@ export function ExtensionDialogs({
       width={request.method === 'editor' ? 720 : 480}
     >
       <DialogBody
+        // Keyed by request: without it the next dialog inherits the previous
+        // one's typed value and selection.
+        key={request.id}
         request={request}
         onRespond={(body) => onRespond(request.id, body)}
         onCancel={() => onRespond(request.id, { cancelled: true })}

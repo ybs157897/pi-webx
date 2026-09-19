@@ -41,7 +41,8 @@ import type {
 } from '../shared/protocol';
 import { PI_DIALOG_METHODS, PI_THINKING_LEVELS } from '../shared/protocol';
 import type { TranscriptState } from '../shared/transcript';
-import { addEcho, applyPiEvent, applySnapshot, retireEcho } from './transcript';
+import { addEcho, applyPiEvent, retireEcho } from './transcript';
+import { restoreSessionMessages, type SessionMessageSnapshot } from './session-snapshot';
 import { createTranscript } from '../shared/transcript';
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'exited' | 'error';
@@ -143,6 +144,8 @@ export class PiSessionClient {
   private buffer: Array<{ seq: number; frame: ServerFrame }> = [];
   private readonly pendingSubmissions = new Map<string, { requestId: string; text: string; imageCount: number; images?: PiImage[] }>();
   private readonly dialogTimers = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Answers in flight, so a double click cannot dispatch the same one twice. */
+  private readonly respondingDialogs = new Set<string>();
   private readonly listeners = new Set<() => void>();
   private detachConnection: (() => void) | null = null;
   private detachStatus: (() => void) | null = null;
@@ -336,6 +339,17 @@ export class PiSessionClient {
 
   private handleExtensionUi(request: PiExtensionUiRequest): void {
     switch (request.method) {
+      // pi (or the bridge, on timeout/abort) is done with this dialog. Retire it
+      // here too, or the user keeps seeing a prompt nobody is waiting on.
+      case 'close_dialog': {
+        const timer = this.dialogTimers.get(request.id);
+        if (timer !== undefined) clearTimeout(timer);
+        this.dialogTimers.delete(request.id);
+        this.update({
+          dialogs: this.snapshot.dialogs.filter((entry) => entry.request.id !== request.id),
+        });
+        return;
+      }
       case 'notify':
         this.pushNotification(
           request.notifyType === 'warning' || request.notifyType === 'error'
@@ -406,11 +420,11 @@ export class PiSessionClient {
       return;
     }
 
-    const data = pickRecord<{ messages?: unknown[]; throughSeq?: number }>(response.data);
+    const data = pickRecord<Partial<SessionMessageSnapshot>>(response.data);
     const messages = pickArray<PiAgentMessage>(data, 'messages');
     const throughSeq = typeof data?.throughSeq === 'number' ? data.throughSeq : 0;
 
-    let transcript = applySnapshot(this.snapshot.transcript, messages);
+    let transcript = restoreSessionMessages(this.snapshot.transcript, { ...data, messages });
     // A snapshot drops echoes by construction; prompts still in flight get
     // theirs back so the user's just-sent text does not blink away.
     for (const submission of this.pendingSubmissions.values()) {
@@ -421,7 +435,16 @@ export class PiSessionClient {
     const buffered = this.buffer;
     this.buffer = [];
     this.hydrated = true;
-    this.update({ transcript });
+    if (Array.isArray(data?.pendingDialogs)) {
+      // The server's list is the authority: whatever prompt it is still waiting
+      // on has to be on screen again, and anything else is stale.
+      for (const timer of this.dialogTimers.values()) clearTimeout(timer);
+      this.dialogTimers.clear();
+      this.update({ transcript, dialogs: [] });
+      for (const request of data.pendingDialogs) if (isDialogRequest(request)) this.handleExtensionUi(request);
+    } else {
+      this.update({ transcript });
+    }
 
     let lastSeq = throughSeq;
     for (const { seq, frame } of buffered) {
@@ -592,13 +615,30 @@ export class PiSessionClient {
     id: string,
     body: { value?: string; confirmed?: boolean; cancelled?: boolean },
   ): Promise<void> => {
-    const timer = this.dialogTimers.get(id);
-    if (timer) {
-      clearTimeout(timer);
+    // The answer is sent *before* the dialog is retired. Closing first meant a
+    // failed send left the user with no prompt and no way to retry, and let a
+    // double click dispatch the same answer twice.
+    if (this.respondingDialogs.has(id)) return;
+    this.respondingDialogs.add(id);
+    try {
+      const response = await this.send({ type: 'extension_ui_response', id, ...body });
+      if (this.disposed) return;
+      if (!response.success) throw new Error(response.error || '回答未送达');
+      const timer = this.dialogTimers.get(id);
+      if (timer !== undefined) clearTimeout(timer);
       this.dialogTimers.delete(id);
+      this.update({ dialogs: this.snapshot.dialogs.filter((entry) => entry.request.id !== id) });
+    } catch (cause) {
+      if (!this.disposed) {
+        this.pushNotification(
+          'error',
+          '回答发送失败，请重试',
+          cause instanceof Error ? cause.message : String(cause),
+        );
+      }
+    } finally {
+      this.respondingDialogs.delete(id);
     }
-    this.update({ dialogs: this.snapshot.dialogs.filter((entry) => entry.request.id !== id) });
-    await this.send({ type: 'extension_ui_response', id, ...body });
   };
 }
 

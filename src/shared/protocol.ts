@@ -275,6 +275,7 @@ export type PiExtensionUiMethod =
   | 'confirm'
   | 'input'
   | 'editor'
+  | 'close_dialog'
   | 'notify'
   | 'setStatus'
   | 'setWidget'
@@ -529,6 +530,13 @@ export interface CreateSessionRequest {
   thinking?: PiThinkingLevel;
   /** Resume an existing pi session JSONL file. */
   sessionPath?: string;
+  /**
+   * Resume by pi's own session id (the `id` in the transcript header, which the
+   * bridge also uses as its hosted id). The server finds the file itself, so a
+   * URL that carries only `?session=<id>` can still bring the conversation back
+   * after the bridge restarted and dropped every in-memory session.
+   */
+  sessionId?: string;
   /** Start with session persistence disabled (`--no-session`). */
   noSession?: boolean;
   /**

@@ -91,8 +91,19 @@ export interface HostedSession {
    * Dialogs an extension is waiting on, keyed by request id. An extension's
    * `ctx.ui.confirm()` resolves only when the browser answers, so a dead session
    * has to resolve them rather than leave the agent's tool call hanging.
+   *
+   * The request text and its arrival time are kept alongside the responder: a
+   * client that reconnects is handed the open dialogs again, and the timeout it
+   * is told about has to be the time *left*, not a fresh full one.
    */
-  pendingDialogs: Map<string, (response: PiExtensionUiResponse) => void>;
+  pendingDialogs: Map<
+    string,
+    {
+      request: PiExtensionUiRequest;
+      createdAt: number;
+      respond: (response: PiExtensionUiResponse) => void;
+    }
+  >;
   /**
    * The builtin selection this session is running with, as the user chose it
    * (before shell resolution and the extension-tool merge). `null` until a
@@ -202,7 +213,15 @@ export class PiHost {
     if (options.name) session.setSessionName(options.name);
 
     const hosted: HostedSession = {
-      id: crypto.randomUUID(),
+      /**
+       * 会话的身份用 **pi 自己写进会话文件的那个 id**，不再另铸一个。
+       *
+       * 以前这里是 `crypto.randomUUID()`：桥接层的 id 与文件里的 id 毫无关系，
+       * 于是服务端一重启，`?session=<桥接 id>` 就再也对不上任何东西——磁盘上的
+       * 对话明明还在，界面却只能说「这堂课已结束」。同一个 id 之后，「按 id
+       * 恢复」才有东西可查（见 routes 里的 `findStoredSessionById`）。
+       */
+      id: sessionManager.getSessionId(),
       cwd,
       createdAt: Date.now(),
       resumed: Boolean(options.sessionPath),
@@ -317,7 +336,9 @@ export class PiHost {
     });
 
     const hosted: HostedSession = {
-      id: crypto.randomUUID(),
+      // Same identity rule as `create`: the bridge's id is pi's session id, so a
+      // URL that carries only the id can be resolved back to a session file.
+      id: sessionManager.getSessionId(),
       cwd,
       createdAt: Date.now(),
       resumed: false,
@@ -501,44 +522,53 @@ export class PiHost {
     fallback?: string | boolean,
   ): Promise<string | boolean | undefined> {
     const id = crypto.randomUUID();
-    return new Promise((resolve) => {
+    const request = {
+      type: 'extension_ui_request',
+      id,
+      method,
+      ...payload,
+      ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
+    } as PiExtensionUiRequest;
+    return new Promise((resolve, reject) => {
       let settled = false;
       let timer: NodeJS.Timeout | null = null;
-      const settle = (value: string | boolean | undefined): void => {
+      const settle = (value: string | boolean | undefined, cancelled = false): void => {
         if (settled) return;
         settled = true;
         hosted.pendingDialogs.delete(id);
         if (timer !== null) clearTimeout(timer);
         options?.signal?.removeEventListener('abort', onAbort);
-        resolve(value);
+        // Tell the browser the dialog is over. Without this it keeps showing a
+        // prompt the extension has already stopped waiting on.
+        this.broadcast(hosted, { t: 'pi', event: { type: 'extension_ui_request', id, method: 'close_dialog' } });
+        // Some select extensions fall back to option 1 when handed undefined, so
+        // a cancellation must not be delivered as a value: that would record a
+        // choice the user never made.
+        if (cancelled && method === 'select') reject(new Error('用户取消了选择'));
+        else resolve(value);
       };
-      const onAbort = (): void => settle(fallback);
+      const onAbort = (): void => settle(fallback, true);
 
       if (options?.timeout !== undefined && options.timeout > 0) {
-        timer = setTimeout(() => settle(fallback), options.timeout);
+        timer = setTimeout(() => settle(fallback, true), options.timeout);
       }
       options?.signal?.addEventListener('abort', onAbort, { once: true });
       if (options?.signal?.aborted === true) {
-        settle(fallback);
+        settle(fallback, true);
         return;
       }
 
-      hosted.pendingDialogs.set(id, (response) => {
-        if (response.cancelled === true) return settle(fallback);
-        if (method === 'confirm') return settle(response.confirmed === true);
-        settle(response.value);
+      hosted.pendingDialogs.set(id, {
+        request,
+        createdAt: Date.now(),
+        respond: (response) => {
+          if (response.cancelled === true) return settle(fallback, true);
+          if (method === 'confirm') return settle(response.confirmed === true);
+          settle(response.value);
+        },
       });
 
-      this.broadcast(hosted, {
-        t: 'pi',
-        event: {
-          type: 'extension_ui_request',
-          id,
-          method,
-          ...payload,
-          ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-        } as unknown as PiEvent,
-      });
+      this.broadcast(hosted, { t: 'pi', event: request });
     });
   }
 
@@ -559,7 +589,7 @@ export class PiHost {
     for (const hosted of this.sessions.values()) {
       const resolver = hosted.pendingDialogs.get(id);
       if (resolver !== undefined) {
-        resolver(response);
+        resolver.respond(response);
         return true;
       }
     }
@@ -653,8 +683,8 @@ export class PiHost {
     session.streaming = false;
     // An extension awaiting a dialog would otherwise hang forever: answer every
     // pending request as a dismissal, which is what a closed window means.
-    for (const resolve of session.pendingDialogs.values()) {
-      resolve({ type: 'extension_ui_response', id: '', cancelled: true });
+    for (const dialog of session.pendingDialogs.values()) {
+      dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
     }
     session.pendingDialogs.clear();
     try {
@@ -744,6 +774,11 @@ export class PiHost {
         await session.followUp(command.message);
         return ok(command.type);
       case 'abort':
+        // An extension awaiting a dialog would otherwise keep waiting for an
+        // answer to a turn the user just stopped.
+        for (const dialog of hosted.pendingDialogs.values()) {
+          dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
+        }
         await session.abort();
         return ok(command.type);
       case 'clear_queue':
@@ -756,6 +791,8 @@ export class PiHost {
         return { type: 'response', command: command.type, success: true, data: this.stateOf(hosted) };
       case 'get_messages': {
         const messages = session.messages;
+        const streamingMessage = session.agent.state.streamingMessage;
+        const running = session.isStreaming;
         // Captured after the list was read: pi appends to its log and emits
         // the event in the same synchronous turn, so everything the snapshot
         // reflects is already journaled and covered by `throughSeq`.
@@ -764,7 +801,21 @@ export class PiHost {
           type: 'response',
           command: command.type,
           success: true,
-          data: { messages, throughSeq },
+          data: {
+            messages,
+            throughSeq,
+            running,
+            streamingMessage,
+            // Handed back so a reconnecting client restores the prompts an
+            // extension is still waiting on, with the time each has left rather
+            // than a fresh full timeout.
+            pendingDialogs: [...hosted.pendingDialogs.values()].map(({ request, createdAt }) => ({
+              ...request,
+              ...(request.timeout === undefined
+                ? {}
+                : { timeout: Math.max(1, request.timeout - (Date.now() - createdAt)) }),
+            })),
+          },
         };
       }
       case 'set_model': {
