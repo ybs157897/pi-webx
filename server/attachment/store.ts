@@ -19,7 +19,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { chmod, link, mkdir, open, readFile, stat, unlink } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 import {
   AttachmentError,
@@ -104,6 +104,32 @@ async function syncDirectory(path: string): Promise<void> {
   }
 }
 
+/** Roots whose ancestor chain this process has already made durable. */
+const syncedChains = new Set<string>();
+
+/**
+ * Make the chain **above** the attachment root durable, once per process.
+ *
+ * Syncing the object's own directory is not enough on the first write into a
+ * fresh home: `…/attachments/v1` and everything above it may have just been
+ * created, so their entries have to reach storage as well or a crash can take
+ * the whole tree with it. Proving the chain is expensive, so it is done once per
+ * root rather than per write — the reference takes the same position. Failures
+ * are ignored: an ancestor that cannot be opened is one this process did not
+ * create, so its entry is somebody else's to make durable.
+ */
+async function syncChainToRoot(root: string): Promise<void> {
+  if (syncedChains.has(root)) return;
+  syncedChains.add(root);
+  let current = root;
+  for (;;) {
+    await syncDirectory(current).catch(() => undefined);
+    const parent = dirname(current);
+    if (parent === current) return;
+    current = parent;
+  }
+}
+
 /**
  * 规范化并存下一张入站图片。
  *
@@ -155,8 +181,11 @@ export async function saveImage(
     // 独占发布：目标已存在说明另一个写者（或上一轮）先到了，直接采用它。
     await link(staging, target);
     await chmod(target, 0o600);
+    // The object's entry in its shard, then the shard's entry in `objects/`,
+    // then (once per process) everything above the root.
     await syncDirectory(shard);
     await syncDirectory(join(root, 'objects'));
+    await syncChainToRoot(root);
   } catch (error) {
     if (!(await exists(target))) {
       await unlink(staging).catch(() => undefined);
