@@ -224,7 +224,7 @@ export function Composer({
     api.transcript.queued.steering.length + api.transcript.queued.followUp.length;
 
   return (
-    <div style={{ padding: '0 20px 16px', maxWidth: 940, margin: '0 auto', width: '100%' }}>
+    <div style={{ flex: 'none', minWidth: 0, padding: '0 20px 16px', maxWidth: 940, margin: '0 auto', width: '100%' }}>
       <div
         style={{
           border: `1px solid ${token.colorBorder}`,

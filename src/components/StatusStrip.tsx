@@ -55,7 +55,7 @@ export function StatusStrip({ api }: { api: PiSessionApi }) {
   if (!hasBanner && statusEntries.length === 0 && !running) return null;
 
   return (
-    <Flexbox gap={8} paddingBlock={6}>
+    <Flexbox gap={8} paddingBlock={6} style={{ flex: 'none', minWidth: 0 }}>
       {retrying && (
         <Alert
           type="warning"

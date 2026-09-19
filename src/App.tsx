@@ -853,7 +853,7 @@ function Shell({
           </Flexbox>
         )}
 
-        <Flexbox paddingInline={20} style={{ maxWidth: 940, margin: '0 auto', width: '100%' }}>
+        <Flexbox paddingInline={20} style={{ flex: 'none', minWidth: 0, maxWidth: 940, margin: '0 auto', width: '100%' }}>
           <WidgetStrip widgets={session.widgets} placement="aboveEditor" />
           <StatusStrip api={session} />
         </Flexbox>
