@@ -268,6 +268,9 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       contentClassName={styles['modelModalBody'] as string}
       footer={(
         <>
+          <button type="button" className={styles['linkButton']} onClick={reset}>
+            {t('resetForm')}
+          </button>
           {props.onDelete === undefined
             ? null
             : (
@@ -449,11 +452,6 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       </details>
 
       {failure === undefined ? null : <p className={styles['error']}>{failure}</p>}
-      <div className={styles['modalFootnote']}>
-        <button type="button" className={styles['linkButton']} onClick={reset}>
-          {t('resetForm')}
-        </button>
-      </div>
     </Modal>
   )
 }
