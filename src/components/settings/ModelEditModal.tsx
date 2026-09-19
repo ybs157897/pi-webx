@@ -20,7 +20,7 @@ import { Button, IconQuestionOutline14, Modal, Tooltip } from '../../ui/primitiv
 import type { ModelExtension } from '../../shared/models-config'
 import { PI_THINKING_LEVELS, type PiThinkingLevel } from '../../shared/protocol'
 import { errorMessage, modelsConfigApi } from '../../lib/modelsConfig'
-import { formatCapacity, parseCapacity } from './capacity.ts'
+import { parseCapacity } from './capacity.ts'
 import type { ModelDraft } from './capacity.ts'
 import { t } from './copy.ts'
 import styles from './ModelsSection.module.css'
@@ -65,9 +65,17 @@ const CAPABILITY_LABELS: Record<CapabilityKey, string> = {
   midConversationSystem: '对话中系统消息',
 }
 
-/** Capacity text for a stored count, '' when unset. */
+/**
+ * Capacity text for a stored count, '' when unset.
+ *
+ * Written out as digits rather than the editor's shorthand: the reference shows
+ * a raw count in these two fields, and a count is what the field actually
+ * holds — the K/M spelling is one accepted *input* form, not the value's name.
+ * `parseCapacity` still takes either, so a typed `1M` keeps working, and the
+ * field's `?` says so.
+ */
 function capacityText(value: number | undefined): string {
-  return value === undefined ? '' : formatCapacity(value)
+  return value === undefined ? '' : String(value)
 }
 
 /**
@@ -145,12 +153,12 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       }
       const filled: string[] = []
       if (context.trim().length === 0 && match.contextWindow !== undefined) {
-        setContext(formatCapacity(match.contextWindow))
-        filled.push('上下文窗口')
+        setContext(capacityText(match.contextWindow))
+        filled.push(t('modelContextWindow'))
       }
       if (maxTokens.trim().length === 0 && match.maxTokens !== undefined) {
-        setMaxTokens(formatCapacity(match.maxTokens))
-        filled.push('最大输出')
+        setMaxTokens(capacityText(match.maxTokens))
+        filled.push(t('modelMaxTokens'))
       }
       if (match.input?.includes('image')) {
         setImages(true)
@@ -318,25 +326,25 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
       </label>
 
       <label className={styles['modalField']}>
-        <span className={styles['modalFieldLabel']}>{t('modelContextWindow')}</span>
+        <FieldLabel text={t('modelContextWindow')} hint={t('capacityInputHint')} />
         <input
           className={styles['input']}
           type="text"
           inputMode="numeric"
           value={context}
-          placeholder="256K / 1M"
+          placeholder="1000000"
           onChange={(event) => { setContext(event.target.value) }}
         />
       </label>
 
       <label className={styles['modalField']}>
-        <span className={styles['modalFieldLabel']}>{t('modelMaxTokens')}</span>
+        <FieldLabel text={t('modelMaxTokens')} hint={t('capacityInputHint')} />
         <input
           className={styles['input']}
           type="text"
           inputMode="numeric"
           value={maxTokens}
-          placeholder="32K / 384K"
+          placeholder="384000"
           onChange={(event) => { setMaxTokens(event.target.value) }}
         />
       </label>

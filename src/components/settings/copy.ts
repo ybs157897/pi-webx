@@ -63,6 +63,7 @@ export const copy = {
   removeModel: '移除模型',
   modelContextWindow: '上下文窗口',
   modelMaxTokens: '最大输出 Token',
+  capacityInputHint: '直接填数字（如 1000000）；也接受 256K、1M 这类写法。',
   modelImageInput: '图片输入',
   modelImageInputHint: '可发送图片',
   modelIdRequired: '模型 ID 不能为空',
