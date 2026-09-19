@@ -544,6 +544,14 @@ export interface SessionSummary {
   provider: string | null;
   model: string | null;
   streaming: boolean;
+  /**
+   * Extension dialogs this session is waiting on the user to answer.
+   *
+   * The sidebar paints a different status for a session that is blocked on the
+   * reader than for one that is merely running — a prompt nobody answers stalls
+   * the run indefinitely.
+   */
+  pendingDialogs: number;
   /** subscribers currently attached to this session's event stream */
   clients: number;
 }

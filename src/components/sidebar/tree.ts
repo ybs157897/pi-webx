@@ -7,6 +7,7 @@
  * order is the browser's manual (dragged) account when present, else recency.
  */
 import type { SessionSummary, StoredSession } from '../../shared/protocol'
+import type { StateDotState } from '../../ui/primitives/index.ts'
 
 /** Order-account key of the flat "In one list" view. */
 export const FLAT_SESSION_ORDER_KEY = '__flat_session_order__'
@@ -31,6 +32,8 @@ export interface SessionNode {
   running: boolean
   /** live session with a live process (a dead one renders dimmed) */
   alive: boolean
+  /** blocked on the reader answering an extension dialog */
+  pendingInteraction: boolean
   updatedAt: number
   live?: SessionSummary
   stored?: StoredSession
@@ -50,6 +53,35 @@ export interface GroupNode {
   sessions: readonly SessionNode[]
 }
 
+/**
+ * One user-visible session status: which dot the leading slot paints, and the
+ * label the hover card and screen readers use.
+ */
+export interface SessionStatus {
+  state: StateDotState
+  label: string
+}
+
+/**
+ * Session status presentation, adapted to pi-webx's facts and ordered by what
+ * the reader has to do about it: a session blocked on an answer outranks one
+ * that is merely running (a prompt nobody answers stalls the run forever), and
+ * both outrank "nothing is happening".
+ *
+ * These are the three states the leading slot distinguishes — running, waiting
+ * on you, and finished — the same three dsh's session dot paints. The leading
+ * slot always paints one of them; there is no fourth "no dot" case, because a
+ * row with no status is indistinguishable from a row whose status failed to
+ * load.
+ */
+export function sessionStatuses(node: SessionNode): readonly SessionStatus[] {
+  if (node.pendingInteraction) return [{ state: 'warning', label: '等待你的确认' }]
+  if (node.running) return [{ state: 'ongoing', label: '正在执行' }]
+  if (node.kind === 'stored') return [{ state: 'done', label: '历史会话' }]
+  if (!node.alive) return [{ state: 'idle', label: '已结束' }]
+  return [{ state: 'done', label: '空闲' }]
+}
+
 /** One flat search row: title plus the workspace it belongs to. */
 export interface SearchResultNode {
   id: string
@@ -58,6 +90,7 @@ export interface SearchResultNode {
   workspace: string
   running: boolean
   alive: boolean
+  pendingInteraction: boolean
 }
 
 /** `/Users/x/work/api` → `~/work/api` when it lives under the reported home dir. */
@@ -98,6 +131,7 @@ export function liveNode(session: SessionSummary, hostedTitle?: string | undefin
     title: session.sessionName ?? hostedTitle ?? workspaceLabel(session.cwd),
     running: session.streaming,
     alive: session.alive,
+    pendingInteraction: session.pendingDialogs > 0,
     updatedAt: session.createdAt,
     live: session,
   }
@@ -121,6 +155,7 @@ export function storedNode(session: StoredSession): SessionNode {
     title: previewTitle(session),
     running: false,
     alive: false,
+    pendingInteraction: false,
     updatedAt: Number.isNaN(parsed) ? 0 : parsed,
     stored: session,
   }
@@ -285,6 +320,7 @@ export function deriveSearchResults(
       workspace: labelOf(session.cwd),
       running: node.running,
       alive: node.alive,
+      pendingInteraction: node.pendingInteraction,
     })
   }
   for (const session of unhosted(stored, hosted)) {
@@ -298,6 +334,7 @@ export function deriveSearchResults(
       workspace: labelOf(session.cwd),
       running: false,
       alive: false,
+      pendingInteraction: false,
     })
   }
   return results

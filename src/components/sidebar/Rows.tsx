@@ -13,7 +13,6 @@ import {
   HoverCard,
   IconArchiveOutline20,
   IconBranchOutline16,
-  IconClockOutline16,
   IconEditOutline16,
   IconEllipsisOutline16,
   IconFolderClose16,
@@ -25,9 +24,8 @@ import {
   StateDot,
   relativeTime,
 } from '../../ui/primitives/index.ts'
-import type { StateDotState } from '../../ui/primitives/index.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from './tree.ts'
-import { shortenCwd } from './tree.ts'
+import { sessionStatuses, shortenCwd } from './tree.ts'
 import css from './Rows.module.css'
 
 /* ------------------------------------------------------------- time labels */
@@ -223,30 +221,6 @@ function IconCheckMarker() {
 /** Pushpin glyph (kept inline: the vendored icon set has no pin). */
 /* ------------------------------------------------------------- session row */
 
-interface SessionStatus {
-  state: StateDotState
-  label: string
-}
-
-/**
- * Session status presentation, adapted to pi-webx's facts: a streaming run is
- * primary; a dead process reads as exited; an idle live session and any stored
- * transcript carry no dot (their labels live in the hover card).
- */
-function sessionStatuses(node: SessionNode): readonly SessionStatus[] {
-  if (node.kind === 'stored') return [{ state: 'idle', label: '历史会话' }]
-  if (node.running) return [{ state: 'ongoing', label: '正在执行' }]
-  if (!node.alive) return [{ state: 'idle', label: '已结束' }]
-  return [{ state: 'done', label: '空闲' }]
-}
-
-/** Whether the leading slot paints a status dot for this node. */
-function showsStatusDot(node: SessionNode, statuses: readonly SessionStatus[]): boolean {
-  if (node.kind === 'stored') return false
-  if (node.running || !node.alive) return true
-  return statuses[0]?.state === 'ongoing'
-}
-
 /** Hover-card body: full title, relative time, and every relevant live status. */
 function SessionHoverContent({ node, now }: { node: SessionNode; now: number }) {
   const statuses = sessionStatuses(node)
@@ -267,10 +241,11 @@ function SessionHoverContent({ node, now }: { node: SessionNode; now: number }) 
 /**
  * One top-level 32px session row: status slot, title, relative time, and the
  * row actions menu. Live rows offer rename/kill; stored rows (a persisted
- * transcript, marked with a clock glyph) offer resume/delete.
+ * transcript) offer resume/delete. The leading slot always carries the status
+ * dot — running, waiting on the reader, or finished.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -290,13 +265,10 @@ export function SessionNodeItem({
   onReveal?: (() => void) | undefined
   /** Present only on draggable rows (grouped sessions outside search). */
   drag?: RowDragProps | undefined
-  /** The row is rendered without a parent Workspace header. */
-  flat?: boolean | undefined
 }) {
   const row = node
   const selected = node.kind === 'live' && node.id === currentId
   const statuses = sessionStatuses(node)
-  const showStatus = showsStatusDot(node, statuses)
   const [menuOpen, setMenuOpen] = useState(false)
   const rowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -317,7 +289,6 @@ export function SessionNodeItem({
       ref={rowRef}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
-        flat && !showStatus && css.flatSessionRowWithoutStatus,
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
       )}
       role="treeitem"
@@ -350,9 +321,7 @@ export function SessionNodeItem({
         }}
     >
       <span className={css.slot}>
-        {node.kind === 'stored'
-          ? <IconClockOutline16 />
-          : showStatus && <StateDot state={statuses[0]?.state ?? 'idle'} />}
+        <StateDot state={statuses[0]?.state ?? 'idle'} />
       </span>
       <span className={css.title}>
         {node.title}
@@ -416,9 +385,17 @@ export function SearchResultItem({ result, currentId, onOpen }: {
     >
       <span className={css.searchResultHeading}>
         <span className={css.slot}>
-          {result.kind === 'stored'
-            ? <IconClockOutline16 />
-            : result.running && <StateDot state="ongoing" />}
+          <StateDot
+            state={
+              result.pendingInteraction
+                ? 'warning'
+                : result.running
+                  ? 'ongoing'
+                  : result.kind === 'stored'
+                    ? 'done'
+                    : 'idle'
+            }
+          />
         </span>
         <span className={css.searchResultTitle}>{result.title}</span>
       </span>

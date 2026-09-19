@@ -514,7 +514,6 @@ function FlatList(props: TreeBodyProps) {
                   onReveal={node.id === revealSessionId
                     ? () => { onSessionRevealed(node.id) }
                     : undefined}
-                  flat
                   drag={orderBy !== 'manual' ? undefined : {
                     start: () => {
                       dropCommitted.current = false

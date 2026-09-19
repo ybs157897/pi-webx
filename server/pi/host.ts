@@ -948,6 +948,7 @@ export class PiHost {
       provider: model?.provider ?? null,
       model: model?.id ?? null,
       streaming: session.streaming,
+      pendingDialogs: session.pendingDialogs.size,
       clients: session.subscribers.size,
     };
   }
