@@ -48,6 +48,7 @@ import type {
   SessionSummary,
 } from '../../src/shared/protocol';
 import { PromptRequests, SessionJournal } from './session-journal';
+import { prepareIncomingImages } from '../attachment/store';
 import {
   appendToolSelection,
   readToolSelection,
@@ -1036,8 +1037,26 @@ export class PiHost {
          * 忙 + 显式 steer → 立刻插话进当前这轮，空闲 → 正常开一轮。
          * 客户端因此不需要猜服务端的状态，也不会因为猜错而看到一条红色报错。
          */
+        /**
+         * 附上的图片先规范化再交给 pi。
+         *
+         * 客户端给的可能是任何东西（手机直出的 HEIC 转 PNG、带 EXIF 方向的 JPEG、
+         * 超大截图），而网关只收 WebP/JPEG 且会拿 `unsupported image` 把一张合法 PNG
+         * 挡回来。规范化同时把字节落进内容寻址的附件库，pi 于是把**规范化后**的图写进
+         * 会话日志——后面每一轮历史里带的就是这份，不需要再处理一次。
+         *
+         * 这一步排在「排队还是直接发」之前：排队那条路 drain 时同样把 `item.images`
+         * 交给 pi，所以两条路都得拿到规范化后的那份字节。
+         */
+        let prepared: Awaited<ReturnType<typeof prepareIncomingImages>>;
+        try {
+          prepared = await prepareIncomingImages(command.images);
+        } catch (error) {
+          if (command.id !== undefined) hosted.promptRequests.forget(command.id);
+          return fail(command.type, errorText(error), command.id);
+        }
         if (command.streamingBehavior === undefined && session.isStreaming) {
-          const queued = this.enqueue(hosted, command.message, command.images);
+          const queued = this.enqueue(hosted, command.message, prepared.images as unknown as ImageContent[]);
           return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
         }
         // 空闲时忽略显式 steer：pi 的 steer 只在当前轮里有投递窗口，空闲会话上
@@ -1049,8 +1068,8 @@ export class PiHost {
         const accepted = new Promise<boolean>((resolve) => {
           void session
             .prompt(command.message, {
-              ...(command.images && command.images.length > 0
-                ? { images: command.images as unknown as ImageContent[] }
+              ...(prepared.images.length > 0
+                ? { images: prepared.images as unknown as ImageContent[] }
                 : {}),
               ...(behavior ? { streamingBehavior: behavior } : {}),
               preflightResult: resolve,
@@ -1074,7 +1093,7 @@ export class PiHost {
          */
         if (!success && command.streamingBehavior === undefined && reason !== null && isAlreadyProcessing(reason)) {
           if (command.id !== undefined) hosted.promptRequests.forget(command.id);
-          const queued = this.enqueue(hosted, command.message, command.images);
+          const queued = this.enqueue(hosted, command.message, prepared.images as unknown as ImageContent[]);
           return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
         }
         // A rejected preflight never becomes a durable user message: release

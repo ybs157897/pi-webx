@@ -37,6 +37,8 @@ import {
 } from './providers';
 import type { CredentialWriteResponse, ListProvidersResponse } from '../src/shared/providers';
 import { clampStoredLimit, listStoredSessions, recentStoredCwds, sessionsRoot } from './stored-sessions';
+import { AttachmentError } from './attachment/normalize';
+import { readImage } from './attachment/store';
 
 /** Upper bound on a request body; large enough for pasted images. */
 export const JSON_BODY_LIMIT = '1mb';
@@ -260,6 +262,25 @@ export function createApiRouter(manager: PiHost): Router {
       res.json(payload);
     } catch (error) {
       sendModelConfigError(res, error);
+    }
+  });
+
+  /**
+   * 按内容寻址 id 取回一张附件。
+   *
+   * 这是「重启后仍在」对外的那一半：图片不再只活在会话日志的 base64 里，而是有稳定
+   * 地址的持久对象，浏览器可以直接引用。因为地址就是内容的摘要，同一个 id 的内容永远
+   * 不会变，所以可以放心长缓存——这也让同一张图在历史里出现多次时只下载一次。
+   */
+  router.get('/attachments/:id', async (req: Request, res: Response) => {
+    try {
+      const { data, mediaType } = await readImage(String(req.params.id));
+      res.setHeader('content-type', mediaType);
+      res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+      res.send(data);
+    } catch (error) {
+      if (error instanceof AttachmentError) return sendError(res, 404, error.message);
+      return sendError(res, 500, errorMessage(error));
     }
   });
 
