@@ -11,7 +11,7 @@
     "build": "vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts"
+    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.4",
@@ -30,6 +30,7 @@
     "motion": "^12.43.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "sharp": "^0.35.4",
     "tsx": "^4.20.6",
     "ws": "^8.21.3"
   },
