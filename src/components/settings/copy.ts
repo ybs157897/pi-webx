@@ -123,7 +123,7 @@ export const copy = {
   imageInput: '图片',
   videoInput: '视频',
   pdfInput: 'PDF',
-  extensionInputHint: '视频/音频/PDF 为记录项：pi 目前只消费文本与图片输入。',
+  extensionInputHint: '视频/PDF 为记录项：pi 目前只消费文本与图片输入。',
   modelCapabilities: '模型能力',
   capabilityHint: '能力标记为记录项：pi 暂不消费这三项。',
   reasoningLevels: '推理等级（从低到高）',

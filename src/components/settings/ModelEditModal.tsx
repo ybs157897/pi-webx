@@ -4,9 +4,11 @@
  *
  * What pi can honour is written to its native keys (`contextWindow`,
  * `maxTokens`, `input`, `reasoning` + `thinkingLevelMap`); everything pi has no
- * concept for yet (video/audio/pdf input kinds, capability flags, the JSONata
+ * concept for yet (the video/pdf input kinds, capability flags, the JSONata
  * reasoning map) is kept in the entry's `piWebx` namespace and labelled as
- * recorded-only, so nothing here reads as working when pi would ignore it.
+ * recorded-only, so nothing here reads as working when pi would ignore it. An
+ * *unrendered* key of that namespace — today `inputFormat.audio` — is inherited
+ * untouched by a save; see `model-extension.ts`.
  *
  * `智能配置` is real: it asks the bridge what pi's bundled catalogue knows for
  * the id (context window, output limit, input kinds, whether it reasons) and

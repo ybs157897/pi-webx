@@ -19,6 +19,7 @@ import {
   buildModelExtension,
 } from '../src/components/settings/model-extension';
 import type { ExtensionSelection } from '../src/components/settings/model-extension';
+import { t } from '../src/components/settings/copy';
 import type { ModelExtension } from '../src/shared/models-config';
 
 /** A selection with every chip off and an empty map — the "cleared everything" form. */
@@ -92,6 +93,18 @@ assert.equal(
   buildModelExtension({ inputFormat: { video: true } }, emptySelection()),
   undefined,
   '最后一个画出来的键被取消勾选后，扩展应该整个消失而不是留个空对象',
+);
+
+// The row's tooltip is part of the same claim: it lists the kinds that are
+// recorded-only, so it must not name a kind the row no longer offers. (It did —
+// the chip went away and the sentence kept saying 音频.)
+assert.ok(
+  t('extensionInputHint').includes('视频') && t('extensionInputHint').includes('PDF'),
+  `输入类型的提示要列出被记录的两种输入：${t('extensionInputHint')}`,
+);
+assert.ok(
+  !t('extensionInputHint').includes('音频'),
+  `输入类型的提示不该再提音频（那一行没有音频 chip）：${t('extensionInputHint')}`,
 );
 
 console.log('PASS 模型编辑器：输入类型只有 视频/PDF（无音频），保存只动表单画出来的键、其余原样继承');
