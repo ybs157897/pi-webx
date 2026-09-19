@@ -126,6 +126,8 @@ function Shell({
     () => new URLSearchParams(window.location.search).get('session'),
   );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
+  /** Whether the bridge's session list has been read at least once. */
+  const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
@@ -165,17 +167,7 @@ function Shell({
     window.history.replaceState(null, '', url);
   }, [sessionId]);
 
-  /**
-   * 「地址里有 id，但服务端已经不认这个会话」时自动把它捞回来。
-   *
-   * 桥接服务重启会结束所有内存中的会话，而页面地址栏里只有 `?session=<id>`。
-   * 以前这种情况下正文直接空掉、提示去会话列表手动重新打开；其实转写就在磁盘上，
-   * `POST /api/sessions { sessionId }` 自己会去找文件（见 `findStoredSessionById`）。
-   * 这里只负责在确认这个会话确实不在内存里之后发一次请求。
-   *
-   * 只在「已连接但会话不在列表里」时动手：连接还没建立时的空列表不代表会话不在，
-   * 那样会在启动瞬间白捞一次。每个 id 只试一次，避免和轮询互相触发成环。
-   */
+  /** Set once a resume has been attempted for an id, so the poll cannot loop. */
   const resumeAttempted = useRef<string | null>(null);
 
   /**
@@ -217,6 +209,9 @@ function Shell({
   const refreshSessions = useCallback(async () => {
     try {
       setSessions((await bridge.listSessions()).sessions);
+      // The list has been read at least once, so "not in it" now means the
+      // bridge does not have this session — see the resume effect below.
+      setSessionsLoaded(true);
     } catch {
       // transient; the poll retries
     }
@@ -242,11 +237,13 @@ function Shell({
    * `POST /api/sessions { sessionId }` 自己会去找文件（见 `findStoredSessionById`）。
    * 这里只负责在确认这个会话确实不在内存里之后发一次请求。
    *
-   * 只在「已连接但会话不在列表里」时动手：连接还没建立时的空列表不代表会话不在，
-   * 那样会在启动瞬间白捞一次。每个 id 只试一次，避免和轮询互相触发成环。
+   * 只在「桥接的会话列表已经读到、且里面没有这个 id」时动手：连接未建立或列表还没
+   * 读到的空列表不代表会话不在，那样会在启动瞬间白捞一次。判定刻意**不**看会话
+   * 客户端的状态——一个服务端已经不认的会话永远等不到 live，用它当门槛恰好会在最
+   * 需要这条路径的时候不触发。每个 id 只试一次，避免和轮询互相触发成环。
    */
   useEffect(() => {
-    if (sessionId === null || session.status !== 'live') return;
+    if (sessionId === null || !sessionsLoaded) return;
     if (sessions.some((entry) => entry.id === sessionId)) return;
     if (resumeAttempted.current === sessionId) return;
     resumeAttempted.current = sessionId;
@@ -259,7 +256,7 @@ function Shell({
         // 磁盘上也没有这个 id：保留现场提示，不打扰用户。
       }
     })();
-  }, [refreshSessions, session.status, sessionId, sessions]);
+  }, [refreshSessions, sessions, sessionId, sessionsLoaded]);
 
   const pickWorkspace = useCallback((path: string) => {
     setSavedWorkspaces((prev) => {
