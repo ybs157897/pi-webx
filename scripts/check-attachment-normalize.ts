@@ -77,6 +77,34 @@ const rotated = await normalizeImage(rotatedSource, 'image/jpeg')
 assert.equal(rotated.width, 600, `EXIF 方向没应用：宽应为 600，实际 ${rotated.width}`)
 assert.equal(rotated.height, 1200, `EXIF 方向没应用：高应为 1200，实际 ${rotated.height}`)
 
+// ---- 大图 + EXIF 方向：摆正之后还要缩，别把竖的压成横的 ----------------------
+// 上面那张小图不进缩放（1200×600 在预算里），所以它测不到「缩放框是按摆正前还是
+// 摆正后的尺寸算的」。真实踩到的坑正是这个组合：手机竖拍的照片既有 EXIF 方向、又
+// 大到必须缩，缩放框按摆正前的横尺寸算 + `fill` 套框，结果像素被横向拉伸一倍。
+const bigRotated = await sharp({
+  create: { width: 2600, height: 1800, channels: 3, background: { r: 10, g: 20, b: 30 } },
+})
+  .jpeg()
+  .withMetadata({ orientation: 6 })
+  .toBuffer()
+const bigOut = await normalizeImage(bigRotated, 'image/jpeg')
+assert.equal(bigOut.mediaType, 'image/jpeg', '不透明的图仍走 JPEG');
+assert.ok(
+  bigOut.width < bigOut.height,
+  `竖拍的照片摆正后应当是竖的，实际 ${bigOut.width}x${bigOut.height}`,
+);
+assert.ok(
+  bigOut.width * bigOut.height <= 2048 * 2048,
+  `缩放后要进像素预算，实际 ${bigOut.width * bigOut.height}`,
+);
+// 比例必须跟「摆正后」的原图一致（1800:2600），差一点是取整，差一倍就是被压扁了。
+const aspect = bigOut.width / bigOut.height;
+const wanted = 1800 / 2600;
+assert.ok(
+  Math.abs(aspect - wanted) < 0.01,
+  `长宽比走样：产物 ${bigOut.width}x${bigOut.height}（${aspect.toFixed(3)}），摆正后应为 ${wanted.toFixed(3)}`,
+);
+
 // ---- 元数据剥离：产物不再携带 EXIF/ICC ------------------------------------
 const outMeta = await sharp(rotated.data).metadata()
 assert.equal(outMeta.exif, undefined, 'EXIF 不该出现在产物里')

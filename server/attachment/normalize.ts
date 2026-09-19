@@ -99,6 +99,12 @@ export interface NormalizedImage {
   sourceMediaType: string;
 }
 
+/**
+ * EXIF 里 5–8 是「要转 90 度」的四种摆法（含镜像的那两种），摆正后宽高互换。
+ * 1–4 只需不动或翻转，尺寸不变。
+ */
+const QUARTER_TURNS: ReadonlySet<number> = new Set([5, 6, 7, 8]);
+
 /** 规范化后长边的像素上限：总像素预算与长边上限取小。 */
 function targetSize(
   width: number,
@@ -173,10 +179,16 @@ export async function normalizeImage(
   /**
    * `rotate()` 不带参数即按 EXIF 方向摆正——这是「应用 EXIF 方向」的实现方式。
    * 不改写 `withMetadata()`，编码时就不会带 EXIF/ICC，元数据与色彩配置一并剥掉。
+   *
+   * 摆正之后宽高可能互换了（EXIF 5–8 就是那四种转 90 度的摆法），所以缩放框必须
+   * 按**摆正后**的尺寸算：拿摆正前的尺寸去算框、再用 `fill` 去套，等于把竖着的像
+   * 素硬按横框压扁——一张手机竖拍的照片会被横向拉伸一倍。`inside` 则让 sharp 自己
+   * 保比例，框只当上界用。
    */
   const pipeline = sharp(data, { failOn: 'error', limitInputPixels: false }).rotate();
-  const target = targetSize(width, height, limits);
-  const resized = target === null ? pipeline : pipeline.resize({ ...target, fit: 'fill' });
+  const turned = meta.orientation !== undefined && QUARTER_TURNS.has(meta.orientation);
+  const target = targetSize(turned ? height : width, turned ? width : height, limits);
+  const resized = target === null ? pipeline : pipeline.resize({ ...target, fit: 'inside' });
 
   // alpha 决定编码格式：带透明的用 JPEG 会丢掉透明，那是内容损失，不是格式偏好。
   const useWebp = meta.hasAlpha === true;
