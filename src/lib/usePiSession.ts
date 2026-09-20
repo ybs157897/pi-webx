@@ -28,6 +28,7 @@ import type {
   PiRpcResponse,
   PiSessionState,
   PiSessionStats,
+  PiQueueAction,
   PiSlashCommand,
   PiThinkingLevel,
   PiToolInfo,
@@ -64,8 +65,9 @@ export interface PiSessionApi {
   editorText: string | null;
 
   prompt(text: string, options?: { images?: PiImage[]; behavior?: 'steer' | 'followUp' }): Promise<PiRpcResponse>;
+  /** One dock-row action: steer the row into the running turn, edit or drop it. */
+  updateQueue(id: string, action: PiQueueAction): Promise<PiRpcResponse>;
   abort(): Promise<void>;
-  clearQueue(): Promise<{ steering: string[]; followUp: string[] }>;
   compact(): Promise<void>;
   newSession(): Promise<void>;
   refreshState(): Promise<void>;
@@ -114,8 +116,8 @@ const IDLE_API: PiSessionApi = {
   ...IDLE_SNAPSHOT,
   pid: null,
   prompt: (_text, _options) => Promise.resolve(noSession('prompt')),
+  updateQueue: () => Promise.resolve(noSession('update_queue')),
   abort: () => Promise.resolve(),
-  clearQueue: () => Promise.resolve({ steering: [], followUp: [] }),
   compact: () => Promise.resolve(),
   newSession: () => Promise.resolve(),
   refreshState: () => Promise.resolve(),
@@ -171,8 +173,8 @@ export function usePiSession(sessionId: string | null): PiSessionApi {
             ...state,
             pid: null,
             prompt: client.prompt,
+            updateQueue: client.updateQueue,
             abort: client.abort,
-            clearQueue: client.clearQueue,
             compact: client.compact,
             newSession: client.newSession,
             refreshState: client.refreshState,

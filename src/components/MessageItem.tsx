@@ -17,7 +17,7 @@ import {
 import { IconThinkOutline14 } from '../ui/primitives/index.ts';
 import { MessageImages } from './MessageImages';
 import { LeadingGlyph } from './LeadingGlyph';
-import { ToolCard } from './ToolCard';
+import { ToolRunView } from './ToolRunView';
 import { TokUIView } from './tokui/TokUIView';
 import { UiRenderer } from './uikit/UiRenderer';
 
@@ -242,7 +242,7 @@ export function AssistantMessageItem({
             {toolCards.length > 0 && (
               <Flexbox gap={8}>
                 {toolCards.map((run) => (
-                  <ToolCard key={run.toolCallId} run={run} />
+                  <ToolRunView key={run.toolCallId} run={run} />
                 ))}
               </Flexbox>
             )}

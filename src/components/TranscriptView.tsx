@@ -9,6 +9,7 @@ import { answerIndexOf } from '../lib/transcript';
 import type { TranscriptEntry, TranscriptState, TurnProcess } from '../shared/transcript';
 import { AssistantMessageItem, CustomMessageItem, UserMessageItem } from './MessageItem';
 import { ToolCard } from './ToolCard';
+import { ToolRunView } from './ToolRunView';
 
 type NoticeLevel = 'info' | 'warning' | 'error';
 
@@ -98,7 +99,7 @@ function EntryView({
       );
 
     case 'toolResult':
-      return <ToolCard run={entry.run} />;
+      return <ToolRunView run={entry.run} />;
 
     case 'bash':
       return (

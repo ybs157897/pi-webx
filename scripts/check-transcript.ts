@@ -485,9 +485,38 @@ check('queue_update replaces both queues', () => {
     createTranscript(),
     ev({ type: 'queue_update', steering: ['focus'], followUp: ['then summarise'] }),
   );
-  assert.deepEqual(state.queued, { steering: ['focus'], followUp: ['then summarise'] });
+  assert.deepEqual(state.queued, { steering: ['focus'], followUp: ['then summarise'], pending: [] });
   const cleared = applyPiEvent(state, ev({ type: 'queue_update' }));
-  assert.deepEqual(cleared.queued, { steering: [], followUp: [] });
+  assert.deepEqual(cleared.queued, { steering: [], followUp: [], pending: [] });
+});
+
+check('queue_update carries the wait list and drops malformed rows', () => {
+  const state = applyPiEvent(
+    createTranscript(),
+    ev({
+      type: 'queue_update',
+      steering: [],
+      followUp: [],
+      pending: [
+        { id: 'q1', text: '先别动，等这轮结束', imageCount: 2, createdAt: 1 },
+        // A row without an id cannot be addressed by any dock action, so it is
+        // not a row: dropping it beats rendering a control that cannot work.
+        { text: 'no id', imageCount: 0, createdAt: 2 } as never,
+      ],
+    }),
+  );
+  assert.deepEqual(state.queued.pending, [
+    { id: 'q1', text: '先别动，等这轮结束', imageCount: 2, createdAt: 1 },
+  ]);
+  // pi's own frames settle its two queues but say nothing about the wait list,
+  // which is the bridge's: an absent `pending` therefore means "unchanged".
+  // Erasing it here would let every steer the dock performs wipe the dock.
+  const fromPi = applyPiEvent(state, ev({ type: 'queue_update', steering: ['now'], followUp: [] }));
+  assert.deepEqual(fromPi.queued.steering, ['now']);
+  assert.deepEqual(fromPi.queued.pending, state.queued.pending);
+  // The host does clear it by naming an empty list.
+  const cleared = applyPiEvent(state, ev({ type: 'queue_update', steering: [], followUp: [], pending: [] }));
+  assert.deepEqual(cleared.queued.pending, []);
 });
 
 check('extension setTitle updates the title, other methods are ignored', () => {
@@ -529,7 +558,7 @@ check('snapshot is deterministic and preserves title/live flags', () => {
     title: 'kept',
     running: true,
     retrying: { attempt: 1 },
-    queued: { steering: ['a'], followUp: [] },
+    queued: { steering: ['a'], followUp: [], pending: [] },
   };
 
   const first = applySnapshot(seeded, messages);
@@ -539,7 +568,7 @@ check('snapshot is deterministic and preserves title/live flags', () => {
   assert.equal(first.title, 'kept');
   assert.equal(first.running, true, 'live flags are not derivable from history');
   assert.deepEqual(first.retrying, { attempt: 1 });
-  assert.deepEqual(first.queued, { steering: ['a'], followUp: [] });
+  assert.deepEqual(first.queued, { steering: ['a'], followUp: [], pending: [] });
 
   const user = only(first, 'user') as UserEntry;
   assert.equal(user.text, 'look');

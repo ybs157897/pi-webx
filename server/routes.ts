@@ -58,6 +58,9 @@ const KNOWN_COMMANDS = new Set<string>([
   'prompt',
   'steer',
   'follow_up',
+  // The wait list's row actions (steer/edit/remove). Not a pi command: it is
+  // this bridge's own, because the list it addresses is the bridge's.
+  'update_queue',
   'abort',
   'clear_queue',
   'new_session',

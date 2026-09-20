@@ -9,7 +9,8 @@ no dependency on a CLI on PATH: pi's own config dir (`~/.pi/agent`) supplies mod
 extensions, so everything configured in the pi CLI keeps working.
 
 Conversations stream in real time, tool calls render as expandable cards, agent-emitted UI
-renders **inline in the conversation**, and extension dialogs are answered through the UI.
+renders **inline in the conversation**, and a message sent while the agent is working waits
+in a queue above the composer instead of being lost or cutting into the running turn.
 
 ![chat](docs/chat.png)
 
@@ -32,8 +33,22 @@ Requirements: Node 20+ only. The bridge logs the embedded pi SDK version at star
 ## What it covers
 
 **Conversation.** Streaming text and thinking blocks, tool calls as expandable cards with
-live output, token/cost usage per turn, context-window usage in the composer bar, queued
-steer/follow-up messages, retry and compaction banners, image attachments (paste or pick).
+live output, token/cost usage per turn, context-window usage in the composer bar, retry and
+compaction banners, image attachments (paste or pick).
+
+**A wait list for messages sent mid-turn (dsh's queue dock).** Enter while the agent is
+running queues the message instead of steering it into the running turn: it appears as a row
+above the composer ("{n} 条排队消息", one row renders bare), every row can be steered into the
+current turn (插话发送), edited or deleted, and the list drains by itself — one message per
+settled turn. `Cmd/Ctrl+Enter` steers the draft immediately; with an empty draft it steers
+every queued row. The list lives on the bridge, which is what gives each row an id, keeps its
+images, and lets it survive a reload.
+
+**Agent questions, answered in the composer (dsh's question surface).** When the agent asks
+something, the composer is replaced by the question — options are clickable, a `confirm`
+offers 是/否, `input`/`editor` take text (Enter submits, Shift+Enter breaks the line) — rather
+than a modal opening over the conversation. The transcript keeps a collapsed row for it
+("提问 · 1/1 已回答"), whose body shows the question and the answer that was given.
 
 **Auto-rendered component views (a2ui-style).** The bundled pi extension
 (`extensions/pi-webx-ui.ts`, deployed to `~/.pi/agent/extensions/`) registers a `render_ui`

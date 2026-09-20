@@ -39,6 +39,8 @@ import type {
   PiExtensionUiRequest,
   PiExtensionUiResponse,
   PiModel,
+  PiQueueAction,
+  PiQueuedPrompt,
   PiRpcResponse,
   PiSessionState,
   PiSessionStats,
@@ -65,6 +67,17 @@ export interface HostSubscriber {
   close: () => void;
 }
 
+/**
+ * One wait-list row: the text and images a settled turn will be handed, plus the
+ * id the browser addresses it by.
+ */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  images?: ImageContent[];
+  createdAt: number;
+}
+
 export class HostError extends Error {
   readonly status: number;
   constructor(status: number, message: string) {
@@ -82,6 +95,14 @@ export interface HostedSession {
   streaming: boolean;
   /** A prompt is mid-preflight; a second one would race the first. */
   preparing?: boolean;
+  /** A queued row is being handed to pi right now; one flush at a time. */
+  flushing?: boolean;
+  /**
+   * Messages accepted while a turn was running, in arrival order — the dock's
+   * rows. Held here, not in pi: pi's own queues are strings with no per-item
+   * identity, so nothing could address a single row (steer/edit/remove).
+   */
+  queue: QueuedPrompt[];
   sessionFile: string | null;
   sessionName: string | null;
   session: AgentSession;
@@ -143,6 +164,19 @@ export interface CreateHostedSessionOptions {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * The SDK's "a turn is already running" refusal.
+ *
+ * Matched by text because it is thrown, not typed. It means the same thing the
+ * preflight's `accepted: false` means — the message has to wait — so the caller
+ * turns it into a queue row instead of an error the user has to read.
+ */
+const ALREADY_PROCESSING = /already processing/i;
+
+function isAlreadyProcessing(message: string): boolean {
+  return ALREADY_PROCESSING.test(message);
 }
 
 function asModel(model: Model<any> | undefined | null): PiModel | null {
@@ -325,6 +359,7 @@ export class PiHost {
       resumed: Boolean(options.sessionPath),
       alive: true,
       streaming: false,
+      queue: [],
       sessionFile: session.sessionFile ?? null,
       sessionName: options.name ?? null,
       session,
@@ -442,6 +477,7 @@ export class PiHost {
       resumed: false,
       alive: true,
       streaming: false,
+      queue: [],
       sessionFile: session.sessionFile ?? null,
       sessionName: null,
       session,
@@ -708,6 +744,10 @@ export class PiHost {
       event: event as unknown as PiEvent,
       ...(source === undefined ? {} : { source }),
     });
+    // The wait list's clock: a settled turn is the only moment a queued message
+    // may start the next one. Broadcast first, so the client's `running` has
+    // already gone false by the time the flush's own events arrive.
+    if (event.type === 'agent_settled') void this.flushQueue(hosted);
   }
 
   /**
@@ -734,6 +774,145 @@ export class PiHost {
 
   private broadcastError(hosted: HostedSession, message: string): void {
     this.broadcast(hosted, { t: 'error', message });
+  }
+
+  /* ------------------------------------------------------------ wait list */
+
+  /** The dock's projection of the wait list: text and id, images reduced to a count. */
+  private queueView(hosted: HostedSession): PiQueuedPrompt[] {
+    return hosted.queue.map((item) => ({
+      id: item.id,
+      text: item.text,
+      imageCount: item.images?.length ?? 0,
+      createdAt: item.createdAt,
+    }));
+  }
+
+  /**
+   * Publish the wait list, alongside pi's own two queues.
+   *
+   * One frame carries all three because the reducer replaces the whole
+   * `queued` object: a frame that named only the wait list would erase pi's
+   * arrays, and vice versa.
+   */
+  private broadcastQueue(hosted: HostedSession): void {
+    this.broadcast(hosted, {
+      t: 'pi',
+      event: {
+        type: 'queue_update',
+        steering: [...hosted.session.getSteeringMessages()],
+        followUp: [...hosted.session.getFollowUpMessages()],
+        pending: this.queueView(hosted),
+      } as unknown as PiEvent,
+    });
+  }
+
+  /**
+   * Accept a message the running turn is not ready for — dsh's queue.
+   *
+   * Owning the list here rather than handing it to pi is what makes each row
+   * addressable (steer / edit / remove) and keeps its images; `flushQueue` is
+   * what eventually starts the turn that carries it.
+   */
+  private enqueue(hosted: HostedSession, text: string, images?: readonly ImageContent[]): QueuedPrompt {
+    const item: QueuedPrompt = {
+      id: crypto.randomUUID(),
+      text,
+      ...(images !== undefined && images.length > 0 ? { images: [...images] } : {}),
+      createdAt: Date.now(),
+    };
+    hosted.queue.push(item);
+    this.broadcastQueue(hosted);
+    return item;
+  }
+
+  /**
+   * One row action: dsh's `session.updateQueue`.
+   *
+   * `steer` is the only one that talks to pi, and only while a turn is running —
+   * that is the window in which a steer is delivered (after the current
+   * assistant turn's tool calls). Everything else is a local edit, so nothing
+   * can be lost to a queue pi has already begun to drain.
+   *
+   * @returns the failure to report, or `null` when the action was applied.
+   */
+  private async updateQueue(
+    hosted: HostedSession,
+    id: string,
+    action: PiQueueAction,
+  ): Promise<string | null> {
+    const index = hosted.queue.findIndex((item) => item.id === id);
+    if (index < 0) return '这条消息已经开始发送了。';
+
+    if (action.kind === 'remove') {
+      hosted.queue.splice(index, 1);
+      this.broadcastQueue(hosted);
+      return null;
+    }
+
+    const item = hosted.queue[index]!;
+    if (action.kind === 'edit') {
+      const text = action.text.trim();
+      if (text.length === 0) return '这条消息的内容不能为空。';
+      hosted.queue[index] = { ...item, text };
+      this.broadcastQueue(hosted);
+      return null;
+    }
+
+    if (!hosted.session.isStreaming) return '仅运行中可插话发送。';
+    hosted.queue.splice(index, 1);
+    this.broadcastQueue(hosted);
+    try {
+      await hosted.session.steer(item.text, item.images);
+    } catch (error) {
+      // Put it back where it was: the user's message is not the failure's cost.
+      hosted.queue.splice(Math.min(index, hosted.queue.length), 0, item);
+      this.broadcastQueue(hosted);
+      return `插话发送失败：${errorText(error)}`;
+    }
+    return null;
+  }
+
+  /**
+   * Hand pi the next queued message once a turn has fully settled.
+   *
+   * One row per settle is dsh's drain rule (`next-turn` claims exactly one
+   * message per turn) and it is what keeps a batch of queued instructions from
+   * collapsing into a single turn. `agent_settled` is pi's "nothing left to
+   * run" edge — retries and compaction included — so this cannot fire mid-run;
+   * a message that fails to start stays queued and is reported instead, because
+   * a failure here is not a reason to silently drop what the user wrote.
+   */
+  private async flushQueue(hosted: HostedSession): Promise<void> {
+    if (hosted.flushing === true || !hosted.alive || hosted.queue.length === 0) return;
+    if (hosted.session.isStreaming || !hosted.session.isIdle) return;
+    const item = hosted.queue[0];
+    if (item === undefined) return;
+    hosted.flushing = true;
+    try {
+      let reason: string | null = null;
+      const accepted = await new Promise<boolean>((resolve) => {
+        void hosted.session
+          .prompt(item.text, {
+            ...(item.images !== undefined && item.images.length > 0 ? { images: item.images } : {}),
+            preflightResult: resolve,
+          })
+          .catch((error: unknown) => {
+            reason = errorText(error);
+          });
+      });
+      if (!accepted) {
+        this.broadcastError(
+          hosted,
+          `排队消息未能发送${reason === null ? '' : `：${reason}`}。它仍在待发送里。`,
+        );
+        return;
+      }
+      hosted.queue = hosted.queue.filter((entry) => entry.id !== item.id);
+      this.broadcastQueue(hosted);
+    } finally {
+      hosted.flushing = false;
+    }
   }
 
   subscribe(session: HostedSession, subscriber: HostSubscriber): void {
@@ -847,18 +1026,23 @@ export class PiHost {
     switch (command.type) {
       case 'prompt': {
         if (hosted.preparing) return fail(command.type, '正在准备上一轮，请稍后再发送。');
-        hosted.preparing = true;
         /**
          * 投递方式由**服务端自己的运行状态**决定，不用客户端的「正在执行」。
          *
          * 客户端的 running 是派生视图（transcript + 快照），轮次收尾的一瞬间会
-         * 落后于 pi 的 `isStreaming`；此时裸 prompt 会被 SDK 直接拒掉，用户看到
-         * 一条红色「Agent is already processing」。DSH 的做法是客户端必须显式声明
-         * `mode: 'queue' | 'steer'`，服务端从不因为「正忙」而拒绝一条用户消息。
-         * 这里取同一立场：调用方显式指定就照办，没指定就按服务端此刻的真实状态补上
-         * ——忙则 steer（排进当前这轮，用户的本意就是「接着说」）。
+         * 落后于 pi 的 `isStreaming`。DSH 的立场是服务端从不因为「正忙」而拒绝
+         * 一条用户消息：忙 + 未指定 → 进待发送队列（`busyEnter` 默认就是 queue），
+         * 忙 + 显式 steer → 立刻插话进当前这轮，空闲 → 正常开一轮。
+         * 客户端因此不需要猜服务端的状态，也不会因为猜错而看到一条红色报错。
          */
-        const behavior = command.streamingBehavior ?? (session.isStreaming ? 'steer' : undefined);
+        if (command.streamingBehavior === undefined && session.isStreaming) {
+          const queued = this.enqueue(hosted, command.message, command.images);
+          return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
+        }
+        // 空闲时忽略显式 steer：pi 的 steer 只在当前轮里有投递窗口，空闲会话上
+        // 它会一直躺在队列里等一个永远不会到来的下一轮。
+        const behavior = session.isStreaming ? command.streamingBehavior : undefined;
+        hosted.preparing = true;
         /** Why the preflight said no — the client needs it to tell a race from a real refusal. */
         let reason: string | null = null;
         const accepted = new Promise<boolean>((resolve) => {
@@ -872,12 +1056,26 @@ export class PiHost {
             })
             .catch((error: unknown) => {
               reason = errorText(error);
-              this.broadcastError(hosted, reason);
+              // 「已经有一轮在跑」是这一层的竞态，不是用户的错：下面会把它
+              // 收进待发送，所以不该先给界面推一条红色报错。
+              if (!(command.streamingBehavior === undefined && isAlreadyProcessing(reason))) {
+                this.broadcastError(hosted, reason);
+              }
             });
         });
         const success = await accepted.finally(() => {
           hosted.preparing = false;
         });
+        /**
+         * 竞态自愈落在服务端：判定「正忙」用的是 pi 自己的 `isStreaming`，两者
+         * 之间仍有一个极窄的窗口，此时 SDK 会抛 `Agent is already processing`。
+         * 用户的本意是「接着说」，所以排进待发送而不是回一条错误。
+         */
+        if (!success && command.streamingBehavior === undefined && reason !== null && isAlreadyProcessing(reason)) {
+          if (command.id !== undefined) hosted.promptRequests.forget(command.id);
+          const queued = this.enqueue(hosted, command.message, command.images);
+          return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
+        }
         // A rejected preflight never becomes a durable user message: release
         // the requestId so retrying the same submit re-attempts it.
         if (!success && command.id !== undefined) hosted.promptRequests.forget(command.id);
@@ -897,6 +1095,10 @@ export class PiHost {
       case 'follow_up':
         await session.followUp(command.message);
         return ok(command.type);
+      case 'update_queue': {
+        const failure = await this.updateQueue(hosted, command.id, command.action);
+        return failure === null ? ok(command.type) : fail(command.type, failure);
+      }
       case 'abort':
         // An extension awaiting a dialog would otherwise keep waiting for an
         // answer to a turn the user just stopped.
@@ -905,8 +1107,11 @@ export class PiHost {
         }
         await session.abort();
         return ok(command.type);
-      case 'clear_queue':
+      case 'clear_queue': {
+        hosted.queue = [];
+        this.broadcastQueue(hosted);
         return { type: 'response', command: command.type, success: true, data: session.clearQueue() };
+      }
       case 'new_session': {
         await this.resetInPlace(hosted);
         return { type: 'response', command: command.type, success: true, data: { cancelled: false } };
@@ -939,6 +1144,10 @@ export class PiHost {
                 ? {}
                 : { timeout: Math.max(1, request.timeout - (Date.now() - createdAt)) }),
             })),
+            // Same reason as the dialogs: the wait list lives in memory and the
+            // journal frames that announced it are already behind `throughSeq`
+            // for a client that is opening the session now.
+            queue: this.queueView(hosted),
           },
         };
       }
@@ -1083,7 +1292,7 @@ export class PiHost {
       sessionId: session.sessionId,
       sessionName: hosted.sessionName ?? undefined,
       messageCount: session.messages.length,
-      pendingMessageCount: 0,
+      pendingMessageCount: hosted.queue.length,
     };
   }
 
@@ -1199,6 +1408,8 @@ export class PiHost {
     hosted.extensionsResult = extensionsResult;
     hosted.sessionFile = session.sessionFile ?? null;
     hosted.streaming = false;
+    // A new conversation has no wait list: the rows named messages of the old one.
+    hosted.queue = [];
     hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
     await this.bindExtensions(session, hosted);
   }

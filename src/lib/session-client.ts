@@ -33,6 +33,7 @@ import type {
   PiSessionState,
   PiSessionStats,
   PiSlashCommand,
+  PiQueueAction,
   PiThinkingLevel,
   PiToolInfo,
   PiToolsPayload,
@@ -43,7 +44,6 @@ import { PI_DIALOG_METHODS, PI_THINKING_LEVELS } from '../shared/protocol';
 import type { TranscriptState } from '../shared/transcript';
 import { addEcho, applyPiEvent, retireEcho } from './transcript';
 import { restoreSessionMessages, type SessionMessageSnapshot } from './session-snapshot';
-import { shouldRetryAsSteer } from './session-send';
 import { createTranscript } from '../shared/transcript';
 
 export type SessionStatus = 'idle' | 'connecting' | 'live' | 'reconnecting' | 'exited' | 'error';
@@ -481,32 +481,40 @@ export class PiSessionClient {
     const requestId = crypto.randomUUID();
     const imageCount = options?.images?.length ?? 0;
     const submission = { requestId, text, imageCount, ...(options?.images ? { images: options.images } : {}) };
-    this.pendingSubmissions.set(requestId, submission);
-    this.update({ transcript: addEcho(this.snapshot.transcript, submission) });
-
-    const deliver = (behavior?: 'steer' | 'followUp') =>
-      this.send({
-        type: 'prompt',
-        message: text,
-        id: requestId,
-        ...(options?.images && options.images.length > 0 ? { images: options.images } : {}),
-        ...(behavior ? { streamingBehavior: behavior } : {}),
-      });
-
-    let response = await deliver(options?.behavior);
     /**
-     * 竞态自愈：界面以为空闲，pi 却还在这一轮里。换成 steer 用同一个 requestId
-     * 重发一次——用户点「接着说」的本意就是排进当前这轮，不该看到一条红色报错。
-     * 判定与理由见 `lib/session-send.ts`。
+     * Where the optimistic echo goes — dsh's `placement`.
+     *
+     * A message sent while a turn is running waits in the dock, so a transcript
+     * echo would sit in the conversation for a whole turn, claiming a position
+     * it has not reached yet; the host's queue frame is that message's display.
+     * An explicit `steer` goes into the current turn, so it keeps the echo.
      */
-    if (!this.disposed && shouldRetryAsSteer(response, options?.behavior)) {
-      response = await deliver('steer');
+    const queued = this.snapshot.transcript.running === true && options?.behavior !== 'steer';
+    if (!queued) {
+      this.pendingSubmissions.set(requestId, submission);
+      this.update({ transcript: addEcho(this.snapshot.transcript, submission) });
     }
 
-    const accepted =
-      response.data && typeof response.data === 'object' && 'accepted' in response.data
-        ? (response.data as { accepted?: unknown }).accepted
-        : undefined;
+    const response = await this.send({
+      type: 'prompt',
+      message: text,
+      id: requestId,
+      ...(options?.images && options.images.length > 0 ? { images: options.images } : {}),
+      ...(options?.behavior ? { streamingBehavior: options.behavior } : {}),
+    });
+
+    const data = pickRecord<{ accepted?: unknown; deliveredAs?: unknown }>(response.data);
+    const deliveredAs = typeof data?.deliveredAs === 'string' ? data.deliveredAs : undefined;
+    const accepted = data?.accepted;
+
+    if (deliveredAs === 'queue') {
+      // The dock owns it now. Heals the prediction above: the client's `running`
+      // can lag the host's, in which case an echo was drawn for a queued row.
+      this.pendingSubmissions.delete(requestId);
+      if (!queued) this.update({ transcript: retireEcho(this.snapshot.transcript, requestId) });
+      return response;
+    }
+
     if ((!response.success || accepted === false) && !this.disposed) {
       // The durable message will never come: drop the echo and say why.
       this.pendingSubmissions.delete(requestId);
@@ -516,14 +524,23 @@ export class PiSessionClient {
     return response;
   };
 
-  abort = async (): Promise<void> => {
-    await this.send({ type: 'abort' });
+  /**
+   * One dock-row action — dsh's `session.updateQueue`.
+   *
+   * `steer` moves the row into the running turn; `remove` and `edit` are local
+   * to the host's wait list. A failed action leaves the row where it was, so the
+   * only thing the user has to read is the message.
+   */
+  updateQueue = async (id: string, action: PiQueueAction): Promise<PiRpcResponse> => {
+    const response = await this.send({ type: 'update_queue', id, action });
+    if (!response.success && !this.disposed) {
+      this.pushNotification('error', '排队消息操作失败', response.error);
+    }
+    return response;
   };
 
-  clearQueue = async (): Promise<{ steering: string[]; followUp: string[] }> => {
-    const response = await this.send({ type: 'clear_queue' });
-    const data = pickRecord<{ steering?: string[]; followUp?: string[] }>(response.data);
-    return { steering: data?.steering ?? [], followUp: data?.followUp ?? [] };
+  abort = async (): Promise<void> => {
+    await this.send({ type: 'abort' });
   };
 
   compact = async (): Promise<void> => {

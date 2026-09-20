@@ -8,7 +8,7 @@
  * Both are pure: they return a new state and never mutate the input.
  */
 
-import type { PiAgentMessage, PiEvent, PiImage, PiModelCost } from './protocol';
+import type { PiAgentMessage, PiEvent, PiImage, PiModelCost, PiQueuedPrompt } from './protocol';
 
 /* -------------------------------------------------------------------- usage */
 
@@ -161,6 +161,12 @@ export interface RetryInfo {
 export interface QueuedMessages {
   steering: string[];
   followUp: string[];
+  /**
+   * The host's wait list — messages accepted while a turn was running, drained
+   * one per settled turn. Distinct from pi's own two queues above: these carry
+   * an id, so the dock can steer, edit or drop a single row.
+   */
+  pending: PiQueuedPrompt[];
 }
 
 /**
@@ -227,7 +233,7 @@ export function createTranscript(): TranscriptState {
     running: false,
     compacting: false,
     retrying: null,
-    queued: { steering: [], followUp: [] },
+    queued: { steering: [], followUp: [], pending: [] },
     lastError: null,
     title: null,
     turnSeq: 0,

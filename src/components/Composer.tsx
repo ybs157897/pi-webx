@@ -2,7 +2,7 @@ import { ActionIcon, Flexbox, Text, Tooltip } from '@lobehub/ui';
 import { ChatInputAreaInner } from '@lobehub/ui/chat';
 import { Tag, theme } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
-import { Eraser, ImagePlus } from 'lucide-react';
+import { ImagePlus } from 'lucide-react';
 import type { ClipboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -89,6 +89,14 @@ export function Composer({
   const [notice, setNotice] = useState<string | null>(null);
   const inputRef = useRef<TextAreaRef | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
+  /**
+   * Whether the Enter being handled carried Cmd/Ctrl.
+   *
+   * LobeHub's textarea calls `onPressEnter` and then `onSend` in the same
+   * handler with no way to hand the modifier across, so it is parked in a ref:
+   * the press lands first, the send reads it, and the next press rewrites it.
+   */
+  const chord = useRef(false);
 
   const running = api.transcript.running;
   const canSend = !disabled && text.trim().length > 0;
@@ -148,21 +156,41 @@ export function Composer({
     [addFiles],
   );
 
-  const submit = useCallback(async () => {    const value = text.trim();
-    if (value.length === 0 || disabled) return;
-    // While a turn is running pi rejects a bare prompt; steer instead so the
-    // message lands right after the current tool calls.
-    const response = await api.prompt(value, {
-      ...(images.length > 0 ? { images } : {}),
-      ...(running ? { behavior: 'steer' as const } : {}),
-    });
-    if (!response.success) {
-      flash(response.error ?? '发送失败');
-      return;
+  /**
+   * Submit the draft.
+   *
+   * `steer` is the Cmd/Ctrl+Enter chord — dsh's "insert this into the running
+   * turn" gesture. Plain Enter and the send button do not decide: they hand the
+   * message to the host, which queues it while a turn is running (the dock's
+   * rows) and starts a turn otherwise. That is dsh's `busyEnter` default, and it
+   * is why this side no longer has to guess whether pi is busy.
+   */
+  const submit = useCallback(
+    async (steer: boolean) => {
+      const value = text.trim();
+      if (value.length === 0 || disabled) return;
+      const response = await api.prompt(value, {
+        ...(images.length > 0 ? { images } : {}),
+        ...(steer ? { behavior: 'steer' as const } : {}),
+      });
+      if (!response.success) {
+        flash(response.error ?? '发送失败');
+        return;
+      }
+      setText('');
+      setImages([]);
+    },
+    [api, disabled, flash, images, text],
+  );
+
+  /** dsh's chord fallback: an empty draft + queued rows steers the whole dock. */
+  const steerAllQueued = useCallback(async () => {
+    for (const row of api.transcript.queued.pending) {
+      await api.updateQueue(row.id, { kind: 'steer' });
     }
-    setText('');
-    setImages([]);
-  }, [api, disabled, flash, images, running, text]);
+  }, [api]);
+
+  const queued = api.transcript.queued.pending;
 
   /**
    * Picker inputs, layered the way dsh layers its model directory: the shared
@@ -220,9 +248,6 @@ export function Composer({
     [api.piState?.thinkingLevel, catalog, current, currentModel],
   );
 
-  const queued =
-    api.transcript.queued.steering.length + api.transcript.queued.followUp.length;
-
   return (
     <div style={{ flex: 'none', minWidth: 0, padding: '0 20px 16px', maxWidth: 940, margin: '0 auto', width: '100%' }}>
       <div
@@ -268,8 +293,12 @@ export function Composer({
           ref={inputRef}
           value={text}
           onChange={(event) => setText(event.target.value)}
+          onPressEnter={(event) => { chord.current = event.ctrlKey || event.metaKey; }}
           onSend={() => {
-            if (canSend) void submit();
+            const steer = chord.current;
+            chord.current = false;
+            if (canSend) void submit(steer);
+            else if (steer && running && queued.length > 0) void steerAllQueued();
           }}
           onPaste={onPaste}
           disabled={disabled}
@@ -277,7 +306,9 @@ export function Composer({
             disabled
               ? '请先创建一个会话'
               : running
-                ? '执行中 — 回车把消息排队（steer）'
+                ? queued.length > 0
+                  ? '执行中 — Cmd/Ctrl+Enter 插话发送全部排队消息'
+                  : '执行中 — 回车排队，结束后自动发送；Cmd/Ctrl+Enter 立即插话'
                 : '给 pi 派活…回车发送，Shift+回车换行'
           }
           autoSize={{ minRows: 2, maxRows: 14 }}
@@ -322,11 +353,6 @@ export function Composer({
               current={toolPreset}
               onApply={onToolPresetChange}
             />
-            {queued > 0 && (
-              <Tooltip title="清空排队中的消息">
-                <ActionIcon icon={Eraser} size="small" onClick={() => void api.clearQueue()} />
-              </Tooltip>
-            )}
           </Flexbox>
 
           <Flexbox horizontal align="center" gap={6} style={{ minWidth: 0 }}>
@@ -358,7 +384,7 @@ export function Composer({
                 disabled={!running && !canSend}
                 onClick={() => {
                   if (running) void api.abort();
-                  else if (canSend) void submit();
+                  else if (canSend) void submit(false);
                 }}
                 style={{
                   display: 'inline-flex',
@@ -394,21 +420,6 @@ export function Composer({
           event.target.value = '';
         }}
       />
-
-      {queued > 0 && (
-        <Flexbox horizontal align="center" gap={6} paddingBlock={6} wrap="wrap">
-          {api.transcript.queued.steering.map((message, index) => (
-            <Tag key={`steer-${String(index)}`} color="processing" style={{ fontSize: 11 }}>
-              排队：{message.slice(0, 40)}
-            </Tag>
-          ))}
-          {api.transcript.queued.followUp.map((message, index) => (
-            <Tag key={`follow-${String(index)}`} style={{ fontSize: 11 }}>
-              稍后：{message.slice(0, 40)}
-            </Tag>
-          ))}
-        </Flexbox>
-      )}
     </div>
   );
 }

@@ -20,7 +20,8 @@ import { usePiSession, type ConnectionStatus, type PiSessionApi } from './lib/us
 import { Composer } from './components/Composer';
 import { readToolPresetPreference } from './components/ToolPresetSelect';
 import { EmptyState } from './components/EmptyState';
-import { ExtensionDialogs } from './components/Dialogs';
+import { QueueDock } from './components/QueueDock';
+import { QuestionComposer } from './components/QuestionComposer';
 import type { ModelSelection } from './components/ModelPicker';
 import { BranchSelect } from './components/BranchSelect';
 import { WorkspaceSwitcher } from './components/WorkspaceSwitcher';
@@ -451,6 +452,15 @@ function Shell({
   );
 
   /**
+   * The question the agent is waiting on, if any.
+   *
+   * pi blocks the extension on one dialog at a time, so the oldest is always the
+   * actionable one; a later request stays in the session snapshot and surfaces
+   * once this one resolves.
+   */
+  const pendingQuestion = session.dialogs[0] ?? null;
+
+  /**
    * Send path for the composer: with a session attached it is a plain prompt,
    * otherwise the session is created first and the message goes straight to it
    * via `sendTo` — `session.prompt` would still close over the old (null) id
@@ -695,14 +705,16 @@ function Shell({
 
   /**
    * Rendered-component actions (buttons/forms in agent UI) loop back to pi as a
-   * normal message. Steer when a run is already going.
+   * normal message, through the same submission policy as the composer: the
+   * host queues it when a turn is running, starts one when it is not. Steering
+   * is the composer's explicit chord, not a side effect of where the text came
+   * from — a card action must not cut into a turn the user did not aim it at.
    */
   const sendAction = useCallback(
     (action: string) => {
-      const behavior = session.transcript.running ? ('steer' as const) : undefined;
-      void guardedPrompt(action, behavior ? { behavior } : {});
+      void guardedPrompt(action);
     },
-    [guardedPrompt, session.transcript.running],
+    [guardedPrompt],
   );
 
   /* Every hook sits above this guard: the boot-error screen must not change
@@ -907,42 +919,70 @@ function Shell({
           <StatusStrip api={session} />
         </Flexbox>
 
-        <Composer
-          api={composerApi}
-          catalog={catalog}
-          toolPreset={sessionToolPreset}
-          onToolPresetChange={applyToolPreset}
-          /* Nothing to send to yet is not a reason to lock the composer: the
-             first send creates the session (see guardedPrompt). */
-          disabled={false}
-          contextPercent={contextPercent}
-          /* The workspace/branch chips answer a question a blank session still
-             has — where does this run. Once a conversation exists, the workspace
-             is that session's own fact and dsh drops the accessory row too, so
-             the composer below a transcript is just the input and its controls. */
-          contextBar={empty ? (
-            <>
-              <WorkspaceSwitcher
-                cwd={cwd}
-                recent={[...savedWorkspaces, ...(config?.suggestedCwds ?? [])]}
-                {...(config?.home === undefined ? {} : { home: config.home })}
-                onPick={(path) => {
-                  pickWorkspace(path);
-                  setCwd(path);
-                  setSessionId(null);
-                }}
-                onBrowse={browseWorkspace}
-              />
-              {cwd.length > 0 && (
-                <BranchSelect
+        {/* The dock hangs above the composer card, outside the box the question
+            replaces: a message queued behind a running turn must stay visible
+            and steerable while the agent is also waiting on an answer. */}
+        <div style={{ flex: 'none', minWidth: 0, padding: '0 20px', maxWidth: 940, margin: '0 auto', width: '100%' }}>
+          <QueueDock
+            items={session.transcript.queued.pending}
+            running={session.transcript.running}
+            onSteer={(id) => session.updateQueue(id, { kind: 'steer' }).then(() => undefined)}
+            onEdit={(id, next) => session.updateQueue(id, { kind: 'edit', text: next }).then(() => undefined)}
+            onRemove={(id) => session.updateQueue(id, { kind: 'remove' }).then(() => undefined)}
+          />
+        </div>
+
+        {/* The question takes the composer's seat — dsh's `conversation.composer`
+            chain, where an elected entry overlays the bar. The bar itself stays
+            mounted behind `display: none` rather than unmounting: a draft being
+            written when the agent asks something has to survive the question. */}
+        <div style={{ display: pendingQuestion === null ? 'contents' : 'none' }}>
+          <Composer
+            api={composerApi}
+            catalog={catalog}
+            toolPreset={sessionToolPreset}
+            onToolPresetChange={applyToolPreset}
+            /* Nothing to send to yet is not a reason to lock the composer: the
+               first send creates the session (see guardedPrompt). */
+            disabled={false}
+            contextPercent={contextPercent}
+            /* The workspace/branch chips answer a question a blank session still
+               has — where does this run. Once a conversation exists, the workspace
+               is that session's own fact and dsh drops the accessory row too, so
+               the composer below a transcript is just the input and its controls. */
+            contextBar={empty ? (
+              <>
+                <WorkspaceSwitcher
                   cwd={cwd}
-                  running={session.transcript.running}
-                  onError={(message) => { session.notify('error', '切换分支失败', message); }}
+                  recent={[...savedWorkspaces, ...(config?.suggestedCwds ?? [])]}
+                  {...(config?.home === undefined ? {} : { home: config.home })}
+                  onPick={(path) => {
+                    pickWorkspace(path);
+                    setCwd(path);
+                    setSessionId(null);
+                  }}
+                  onBrowse={browseWorkspace}
                 />
-              )}
-            </>
-          ) : undefined}
-        />
+                {cwd.length > 0 && (
+                  <BranchSelect
+                    cwd={cwd}
+                    running={session.transcript.running}
+                    onError={(message) => { session.notify('error', '切换分支失败', message); }}
+                  />
+                )}
+              </>
+            ) : undefined}
+          />
+        </div>
+        {pendingQuestion !== null && (
+          <QuestionComposer
+            /* Keyed to the request: the surface must not carry a previous
+               question's text into the next one. */
+            key={pendingQuestion.request.id}
+            dialog={pendingQuestion}
+            onRespond={(body) => void session.respondToDialog(pendingQuestion.request.id, body)}
+          />
+        )}
         <Flexbox paddingInline={20} style={{ maxWidth: 940, margin: '0 auto', width: '100%' }}>
           <WidgetStrip widgets={session.widgets} placement="belowEditor" />
         </Flexbox>
@@ -995,11 +1035,6 @@ function Shell({
             render: () => <UiShowcase onAction={sendAction} themeMode={themeMode} />,
           },
         ]}
-      />
-
-      <ExtensionDialogs
-        dialogs={session.dialogs}
-        onRespond={(id, body) => void session.respondToDialog(id, body)}
       />
 
       <NotificationStack

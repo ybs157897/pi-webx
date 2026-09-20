@@ -36,6 +36,23 @@ export interface PiImage {
   mimeType: string;
 }
 
+/**
+ * A message the user submitted while a turn was already running: dsh's queue
+ * item, held on the host until the turn settles.
+ *
+ * pi's own `steer`/`followUp` queues only ever carry strings and cannot be
+ * addressed item by item, so the wait list is the bridge's own — which is what
+ * makes the dock's per-row actions (插话发送 / 编辑 / 删除) possible. The id
+ * travels with the projection because every action names the row it acts on.
+ */
+export interface PiQueuedPrompt {
+  id: string;
+  text: string;
+  /** Images stay on the host; the dock only has to say how many there are. */
+  imageCount: number;
+  createdAt: number;
+}
+
 export interface PiModelCost {
   input: number;
   output: number;
@@ -232,7 +249,7 @@ export type PiEvent =
       args?: Record<string, unknown>;
     }
   | { type: 'bash_execution_update'; id?: string; delta: string }
-  | { type: 'queue_update'; steering?: string[]; followUp?: string[] }
+  | { type: 'queue_update'; steering?: string[]; followUp?: string[]; pending?: PiQueuedPrompt[] }
   | { type: 'compaction_start'; reason?: string }
   | {
       type: 'compaction_end';
@@ -325,15 +342,34 @@ export interface PiExtensionUiRequest {
 
 /* -------------------------------------------------------------------- commands */
 
+/**
+ * What a dock row's action asks for, i.e. dsh's `session.updateQueue`.
+ *
+ * `steer` moves the row out of the wait list and into the running turn (pi's
+ * `steer`, delivered after the current assistant turn's tool calls); `remove`
+ * and `edit` never touch pi. Nothing here discards the other rows.
+ */
+export type PiQueueAction =
+  | { kind: 'steer' }
+  | { kind: 'remove' }
+  | { kind: 'edit'; text: string };
+
 export type PiCommand =
   | {
       type: 'prompt';
       message: string;
       images?: PiImage[];
+      /**
+       * Omitted means "let the host decide": a busy session queues the message
+       * (dsh's busy-Enter default), an idle one starts a turn. `steer` is the
+       * explicit 插话 path (Cmd/Ctrl+Enter); `followUp` hands the message to
+       * pi's own follow-up queue instead of this dock.
+       */
       streamingBehavior?: 'steer' | 'followUp';
     }
   | { type: 'steer'; message: string; images?: PiImage[] }
   | { type: 'follow_up'; message: string; images?: PiImage[] }
+  | { type: 'update_queue'; id: string; action: PiQueueAction }
   | { type: 'abort' }
   | { type: 'clear_queue' }
   | { type: 'new_session'; parentSession?: string }

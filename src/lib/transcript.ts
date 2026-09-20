@@ -28,7 +28,7 @@
  * exception would take the UI down with it.
  */
 
-import type { PiAgentMessage, PiEvent, PiImage, PiToolCallBlock } from '../shared/protocol';
+import type { PiAgentMessage, PiEvent, PiImage, PiQueuedPrompt, PiToolCallBlock } from '../shared/protocol';
 import type {
   AddEcho,
   ApplyPiEvent,
@@ -1274,13 +1274,32 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
     }
 
     case 'queue_update': {
-      const steering = Array.isArray(event.steering)
-        ? event.steering.filter((item): item is string => typeof item === 'string')
-        : [];
-      const followUp = Array.isArray(event.followUp)
-        ? event.followUp.filter((item): item is string => typeof item === 'string')
-        : [];
-      return { ...state, queued: { steering, followUp } };
+      const strings = (value: unknown): string[] =>
+        Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+      return {
+        ...state,
+        queued: {
+          // pi always emits both of its own arrays together, so a frame settles
+          // them outright: an empty array means an empty queue.
+          steering: strings(event.steering),
+          followUp: strings(event.followUp),
+          /**
+           * The wait list is the bridge's, not pi's, so pi's own frames say
+           * nothing about it — and a frame that says nothing must not erase it.
+           * An absent `pending` means "unchanged"; the host's frames always
+           * carry the list.
+           */
+          pending: Array.isArray(event.pending)
+            ? event.pending.filter(
+                (item): item is PiQueuedPrompt =>
+                  typeof item === 'object' &&
+                  item !== null &&
+                  typeof (item as PiQueuedPrompt).id === 'string' &&
+                  typeof (item as PiQueuedPrompt).text === 'string',
+              )
+            : state.queued.pending,
+        },
+      };
     }
 
     case 'compaction_start': {

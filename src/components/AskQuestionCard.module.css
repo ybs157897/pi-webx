@@ -1,0 +1,76 @@
+/*
+ * dsh's `AskQuestionCard.module.css`, same tokens and geometry: a bordered
+ * panel indented under the tool row, the question in the tertiary label colour
+ * and the answer in the primary one.
+ *
+ * The font sizes are literal rather than `var(--dsh-content-font-size, 14px)`:
+ * this app does not carry the design platform's content-font scale, and 14/24px
+ * is the value that variable falls back to upstream.
+ */
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-height: 360px;
+  margin: 4px 0 4px 4px;
+  padding: 16px 20px;
+  overflow-y: auto;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-alias-bg-base);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.question,
+.answer {
+  margin: 0;
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.question {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.answer {
+  color: var(--dsw-alias-label-primary);
+}
+
+.answerLine {
+  display: block;
+}
+
+.skipped {
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.verdict {
+  margin: 0;
+  color: var(--dsw-alias-label-primary);
+  font-size: 14px;
+  line-height: 24px;
+}
+
+.questionList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 20px;
+}
+
+.unansweredQuestion {
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 24px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
