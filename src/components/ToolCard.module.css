@@ -95,3 +95,17 @@
   margin: 4px 0 4px 4px;
   border: 0.5px solid var(--dsw-alias-border-l1);
 }
+
+/*
+ * The row's separator, taken from dsh's `.sep` (figma 122:9479): a 2x2 dot in
+ * the caption colour, not a `·` glyph. The dot's own 2px each side complete the
+ * reference's 8px, since the row's flex gap is 6.
+ */
+.sep {
+  flex: none;
+  width: 2px;
+  height: 2px;
+  border-radius: 1px;
+  margin: 0 2px;
+  background: var(--dsw-alias-label-caption);
+}

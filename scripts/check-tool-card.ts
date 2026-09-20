@@ -85,10 +85,13 @@ assert.match(bash, /class="command">seq 1 40</, '命令要画在终端卡的提�
 assert.ok(!bash.includes('参数'), `bash 卡不该有「参数」区块：${bash.slice(0, 200)}`);
 assert.ok(!bash.includes('class="section"'), 'bash 卡不该再走通用 section 形状');
 
-// 行标题是 dsh 的 titleKey（`Bash`），不是 pi 的小写工具 id；摘要仍是命令本身，
-// 因为 pi 的 bash 没有 description 可放（参考实现同样退化成命令）。
-assert.match(textOf(bash), /Bash·seq 1 40/, '行摘要要读作「Bash · 命令」');
-assert.ok(!textOf(bash).includes('bash·'), '行里不该再出现小写的 bash 标题');
+// 行是 dsh 的行几何（figma 122:9479）：标题（secondary、body 字体）+ 2x2 圆点分隔符
+// + 摘要（tertiary、填充截断）。标题是 dsh 的 titleKey（`Bash`），不是 pi 的小写 id；
+// 摘要仍是命令本身，因为 pi 的 bash 没有 description 可放（参考实现同样退化成命令）。
+assert.match(bash, /color:var\(--dsw-alias-label-secondary\)[^>]*>Bash</, '行标题用 secondary 色');
+assert.match(bash, /class="sep" aria-hidden="true"><\/span>/, '分隔符是 dsh 的 2x2 圆点，不是 `·` 字符');
+assert.match(bash, /color:var\(--dsw-alias-label-tertiary\)[^>]*>seq 1 40</, '摘要用 tertiary 色');
+assert.ok(!textOf(bash).includes('·'), '行里不该再有 `·` 字符');
 
 // 工作目录是会话的，不是调用的：pi 的 bash 永远在会话目录里跑、参数里没有 workdir。
 // 提示标签取路径最后一段。没有会话目录时退回裸 `$`，不编一个出来。
@@ -131,6 +134,16 @@ const failedBash = render(
 assert.match(failedBash, /class="pill status">退出码 1</, '失败退出码要成为卡上的 pill');
 assert.ok(!textOf(failedBash).includes('Command exited with code'), 'pi 的状态行不该被画成输出');
 assert.ok(textOf(failedBash).includes('boom'), '命令自己的输出要留下');
+
+// 失败行的摘要被失败首行**替换**（dsh 的 `failureLine ?? summary`）并染成错误色：没落地的
+// 一次调用只有一句话要说，而它请求执行的命令在展开体里本来就有。
+const failedRow = failedBash.slice(0, failedBash.indexOf('<div class="block'));
+assert.match(
+  failedRow,
+  /color:var\(--dsw-alias-state-error-primary\)[^>]*>boom</,
+  '失败行的摘要换成失败首行、且是错误色',
+);
+assert.ok(!failedRow.includes('exit 1'), '失败行不再显示命令（命令在卡里，行只说哪里坏了）');
 
 // `bashExecution`（pi 自己那条直连 shell，由快照回放）把退出码当字段带，不在文本里；
 // 转写把它放在 run 的 `details` 上，那里报的码优先于文本解析。
@@ -227,6 +240,14 @@ const bareRule = /\.bare\s*\{([^}]*)\}/.exec(css);
 assert.ok(bareRule, 'ToolCard.module.css 里要有 .bare 规则（不带 caption 的区块）');
 assert.match(bareRule[1]!, /max-height:\s*150px/, '.bare 与 .section 同一高度上限');
 assert.match(bareRule[1]!, /overflow-y:\s*auto/, '.bare 也要自己滚动');
+
+// 分隔符是 dsh 的 2x2 圆点（`.sep`），不是 `·` 字符；点自带 2px，因为行 gap 是 6。
+const sepRule = /\.sep\s*\{([^}]*)\}/.exec(css);
+assert.ok(sepRule, 'ToolCard.module.css 里要有 .sep 规则');
+assert.match(sepRule[1]!, /width:\s*2px/, '分隔符是 2px 宽的圆点（dsh .sep）');
+assert.match(sepRule[1]!, /height:\s*2px/, '分隔符是 2x2');
+assert.match(sepRule[1]!, /border-radius:\s*1px/, '圆点要圆');
+assert.match(sepRule[1]!, /margin:\s*0 2px/, '圆点自带 2px（行 gap 6 + 2 = dsh 的 8）');
 
 /**
  * 终端卡的高度上限同样是样式契约：参考实现把上限加在**输出区**（对话行里是
@@ -371,6 +392,6 @@ assert.ok(
 assert.ok(!failedEdit.includes('变更'), '失败的 edit 不该把没落地的改动画成变更');
 
 console.log(
-  'PASS 工具卡：bash 走终端卡（Bash · 命令、cwd 徽标、命令带 $/输出不带、退出码 pill、ANSI 上色、输出区 224px 自滚），'
-  + 'read/write/edit 只渲染结果、结果区不带 caption 且仍是 150px 独立滚动容器，摘要里没有的仍显示参数',
+  'PASS 工具卡：bash 走终端卡（dsh 行几何「标题·圆点·摘要」、cwd 徽标、命令带 $/输出不带、退出码 pill、ANSI 上色、输出区 224px 自滚），'
+  + 'read/write/edit 只渲染结果、结果区不带 caption 且仍是 150px 独立滚动容器，失败行摘要换成失败首行，摘要里没有的仍显示参数',
 );

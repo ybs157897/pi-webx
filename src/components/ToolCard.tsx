@@ -77,6 +77,12 @@ function str(value: unknown): string | null {
   return typeof value === 'string' ? value : null;
 }
 
+/** Everything before the first newline, or the whole string (dsh's `firstLine`). */
+function firstLine(text: string): string {
+  const newline = text.indexOf('\n');
+  return newline === -1 ? text : text.slice(0, newline);
+}
+
 interface Fragment {
   oldText: string;
   newText: string;
@@ -260,7 +266,6 @@ export const RESULT_ONLY_TOOLS: ReadonlySet<string> = new Set([
 ]);
 
 export function ToolCard({ run }: { run: ToolRun }) {
-  const { token } = theme.useToken();
   const [manual, setManual] = useState<boolean | null>(null);
   const [hovered, setHovered] = useState(false);
   const cwd = useSessionCwd();
@@ -272,6 +277,13 @@ export function ToolCard({ run }: { run: ToolRun }) {
   const open = manual ?? (run.status === 'running' || run.status === 'error');
   const summary = summarizeToolCall(run.toolName, run.args);
   const failed = run.status === 'error';
+  // A failure REPLACES the summary rather than supplementing it — dsh's
+  // collapsed line is `failureLine ?? summary`. A call that did not land has one
+  // thing to say in one line, and the command or path it was asked to run is
+  // restated in the expanded body anyway. A failure that carries no result text
+  // keeps the ordinary summary, so the row never degrades to a bare title.
+  const failureLine = failed ? firstLine(run.output) : '';
+  const summaryText = failureLine !== '' ? failureLine : summary;
 
   // A tool whose arguments the row summary already spells out shows only its
   // result when expanded. dsh draws its single-file tools this way — the row is
@@ -312,35 +324,35 @@ export function ToolCard({ run }: { run: ToolRun }) {
             mark, and nothing trails the summary either: dsh's row is one line of
             glyph · title · summary, with the numbers left to the expanded body. */}
         <LeadingGlyph icon={leadingGlyph(run.status, run.toolName)} swap={hovered || open} />
-        <Text fontSize={13} style={{ fontFamily: token.fontFamilyCode, flexShrink: 0 }}>
+        {/* dsh's row is one line of [16 leading] gap 6 [title 13/24] gap 8
+            [2x2 dot] gap 8 [summary filling and truncated] (figma 122:9479). The
+            title and the summary are chrome, not code: they keep the body font
+            and the label colours, and the code font stays in the payload. */}
+        <Text fontSize={13} style={{ color: 'var(--dsw-alias-label-secondary)', flexShrink: 0 }}>
           {title}
         </Text>
-        {summary.length > 0 && (
+        {summaryText.length > 0 && (
           <>
-            <Text fontSize={13} type="secondary" style={{ flexShrink: 0, opacity: 0.45 }}>
-              ·
-            </Text>
+            {/* The dot carries 2px of its own on each side because the row's flex
+                gap is 6 and dsh's separator sits at 8. */}
+            <span className={css.sep} aria-hidden />
             <Text
               fontSize={13}
-              type="secondary"
               ellipsis
               style={{
-                fontFamily: token.fontFamilyCode,
+                // dsh paints the failure line in the error colour
+                // (`.errorSummary`); with no trailing status mark left, that
+                // colour is what says "this one broke".
+                color: failed ? 'var(--dsw-alias-state-error-primary)' : 'var(--dsw-alias-label-tertiary)',
                 flex: 1,
                 minWidth: 0,
-                // dsh paints a failed row's summary in the error colour
-                // (`.errorSummary`); with no trailing status mark left, that
-                // colour is what says "this one broke". It has to be inline: the
-                // secondary colour arrives as a generated class of equal
-                // specificity that lands later in the sheet.
-                ...(failed ? { color: 'var(--dsw-alias-state-error-primary)' } : {}),
               }}
             >
-              {summary}
+              {summaryText}
             </Text>
           </>
         )}
-        {summary.length === 0 && <div style={{ flex: 1 }} />}
+        {summaryText.length === 0 && <div style={{ flex: 1 }} />}
       </Flexbox>
 
       {/* The expanded terminal card: the command banner and its output on one
