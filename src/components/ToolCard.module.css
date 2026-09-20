@@ -33,6 +33,16 @@
 }
 
 /*
+ * An uncaptioned section: the same 150px cap and its own scrollport, with no
+ * gutter. The result is drawn this way — a caption there restated what the
+ * card's own shape already said, and charged a column to do it.
+ */
+.bare {
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+/*
  * Sticky against the section's own scrollport, so the caption stays readable
  * while its payload scrolls underneath (`align-self: start` because sticky needs
  * a block-start anchor inside its grid area). No background is needed: the
@@ -56,13 +66,15 @@
  * it floats inside the rounded card edge instead of hugging it, and the track
  * keeps end-margins out of the corners — both taken from the same dsh rule.
  */
-.section::-webkit-scrollbar-thumb {
+.section::-webkit-scrollbar-thumb,
+.bare::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   background-clip: padding-box;
   border-radius: 6px;
 }
 
-.section::-webkit-scrollbar-track {
+.section::-webkit-scrollbar-track,
+.bare::-webkit-scrollbar-track {
   margin: 6px 0;
 }
 

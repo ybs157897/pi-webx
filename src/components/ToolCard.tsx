@@ -200,21 +200,31 @@ function leadingGlyph(status: ToolRun['status'], toolName: string): ReactNode {
  * The caption used to sit above the payload, outside the scrollport. That also
  * kept it visible, but it charged a line per section and did not match the
  * reference's geometry.
+ *
+ * An uncaptioned block (`label === null`) is the same payload under the same
+ * 150px cap, with no gutter at all. The result uses it: `输出` named the one
+ * block the card's own shape already implies, and the gutter it charged read as
+ * a stray word beside the content — the reference's gutter exists to separate an
+ * IN from an OUT, and there is no IN here to separate it from.
  */
 function Section({
   label,
   children,
   scroll = true,
 }: {
-  label: string;
+  /** Caption for the left gutter, or null for a block that runs full width. */
+  label: string | null;
   children: ReactNode;
   /**
    * A diff or a set of thumbnails opts out of the cap: those are the result
    * itself, read or looked at directly, and dsh draws them as their own card
-   * rather than as an IN/OUT section. The caption gutter still applies.
+   * rather than as an IN/OUT section.
    */
   scroll?: boolean;
 }) {
+  // The uncaptioned block is the capped scrollport unconditionally: the only
+  // caller is the result, and an uncapped uncaptioned block has no use yet.
+  if (label === null) return <div className={css['bare']}>{children}</div>;
   return (
     <div className={scroll ? css['section'] : css['sectionPlain']}>
       <span className={css['sectionLabel']}>{label}</span>
@@ -383,7 +393,7 @@ export function ToolCard({ run }: { run: ToolRun }) {
               the error that explains it. The failure outranks the attempt —
               dsh's own error row replaces its summary with the failure line. */}
           {run.output.length > 0 && (change === null || failed) && (
-            <Section label="输出">
+            <Section label={null}>
               {/* dsh colours the expanded OUT text of a failed call
                   (`.ioText[data-error]`); the class carries that override,
                   since Shiki writes its palette as inline styles. */}

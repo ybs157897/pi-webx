@@ -99,6 +99,24 @@ const withCwd = renderWithCwd(
 assert.match(withCwd, /class="cwd">pi-webx</, 'cwd 徽标要取会话目录的最后一段');
 assert.match(bash, /class="cwd">\$</, '没有会话目录时提示符退回裸 $');
 
+// 输入带 `$`、输出不带 —— 参考实现的口径：命令的**首行**挂工作目录标签，续行挂 `$`，
+// 输出行一个都不挂。所以单行命令看不到 `$` 不是缺失，是首行让给了 cwd。
+const multiLine = renderWithCwd(
+  run({ toolName: 'bash', args: { command: 'set -e\nseq 1 3\necho done' }, output: '1\n2\n3\ndone' }),
+  '/w/pi-webx',
+);
+assert.deepEqual(
+  [...multiLine.matchAll(/class="cwd">([^<]*)<\/span><span class="command">([^<]*)</g)]
+    .map((m) => `${m[1]!} ${m[2]!}`),
+  ['pi-webx set -e', '$ seq 1 3', '$ echo done'],
+  '命令首行挂工作目录、续行挂 $（dsh TerminalBlock 的口径）',
+);
+assert.deepEqual(
+  [...multiLine.matchAll(/class="line">([^<]*)</g)].map((m) => m[1]!),
+  ['1', '2', '3', 'done'],
+  '输出行不带 $',
+);
+
 // pi 把失败的 shell 调用「抛」出来，输出后面附自己的状态行（`Command exited with
 // code N`）。那是 pi 写的界面文案、不是命令印的字，所以它变成卡上的退出码 pill，
 // 不再被画成输出的一部分。
@@ -165,11 +183,14 @@ assert.match(
 );
 assert.ok(!ansi.includes('\u001b'), '输出里不该留裸的转义字节');
 
-// A file read: the path is the row summary, so no 「参数」 JSON block either.
+// A file read: the path is the row summary, so no 「参数」 JSON block, and the
+// result itself carries no caption — `输出` named the one block the card's shape
+// already implies, and charged a left column to say it.
 const read = render(
   run({ toolName: 'read', args: { path: '/tmp/example.ts' }, output: longOutput }),
 );
-assert.ok(read.includes('输出'), 'read 卡要有输出区');
+assert.ok(read.includes('class="bare"'), 'read 的结果区走无标签的 bare 区块');
+assert.ok(!read.includes('输出'), `read 卡不该再挂「输出」左栏标签：${read.slice(0, 200)}`);
 assert.ok(!read.includes('参数'), 'read 卡不该再渲染「参数」区块');
 
 // A tool whose arguments are NOT in the summary keeps its args block.
@@ -200,6 +221,12 @@ assert.match(label[1]!, /top:\s*0/, '.sectionLabel 粘在滚动容器的顶边')
 const grid = /\.section,\s*\n?\.sectionPlain\s*\{([^}]*)\}/.exec(css);
 assert.ok(grid, '两个 section 变体要共用一套几何');
 assert.match(grid[1]!, /grid-template-columns:\s*max-content\s+1fr/, 'caption 左栏 + payload 右栏');
+
+// 无标签区块：同样的 150px 上限与自己的滚动条，但没有 caption 栏——结果区用它。
+const bareRule = /\.bare\s*\{([^}]*)\}/.exec(css);
+assert.ok(bareRule, 'ToolCard.module.css 里要有 .bare 规则（不带 caption 的区块）');
+assert.match(bareRule[1]!, /max-height:\s*150px/, '.bare 与 .section 同一高度上限');
+assert.match(bareRule[1]!, /overflow-y:\s*auto/, '.bare 也要自己滚动');
 
 /**
  * 终端卡的高度上限同样是样式契约：参考实现把上限加在**输出区**（对话行里是
@@ -250,18 +277,22 @@ const withImages = render(
   }),
 );
 assert.ok(withImages.includes('图片'), '工具返回的图要有自己的区块');
-assert.ok(withImages.includes('输出'), '同一张卡仍有输出区');
 assert.match(
   withImages,
   /<img[^>]+src="data:image\/png;base64,AAAA"/,
   '服务端渲染时缩略图走内联回退（摘要还没算出来），不能是裂图',
 );
-// 图片区块用 sectionPlain：数一下带滚动上限的那个 class 出现几次，
-// 只该有「输出」那一个（sectionLabel / sectionBody / sectionPlain 都不该被误计）。
+// 图片区块走不封顶的 sectionPlain，输出走封顶的 bare：所以带 caption 的 .section
+// 在这张卡里一个都没有（正则带引号，不会误匹配 sectionPlain）。
 assert.equal(
   (withImages.match(/class="section"/g) ?? []).length,
+  0,
+  '输出区已不带 caption，图片区块走 sectionPlain',
+);
+assert.equal(
+  (withImages.match(/class="bare"/g) ?? []).length,
   1,
-  '只有输出区该被 150px 滚动容器包住，图片区块走 sectionPlain',
+  '只有输出区该被 150px 滚动容器包住',
 );
 assert.ok(
   withImages.includes('sectionPlain'),
@@ -300,10 +331,11 @@ for (const name of RESULT_ONLY_TOOLS) {
     // 「只显示结果」在这条路径上的形态是终端卡：命令在提示行，结果就是卡身。
     assert.ok(markup.includes('data-terminal'), `${name} 卡要走终端卡`);
   } else {
-    // 写文件类的结果是那份变更，其它是输出区。
+    // 写文件类的结果是那份变更（带「变更」标签）；其余是结果区块——它已不带 caption，
+    // 所以这里断言区块本身渲染出来，而不是找一个标签词。
     assert.ok(
-      textOf(markup).includes('变更') || textOf(markup).includes('输出'),
-      `${name} 卡要显示结果（变更或输出）`,
+      textOf(markup).includes('变更') || markup.includes('class="bare"'),
+      `${name} 卡要显示结果（变更区块或无 caption 的结果区块）`,
     );
   }
 }
@@ -339,6 +371,6 @@ assert.ok(
 assert.ok(!failedEdit.includes('变更'), '失败的 edit 不该把没落地的改动画成变更');
 
 console.log(
-  'PASS 工具卡：bash 走终端卡（Bash · 命令、cwd 徽标、退出码 pill、ANSI 上色、输出区 224px 自滚），'
-  + 'read/write/edit 只渲染结果、section 是 150px 独立滚动容器且 caption sticky，摘要里没有的仍显示参数',
+  'PASS 工具卡：bash 走终端卡（Bash · 命令、cwd 徽标、命令带 $/输出不带、退出码 pill、ANSI 上色、输出区 224px 自滚），'
+  + 'read/write/edit 只渲染结果、结果区不带 caption 且仍是 150px 独立滚动容器，摘要里没有的仍显示参数',
 );
