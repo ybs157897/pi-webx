@@ -20,6 +20,7 @@
     "@lobehub/fluent-emoji": "^4.1.1",
     "@lobehub/icons": "^5.18.0",
     "@lobehub/ui": "^5.47.1",
+    "anser": "^2.3.5",
     "antd": "^6.6.4",
     "antd-style": "^4.1.0",
     "clsx": "^2.1.1",
