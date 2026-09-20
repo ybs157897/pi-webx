@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { api as bridge } from './lib/api';
 import { catalogDefaultSelection, modelCatalogApi } from './lib/modelCatalog';
+import { SessionCwdProvider } from './lib/session-cwd';
 import { loadPrefs, savePrefs } from './lib/storage';
 import { usePiSession, type ConnectionStatus, type PiSessionApi } from './lib/usePiSession';
 import { Composer } from './components/Composer';
@@ -905,12 +906,14 @@ function Shell({
           <Flexbox style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
             {/* Keyed by session: transcript-local UI state (fold expansion)
                 must not leak from one session's turn numbering to another's. */}
-            <TranscriptView
-              key={sessionId ?? 'pending'}
-              transcript={session.transcript}
-              onAction={sendAction}
-              renderStyle={renderStyle}
-            />
+            <SessionCwdProvider cwd={cwd === '' ? null : cwd}>
+              <TranscriptView
+                key={sessionId ?? 'pending'}
+                transcript={session.transcript}
+                onAction={sendAction}
+                renderStyle={renderStyle}
+              />
+            </SessionCwdProvider>
           </Flexbox>
         )}
 

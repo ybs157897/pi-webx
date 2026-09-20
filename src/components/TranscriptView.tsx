@@ -1,4 +1,4 @@
-import { Alert, Flexbox, Highlighter, Icon, Text } from '@lobehub/ui';
+import { Alert, Flexbox, Icon, Text } from '@lobehub/ui';
 import { theme } from 'antd';
 import { ArrowDown, ChevronDown, ChevronRight, Eraser } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -102,27 +102,24 @@ function EntryView({
       return <ToolRunView run={entry.run} />;
 
     case 'bash':
+      // pi's own shell execution, replayed from a session snapshot. The command
+      // now lives in the terminal card's prompt line, so the separate `$ …`
+      // line that used to sit above the card is gone — printing the command
+      // twice is the duplication dsh's bash row exists to avoid. This path has a
+      // real exit code where the tool path has only pi's thrown status text, so
+      // it rides the run's `details` (see terminalCard).
       return (
-        <Flexbox gap={6}>
-          {/* The command line is the one piece of a shell entry that is code, so
-              it is drawn by the same highlighter the markdown blocks use. The
-              card below then reports only what the command produced — its
-              arguments stay empty, so the command is not printed twice (prompt
-              line and card summary) on top of the JSON that wrapped it. */}
-          <Highlighter language="bash" variant="borderless" wrap showLanguage={false}>
-            {`$ ${entry.command}`}
-          </Highlighter>
-          <ToolCard
-            run={{
-              toolCallId: entry.id,
-              toolName: 'bash',
-              args: {},
-              output: entry.output,
-              status: entry.streaming ? 'running' : entry.exitCode === 0 ? 'success' : 'error',
-              startedAt: entry.at,
-            }}
-          />
-        </Flexbox>
+        <ToolCard
+          run={{
+            toolCallId: entry.id,
+            toolName: 'bash',
+            args: { command: entry.command },
+            output: entry.output,
+            details: { exitCode: entry.exitCode },
+            status: entry.streaming ? 'running' : entry.exitCode === 0 ? 'success' : 'error',
+            startedAt: entry.at,
+          }}
+        />
       );
 
     case 'notice':

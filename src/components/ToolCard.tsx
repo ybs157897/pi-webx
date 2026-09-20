@@ -11,6 +11,8 @@ import {
   summarizeToolCall,
   toolOutputLanguage,
 } from '../lib/format';
+import { useSessionCwd } from '../lib/session-cwd';
+import { terminalCard, terminalTitle } from '../lib/terminal-card';
 import {
   IconApiOutline14,
   IconBrowseOutline16,
@@ -20,6 +22,7 @@ import {
   IconSearchOutline16,
   IconSparkle16,
   StateDot,
+  TerminalBlock,
 } from '../ui/primitives/index.ts';
 import { LeadingGlyph } from './LeadingGlyph';
 import { MessageImages } from './MessageImages';
@@ -250,6 +253,7 @@ export function ToolCard({ run }: { run: ToolRun }) {
   const { token } = theme.useToken();
   const [manual, setManual] = useState<boolean | null>(null);
   const [hovered, setHovered] = useState(false);
+  const cwd = useSessionCwd();
 
   // Running and failed calls open themselves; a successful one folds to its
   // header line unless the user has explicitly toggled it. Collapsed means the
@@ -267,6 +271,18 @@ export function ToolCard({ run }: { run: ToolRun }) {
   // carry the path (and, for a mutation, the byte count).
   const resultOnly = RESULT_ONLY_TOOLS.has(run.toolName);
   const change = useMemo(() => changeView(run), [run]);
+
+  // A shell call is dsh's terminal card, not the generic IN/OUT body. Its own
+  // shape is a prompt line — run-state dot, working directory, the command —
+  // with the output under it, so the command belongs in the card rather than
+  // being restated in the row summary AND again as an input section. `null` for
+  // every other tool, which keeps the section stack below.
+  const terminal = useMemo(() => terminalCard(run, cwd), [run, cwd]);
+  // The row's leading word: dsh prints a localized title, so a shell row reads
+  // `Bash · …` where pi's tool id is lowercase. Only the terminal card's tools
+  // are titled here; the generic rows keep pi's own names, since re-titling them
+  // is a separate change with its own reference rows.
+  const title = terminal === null ? run.toolName : terminalTitle(run.toolName);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -287,7 +303,7 @@ export function ToolCard({ run }: { run: ToolRun }) {
             glyph · title · summary, with the numbers left to the expanded body. */}
         <LeadingGlyph icon={leadingGlyph(run.status, run.toolName)} swap={hovered || open} />
         <Text fontSize={13} style={{ fontFamily: token.fontFamilyCode, flexShrink: 0 }}>
-          {run.toolName}
+          {title}
         </Text>
         {summary.length > 0 && (
           <>
@@ -317,7 +333,24 @@ export function ToolCard({ run }: { run: ToolRun }) {
         {summary.length === 0 && <div style={{ flex: 1 }} />}
       </Flexbox>
 
-      {open && (
+      {/* The expanded terminal card: the command banner and its output on one
+          surface, the output capped so a long log scrolls inside the card rather
+          than pushing the transcript down. The line cap is off
+          (`maxLines={Infinity}`) because the cap here IS the scrollport, exactly
+          as in dsh's bash row. */}
+      {open && terminal !== null && (
+        <TerminalBlock
+          command={terminal.command}
+          cwd={terminal.cwd}
+          output={terminal.output}
+          exitCode={terminal.exitCode}
+          running={terminal.running}
+          maxLines={Infinity}
+          className={css.terminal}
+        />
+      )}
+
+      {open && terminal === null && (
         <Flexbox
           gap={8}
           // dsh indents the expanded body under the row and boxes only the
