@@ -28,6 +28,7 @@
  * exception would take the UI down with it.
  */
 
+import { IMAGE_LIMITS } from '../shared/attachments';
 import type { PiAgentMessage, PiEvent, PiImage, PiQueuedPrompt, PiToolCallBlock } from '../shared/protocol';
 import type {
   AddEcho,
@@ -150,9 +151,9 @@ function contentImageCount(content: unknown): number {
 /** Media types the transcript will render; anything else is left alone. */
 const RENDERABLE_IMAGE = /^image\/(png|jpeg|webp|gif)$/;
 /** Ceiling on one embedded image, so a hostile payload cannot wedge the view. */
-const MAX_IMAGE_CHARS = 8_000_000;
-/** A turn rarely needs more than a few; more is payload, not evidence. */
-const MAX_IMAGES = 4;
+const MAX_IMAGE_CHARS = Math.ceil(IMAGE_LIMITS.maxImageBytes / 3) * 4;
+/** History must retain every image accepted by the composer and host. */
+const MAX_IMAGES = IMAGE_LIMITS.maxImagesPerMessage;
 
 /**
  * The image blocks of a message, normalised to `PiImage`.

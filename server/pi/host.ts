@@ -1028,6 +1028,9 @@ export class PiHost {
     switch (command.type) {
       case 'prompt': {
         if (hosted.preparing) return fail(command.type, '正在准备上一轮，请稍后再发送。');
+        if (command.images?.length && !session.model?.input.includes('image')) {
+          return fail(command.type, '当前模型未启用图片输入，请在模型设置中启用或选择支持图片的模型。');
+        }
         /**
          * 投递方式由**服务端自己的运行状态**决定，不用客户端的「正在执行」。
          *

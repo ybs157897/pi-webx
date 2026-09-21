@@ -279,6 +279,9 @@ export async function prepareIncomingImages(
   let total = 0;
   for (const image of list) {
     const raw = Buffer.from(image.data, 'base64');
+    if (raw.length === 0 || raw.toString('base64') !== image.data) {
+      throw new AttachmentError('图片数据不完整，请重新添加。', 'INVALID_IMAGE');
+    }
     total += raw.byteLength;
     if (total > limits.maxMessageImageBytes) {
       throw new AttachmentError('这条消息的图片总量超过上限。', 'IMAGE_TOO_LARGE');

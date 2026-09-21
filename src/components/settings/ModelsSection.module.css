@@ -799,17 +799,33 @@ select.input {
 /* ---------------------------------------------------- model editor modal */
 
 .modelModal {
-  width: 640px;
+  width: min(672px, 100%);
+  max-height: calc(100dvh - 64px);
+  gap: 0;
+  padding: 20px 18px 24px;
+  border-radius: 16px;
 }
 
+.modelModalHeader { flex: none; padding: 0 0 20px; }
+.modelModalTitleRow { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+.modelModalTitleRow h2 { margin: 0; font-size: 14px; line-height: 24px; font-weight: 600; }
+.modalClose { display: grid; place-items: center; width: 24px; height: 24px; border: 0; background: transparent; color: var(--dsw-alias-label-secondary); cursor: pointer; border-radius: 6px; }
+.modalClose:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .modelModalBody {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  max-height: 60vh;
+  gap: 20px;
+  min-height: 0;
   overflow-y: auto;
-  padding-right: 4px;
+  padding-right: 12px;
+  margin-right: -12px;
+  scrollbar-gutter: stable;
 }
+.modelModalFooter { flex: none; display: flex; gap: 8px; align-items: center; padding-top: 24px; }
+.modelModalFooter button { border-radius: 8px; height: 32px; }
+.modelModalFooter .modalSave { background: var(--pi-settings-brand); color: var(--pi-settings-brand-fg); }
+.modelModalFooter .linkButton { text-decoration: underline; text-underline-offset: 4px; padding: 0; }
+.modelModal :is(button, input, textarea, select, summary):focus-visible { outline: 2px solid var(--dsw-alias-brand-primary); outline-offset: 2px; }
 
 .modalSwitchRow {
   display: flex;
@@ -860,17 +876,21 @@ select.input {
   color: var(--dsw-alias-label-tertiary);
 }
 
-.modalAdvanced {
-  border-top: 0.5px solid var(--dsw-alias-border-l3);
-  padding-top: 10px;
-}
+.modalAdvanced { padding: 0; }
+.modalAdvanced[open] > .modalField { margin-top: 20px; }
 
 .modalAdvancedSummary {
-  margin: 0 0 10px;
-  font-size: 13px;
+  margin: 0;
+  padding: 4px 8px;
+  font-size: 14px;
+  list-style: none;
   color: var(--dsw-alias-label-primary);
   cursor: pointer;
 }
+
+.modalAdvancedSummary::before { content: '›'; display: inline-block; margin-right: 12px; font-size: 20px; line-height: 16px; transform: rotate(0deg); }
+.modalAdvanced[open] > .modalAdvancedSummary::before { transform: rotate(90deg); }
+.modalAdvancedSummary::-webkit-details-marker { display: none; }
 
 .chipRow {
   display: flex;
@@ -922,8 +942,8 @@ select.input {
   content: '';
   width: 7px;
   height: 3.5px;
-  border-left: 1.6px solid #fff;
-  border-bottom: 1.6px solid #fff;
+  border-left: 1.6px solid var(--pi-settings-card);
+  border-bottom: 1.6px solid var(--pi-settings-card);
   transform: rotate(-45deg) translate(0.5px, -1px);
 }
 
@@ -932,14 +952,10 @@ select.input {
   background: var(--dsw-alias-interactive-bg-hover-solid);
 }
 
-.chipLocked {
-  cursor: default;
-  color: var(--dsw-alias-label-tertiary);
-}
+.chipLocked { cursor: default; }
+.chipLocked svg { color: var(--dsw-alias-label-tertiary); }
 
-.chipButton {
-  font-size: 13px;
-}
+.chipButton { position: relative; min-width: 64px; justify-content: center; padding-right: 18px; background: transparent; font-size: 14px; }
 
 /*
  * The removal mark on a selected reasoning-level chip. The reference's chips
@@ -948,6 +964,7 @@ select.input {
  * row reads exactly like the reference's.
  */
 .chipClose {
+  position: absolute; right: 5px; font-size: 10px;
   opacity: 0;
   transition: opacity 0.12s ease;
 }
@@ -958,6 +975,7 @@ select.input {
 }
 
 .chipAdd {
+  appearance: none; width: 32px; height: 32px; padding: 0; text-align: center;
   color: var(--dsw-alias-label-secondary);
 }
 
@@ -972,6 +990,8 @@ select.input {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 18px;
-  resize: vertical;
+  resize: none;
+  height: 128px;
+  overflow: auto;
 }
 

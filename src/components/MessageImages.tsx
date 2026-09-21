@@ -1,6 +1,7 @@
 import { theme } from 'antd';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
+import { ImageLightbox } from './ImageLightbox';
 import type { PiImage } from '../shared/protocol';
 
 /**
@@ -44,6 +45,7 @@ function useImageSrc(image: PiImage): { src: string; onError: () => void } {
 
   useEffect(() => {
     let cancelled = false;
+    setSrc(`data:${image.mimeType};base64,${image.data}`);
     const cached = idCache.get(image.data);
     if (cached !== undefined) {
       if (cached !== null) setSrc(`/api/attachments/${cached}`);
@@ -99,19 +101,27 @@ function StoredImage({
   border: string;
 }) {
   const { src, onError } = useImageSrc(image);
+  const [preview, setPreview] = useState(false);
+  const close = useCallback(() => setPreview(false), []);
   return (
+    <>
+    <button type="button" aria-label={`预览${label}`} onClick={() => setPreview(true)} style={{ padding: 0, border: 0, background: 'transparent', cursor: 'zoom-in' }}>
     <img
       src={src}
       alt={label}
       loading="lazy"
       onError={onError}
       style={{
-        maxWidth: 180,
-        maxHeight: 180,
-        borderRadius: 6,
+        display: 'block',
+        width: 64,
+        height: 64,
+        borderRadius: 16,
         border: `1px solid ${border}`,
         objectFit: 'cover',
       }}
     />
+    </button>
+    {preview && <ImageLightbox src={src} alt={label} onClose={close} />}
+    </>
   );
 }

@@ -322,6 +322,7 @@ export function SessionNodeItem({
     >
       <span className={css.slot}>
         <StateDot state={statuses[0]?.state ?? 'idle'} />
+        {statuses.map(status => <span className={css.visuallyHidden} key={status.label}>{status.label}</span>)}
       </span>
       <span className={css.title}>
         {node.title}

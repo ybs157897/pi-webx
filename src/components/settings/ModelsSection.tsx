@@ -87,11 +87,14 @@ export function ModelsSection(): ReactNode {
   useEffect(() => { void load() }, [load])
 
   /** A card closed: adopt the fresh config and announce a write. */
+  const [editorVersion, setEditorVersion] = useState(0)
+
   const closeCard = (
     changed: boolean,
     nextConfig: ModelConfigResponse | undefined,
     target: ProviderIdentity,
   ): void => {
+    setEditorVersion(version => version + 1)
     setAddFlow(undefined)
     setDismissedSetup(true)
     if (nextConfig !== undefined) setConfig(nextConfig)
@@ -187,7 +190,7 @@ export function ModelsSection(): ReactNode {
     if (activeCustom !== undefined) {
       return (
         <ProviderEditor
-          key={activeCustom.id}
+          key={`${activeCustom.id}:${editorVersion}`}
           provider={activeCustom}
           onClose={(changed, nextConfig) => {
             closeCard(changed, nextConfig, activeCustom)

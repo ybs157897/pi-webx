@@ -29,7 +29,9 @@
 
 .section {
   max-height: 150px;
-  overflow-y: auto;
+  overflow: auto;
+  min-width: 0;
+  overscroll-behavior: contain;
 }
 
 /*
@@ -38,8 +40,15 @@
  * card's own shape already said, and charged a column to do it.
  */
 .bare {
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-module-platform);
   max-height: 150px;
-  overflow-y: auto;
+  overflow: auto;
+  min-width: 0;
+  overscroll-behavior: contain;
 }
 
 /*
@@ -109,3 +118,5 @@
   margin: 0 2px;
   background: var(--dsw-alias-label-caption);
 }
+
+.outputText { margin: 0; font-family: var(--ds-font-family-code); font-size: 12px; line-height: 18px; white-space: pre; color: var(--dsw-alias-label-primary); }

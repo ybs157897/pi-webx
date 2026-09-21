@@ -1,12 +1,14 @@
 import { ActionIcon, Flexbox, Text, Tooltip } from '@lobehub/ui';
 import { ChatInputAreaInner } from '@lobehub/ui/chat';
-import { Tag, theme } from 'antd';
+import { theme } from 'antd';
 import type { TextAreaRef } from 'antd/es/input/TextArea';
-import { ImagePlus } from 'lucide-react';
+import { Paperclip } from 'lucide-react';
 import type { ClipboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { failureCopy } from '../lib/failure';
+import { IMAGE_LIMITS, IMAGE_TYPES, imageAdmissionError } from '../shared/attachments';
+import { ComposerAttachments, type DraftImage } from './ComposerAttachments';
 import { formatTokens } from '../lib/format';
 import { IconSendOutline16, IconStopFill16 } from '../ui/primitives/icons';
 import {
@@ -26,9 +28,6 @@ import { ModelSelect, ThinkingSelect, type ModelSelection } from './ModelPicker'
 import { ToolPresetSelect } from './ToolPresetSelect';
 import { SlashCommandMenu } from './SlashCommandMenu';
 
-const MAX_IMAGES = 4;
-const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
-
 /**
  * The composer's corner radius, in px.
  *
@@ -39,9 +38,7 @@ const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
  */
 const COMPOSER_RADIUS = 18;
 
-async function fileToImage(file: File): Promise<PiImage | null> {
-  if (!file.type.startsWith('image/')) return null;
-  if (file.size > MAX_IMAGE_BYTES) return null;
+async function fileToImage(file: File): Promise<PiImage> {
   const buffer = new Uint8Array(await file.arrayBuffer());
   let binary = '';
   const CHUNK = 0x8000;
@@ -86,7 +83,21 @@ export function Composer({
 }: ComposerProps) {
   const { token } = theme.useToken();
   const [text, setText] = useState('');
-  const [images, setImages] = useState<PiImage[]>([]);
+  const [images, setImages] = useState<DraftImage[]>([]);
+  const imagesRef = useRef<DraftImage[]>([]);
+  const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const replaceImages = useCallback((next: DraftImage[]) => {
+    const keep = new Set(next.map(image => image.id));
+    for (const image of imagesRef.current) if (!keep.has(image.id)) URL.revokeObjectURL(image.previewUrl);
+    imagesRef.current = next;
+    setImages(next);
+  }, []);
+  useEffect(() => () => {
+    for (const image of imagesRef.current) URL.revokeObjectURL(image.previewUrl);
+  }, []);
   const [notice, setNotice] = useState<string | null>(null);
   const inputRef = useRef<TextAreaRef | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -100,7 +111,7 @@ export function Composer({
   const chord = useRef(false);
 
   const running = api.transcript.running;
-  const canSend = !disabled && text.trim().length > 0;
+  const canSend = !disabled && !sending && (text.trim().length > 0 || images.length > 0);
   const { editorText, consumeEditorText } = api;
 
   const flash = useCallback((message: string) => {
@@ -134,28 +145,51 @@ export function Composer({
     inputRef.current?.focus();
   }, [editorText, consumeEditorText]);
 
-  const addFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const incoming = await Promise.all(Array.from(files).map(fileToImage));
-      const accepted = incoming.filter((image): image is PiImage => image !== null);
-      if (accepted.length === 0) {
-        flash(`仅支持小于 ${MAX_IMAGE_BYTES / 1024 / 1024}MB 的图片`);
-        return;
-      }
-      setImages((prev) => [...prev, ...accepted].slice(0, MAX_IMAGES));
-    },
-    [flash],
-  );
+  const addFiles = useCallback((files: FileList | File[]) => {
+    if (disabled || sendingRef.current) return;
+    const batch = Array.from(files);
+    if (batch.length === 0) return;
+    const error = imageAdmissionError(batch, imagesRef.current.map(image => image.file));
+    if (error) { flash(error); return; }
+    replaceImages([...imagesRef.current, ...batch.map(file => ({
+      id: crypto.randomUUID(), file, previewUrl: URL.createObjectURL(file),
+    }))]);
+    inputRef.current?.focus();
+  }, [disabled, flash, replaceImages]);
 
-  const onPaste = useCallback(
-    (event: ClipboardEvent<HTMLTextAreaElement>) => {
-      const files = Array.from(event.clipboardData.files);
-      if (files.length === 0) return;
-      event.preventDefault();
-      void addFiles(files);
-    },
-    [addFiles],
-  );
+  const onPaste = useCallback((event: ClipboardEvent<HTMLTextAreaElement>) => {
+    const files = Array.from(event.clipboardData.files).filter(file => file.type.startsWith('image/'));
+    if (files.length === 0) return;
+    event.preventDefault();
+    addFiles(files);
+    const pasted = event.clipboardData.getData('text/plain');
+    if (pasted) {
+      const area = event.currentTarget;
+      setText(previous => previous.slice(0, area.selectionStart) + pasted + previous.slice(area.selectionEnd));
+    }
+  }, [addFiles]);
+
+  useEffect(() => {
+    const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes('Files');
+    const enter = (event: DragEvent) => { if (hasFiles(event)) { event.preventDefault(); dragDepth.current += 1; setDragging(true); } };
+    const over = (event: DragEvent) => { if (hasFiles(event)) { event.preventDefault(); if (event.dataTransfer) event.dataTransfer.dropEffect = disabled || sending ? 'none' : 'copy'; } };
+    const leave = (event: DragEvent) => { if (hasFiles(event) && --dragDepth.current <= 0) { dragDepth.current = 0; setDragging(false); } };
+    const drop = (event: DragEvent) => {
+      if (!hasFiles(event)) return;
+      event.preventDefault(); dragDepth.current = 0; setDragging(false);
+      if (event.dataTransfer) addFiles(event.dataTransfer.files);
+    };
+    document.addEventListener('dragenter', enter);
+    document.addEventListener('dragover', over);
+    document.addEventListener('dragleave', leave);
+    document.addEventListener('drop', drop);
+    return () => {
+      document.removeEventListener('dragenter', enter);
+      document.removeEventListener('dragover', over);
+      document.removeEventListener('dragleave', leave);
+      document.removeEventListener('drop', drop);
+    };
+  }, [addFiles, disabled, sending]);
 
   /**
    * Submit the draft.
@@ -169,10 +203,13 @@ export function Composer({
   const submit = useCallback(
     async (steer: boolean) => {
       const value = text.trim();
-      if (value.length === 0 || disabled) return;
+      if ((value.length === 0 && images.length === 0) || disabled || sendingRef.current) return;
+      sendingRef.current = true;
+      setSending(true);
       try {
+        const payload = await Promise.all(images.map(image => fileToImage(image.file)));
         const response = await api.prompt(value, {
-          ...(images.length > 0 ? { images } : {}),
+          ...(payload.length > 0 ? { images: payload } : {}),
           ...(steer ? { behavior: 'steer' as const } : {}),
         });
         if (!response.success) {
@@ -187,11 +224,14 @@ export function Composer({
          */
         flash(failureCopy(error).title);
         return;
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
       setText('');
-      setImages([]);
+      replaceImages([]);
     },
-    [api, disabled, flash, images, text],
+    [api, disabled, flash, images, replaceImages, text],
   );
 
   /** dsh's chord fallback: an empty draft + queued rows steers the whole dock. */
@@ -269,25 +309,11 @@ export function Composer({
           overflow: 'hidden',
         }}
       >
-        {(images.length > 0 || notice !== null) && (
-          <Flexbox horizontal align="center" gap={6} paddingInline={10} paddingBlock={6} wrap="wrap">
-            {images.map((image, index) => (
-              <Tag
-                key={`${image.mimeType}-${String(index)}`}
-                closable
-                onClose={() => setImages((prev) => prev.filter((_, i) => i !== index))}
-                style={{ fontSize: 11 }}
-              >
-                图片 {index + 1}
-              </Tag>
-            ))}
-            {notice !== null && (
-              <Text fontSize={11} style={{ color: token.colorWarning }}>
-                {notice}
-              </Text>
-            )}
-          </Flexbox>
-        )}
+        <ComposerAttachments images={images} disabled={sending} onRemove={id => replaceImages(imagesRef.current.filter(image => image.id !== id))} />
+        {notice !== null && <div role="alert" style={{ padding: '6px 12px', color: token.colorWarning, fontSize: 12 }}>{notice}</div>}
+        {dragging && <div style={{ position: 'fixed', inset: 12, zIndex: 900, display: 'grid', placeItems: 'center', border: `2px dashed ${token.colorPrimary}`, borderRadius: 20, background: token.colorBgMask, pointerEvents: 'none', color: token.colorTextLightSolid, fontSize: 18 }}>
+          {disabled || sending ? '请等待当前消息发送完成' : '放开以添加图片'}
+        </div>}
 
         {/* The chip bar rides the same card surface as the input — dsh's
             accessory slot (`padding: 10px 12px 0`, no fill of its own) — and the
@@ -312,7 +338,7 @@ export function Composer({
             else if (steer && running && queued.length > 0) void steerAllQueued();
           }}
           onPaste={onPaste}
-          disabled={disabled}
+          disabled={disabled || sending}
           placeholder={
             disabled
               ? '请先创建一个会话'
@@ -353,9 +379,10 @@ export function Composer({
             <SlashCommandMenu commands={api.commands} disabled={disabled} onPick={insertCommand} />
             <Tooltip title="附加图片">
               <ActionIcon
-                icon={ImagePlus}
+                icon={Paperclip}
+                aria-label="附加图片"
                 size="small"
-                disabled={disabled || images.length >= MAX_IMAGES}
+                disabled={disabled || sending || images.length >= IMAGE_LIMITS.maxImagesPerMessage}
                 onClick={() => fileRef.current?.click()}
               />
             </Tooltip>
@@ -423,7 +450,7 @@ export function Composer({
       <input
         ref={fileRef}
         type="file"
-        accept="image/*"
+        accept={IMAGE_TYPES.join(',')}
         multiple
         hidden
         onChange={(event) => {

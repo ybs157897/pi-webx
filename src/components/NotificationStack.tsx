@@ -20,7 +20,7 @@ export function NotificationStack({
       style={{
         position: 'fixed',
         right: 20,
-        bottom: 20,
+        top: 64,
         zIndex: 1200,
         width: 360,
         maxWidth: 'calc(100vw - 40px)',
@@ -38,7 +38,7 @@ export function NotificationStack({
           {...(entry.detail === undefined ? {} : { description: entry.detail })}
           style={{ background: token.colorBgElevated, boxShadow: token.boxShadowSecondary }}
           action={
-            <ActionIcon icon={X} size="small" title="关闭" onClick={() => onDismiss(entry.id)} />
+            <ActionIcon icon={X} size="small" aria-label="关闭通知" title="关闭" onClick={() => onDismiss(entry.id)} />
           }
         />
       ))}

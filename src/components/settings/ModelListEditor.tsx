@@ -21,6 +21,7 @@ import {
   IconCopyOutline16,
   IconEditOutline16,
   IconPlusOutline16,
+  IconTrashOutline16,
   Modal,
   writeClipboard,
 } from '../../ui/primitives/index.ts'
@@ -254,6 +255,9 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
                     >
                       <IconEditOutline16 size={14} />
                     </button>
+                    <button type="button" className={styles['iconButton']} aria-label={`移除模型 ${index + 1}`} title={t('removeModel')} disabled={disabled} onClick={() => onChange(models.filter((_model, at) => at !== index))}>
+                      <IconTrashOutline16 size={14} />
+                    </button>
                     <label
                       className={styles['modelRowToggle']}
                       title={enabled ? t('modelEnabled') : t('modelDisabled')}
@@ -289,12 +293,7 @@ export function ModelListEditor(props: ModelListEditorProps): ReactNode {
               else replaceRow(editing, draft)
               setEditing(undefined)
             }}
-            onDelete={typeof editing === 'number'
-              ? () => {
-                onChange(models.filter((_model, at) => at !== editing))
-                setEditing(undefined)
-              }
-              : undefined}
+
           />
         )}
 

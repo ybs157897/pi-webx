@@ -1,15 +1,12 @@
-import { CodeDiff, Flexbox, Highlighter, PatchDiff, Text } from '@lobehub/ui';
+import { Flexbox, Highlighter, Text } from '@lobehub/ui';
 import { theme } from 'antd';
 import type { ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
 import {
-  baseName,
   formatArgs,
   formatRelativeTime,
-  languageFromPath,
   summarizeToolCall,
-  toolOutputLanguage,
 } from '../lib/format';
 import { useSessionCwd } from '../lib/session-cwd';
 import { terminalCard, terminalTitle } from '../lib/terminal-card';
@@ -59,125 +56,9 @@ function toolGlyph(toolName: string): ReactNode {
   }
 }
 
-/* ------------------------------------------------------------------- helpers */
-
-/** Plain object view of a wire value; `null` for everything else. */
-function record(value: unknown): Record<string, unknown> | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  return value as Record<string, unknown>;
-}
-
-/** Non-empty string, or `null`. */
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-/** Any string, including the empty one (an edit may insert where nothing was). */
-function str(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
-
-/** Everything before the first newline, or the whole string (dsh's `firstLine`). */
 function firstLine(text: string): string {
   const newline = text.indexOf('\n');
   return newline === -1 ? text : text.slice(0, newline);
-}
-
-interface Fragment {
-  oldText: string;
-  newText: string;
-}
-
-/**
- * The `{oldText, newText}` pairs an `edit` call carried, if any.
- *
- * pi normalises its legacy top-level `oldText`/`newText` into `edits[]` before
- * the tool runs, but a transcript restored from an older log can still hold the
- * un-normalised form, so both shapes are read.
- */
-function editFragments(run: ToolRun): Fragment[] | null {
-  if (run.toolName !== 'edit') return null;
-  const legacyOld = str(run.args['oldText']);
-  const legacyNew = str(run.args['newText']);
-  if (legacyOld !== null && legacyNew !== null) {
-    return [{ oldText: legacyOld, newText: legacyNew }];
-  }
-  const edits = run.args['edits'];
-  if (!Array.isArray(edits)) return null;
-  const fragments = edits.flatMap((entry): Fragment[] => {
-    const edit = record(entry);
-    const oldText = str(edit?.['oldText']);
-    const newText = str(edit?.['newText']);
-    if (oldText === null || newText === null) return [];
-    return [{ oldText, newText }];
-  });
-  return fragments.length > 0 ? fragments : null;
-}
-
-/**
- * What a file-mutating call changed, drawn by the app's own diff components.
- *
- * pi reports the artefact, not the intention: an `edit` result carries its
- * `{patch, diff}` in `details`, and a `write` carries nothing but the content it
- * was handed. The unified patch is the most faithful view, so it wins; then the
- * display diff; then a diff rebuilt from the call's own arguments, which is all
- * a still-streaming run or an old transcript has.
- */
-function changeView(run: ToolRun): ReactNode | null {
-  const details = record(run.details);
-  const file = text(run.args['path']) ?? text(run.args['file_path']) ?? text(run.args['filePath']) ?? '';
-  const language = languageFromPath(file);
-  const fileName = baseName(file);
-  const named = fileName.length > 0 ? { fileName } : {};
-
-  const patch = text(details?.['patch']);
-  if (patch !== null) {
-    return <PatchDiff patch={patch} variant="outlined" {...named} />;
-  }
-
-  const recorded = text(details?.['diff']);
-  if (recorded !== null) {
-    return (
-      <Highlighter language="diff" variant="outlined" wrap showLanguage={false}>
-        {recorded}
-      </Highlighter>
-    );
-  }
-
-  const fragments = editFragments(run);
-  if (fragments !== null) {
-    return (
-      <Flexbox gap={6}>
-        {fragments.map((fragment, index) => (
-          <CodeDiff
-            // Edits are positional and carry no id of their own; the index is the
-            // only stable key a call's own argument list can offer.
-            key={String(index)}
-            oldContent={fragment.oldText}
-            newContent={fragment.newText}
-            language={language}
-            variant="outlined"
-            {...named}
-          />
-        ))}
-      </Flexbox>
-    );
-  }
-
-  const written = run.toolName === 'write' ? str(run.args['content']) : null;
-  if (written !== null) {
-    return (
-      <CodeDiff
-        oldContent=""
-        newContent={written}
-        language={language}
-        variant="outlined"
-        {...named}
-      />
-    );
-  }
-
-  return null;
 }
 
 /**
@@ -230,7 +111,7 @@ function Section({
 }) {
   // The uncaptioned block is the capped scrollport unconditionally: the only
   // caller is the result, and an uncapped uncaptioned block has no use yet.
-  if (label === null) return <div className={css['bare']}>{children}</div>;
+  if (label === null) return <div className={css['bare']} role="region" aria-label="工具输出" tabIndex={0}>{children}</div>;
   return (
     <div className={scroll ? css['section'] : css['sectionPlain']}>
       <span className={css['sectionLabel']}>{label}</span>
@@ -247,8 +128,7 @@ function Section({
  *
  * The rule is duplication, not brevity — a shell call's `command` is the row
  * summary verbatim, `read`'s path likewise, `write`/`edit` print the path and
- * byte count in the summary and the payload itself through the diff above, so
- * their args JSON restates what the card already shows and only pushes the
+ * byte count in the summary, so their args JSON repeats the call and pushes the
  * output down. The search family (`grep`/`find`/`ls`) keeps its args block
  * because its summary is an *abbreviation* of the call (the pattern clipped to
  * 90 chars, the scope to 50) while args carry fields the summary drops
@@ -292,7 +172,6 @@ export function ToolCard({ run }: { run: ToolRun }) {
   // card. Shell calls carry their whole command in the summary; read/write/edit
   // carry the path (and, for a mutation, the byte count).
   const resultOnly = RESULT_ONLY_TOOLS.has(run.toolName);
-  const change = useMemo(() => changeView(run), [run]);
 
   // A shell call is dsh's terminal card, not the generic IN/OUT body. Its own
   // shape is a prompt line — run-state dot, working directory, the command —
@@ -313,6 +192,11 @@ export function ToolCard({ run }: { run: ToolRun }) {
         align="center"
         gap={6}
         style={{ height: 24, cursor: 'pointer' }}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label={`${title} ${summaryText}`}
+        onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setManual(!open); } }}
         onClick={() => setManual(!open)}
         onMouseEnter={() => { setHovered(true); }}
         onMouseLeave={() => { setHovered(false); }}
@@ -380,50 +264,22 @@ export function ToolCard({ run }: { run: ToolRun }) {
           // a flat line in the flow.
           style={{ margin: '4px 0 4px 4px' }}
         >
-          {/* The call's own description and the change it made are
-              alternatives: once a diff is drawn, the path and bytes it was
-              built from are already on screen. */}
-          {change !== null && !failed ? (
-            <Section label="变更" scroll={false}>{change}</Section>
-          ) : (
-            !resultOnly && Object.keys(run.args).length > 0 && (
-              <Section label="参数">
-                <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
-                  {formatArgs(run.args)}
-                </Highlighter>
-              </Section>
-            )
+          {!resultOnly && Object.keys(run.args).length > 0 && (
+            <Section label="参数">
+              <Highlighter language="json" variant="outlined" wrap showLanguage={false}>
+                {formatArgs(run.args)}
+              </Highlighter>
+            </Section>
           )}
-
-          {/* The result text is NOT an alternative to the change, but it yields
-              to it on a call that landed: pi's mutation output restates the diff
-              ("Successfully replaced 1 block(s) in …"). A *failed* mutation is
-              the exception, and it is the reason this section cannot live in the
-              else-branch above: pi reports the failure in the result text
-              ("Could not find edits[14] in …", an isError result with an empty
-              patch), so the diff would be the never-applied request drawn over
-              the error that explains it. The failure outranks the attempt —
-              dsh's own error row replaces its summary with the failure line. */}
-          {run.output.length > 0 && (change === null || failed) && (
+          {run.output.length > 0 && (
             <Section label={null}>
-              {/* dsh colours the expanded OUT text of a failed call
-                  (`.ioText[data-error]`); the class carries that override,
-                  since Shiki writes its palette as inline styles. */}
               <div className={failed ? css.errorOutput : undefined}>
-                <Highlighter
-                  language={toolOutputLanguage(run.toolName, run.args)}
-                  variant="outlined"
-                  wrap
-                  showLanguage={false}
-                >
-                  {run.output}
-                </Highlighter>
+                <pre className={css.outputText}>{run.output}</pre>
               </div>
             </Section>
           )}
 
-          {/* Images belong to neither branch: a call can carry a diff and still
-              have returned a picture, and the picture is the result either way. */}
+          {/* Tool-returned images remain visible beside the textual result. */}
           {run.images !== undefined && run.images.length > 0 && (
             // Thumbnails are content to look at, not text to scan: capping
             // them at the section scrollport would clip the picture itself.

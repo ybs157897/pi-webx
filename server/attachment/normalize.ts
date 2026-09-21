@@ -14,6 +14,7 @@
  *   因为一张图超预算就让整条消息失败。
  */
 import sharp from 'sharp';
+import { IMAGE_LIMITS } from '../../src/shared/attachments';
 import type { Metadata, Sharp } from 'sharp';
 
 /** 拒绝一张入站图片的原因。 */
@@ -57,16 +58,7 @@ export interface AttachmentLimits {
 
 /** 参考实现公布的默认门槛。 */
 export const DEFAULT_ATTACHMENT_LIMITS: AttachmentLimits = {
-  maxImageBytes: 20 * 1024 * 1024,
-  maxImagesPerMessage: 20,
-  /**
-   * 单条消息的图片总字节，也是**传输层必须扛得住**的那个数：图片是作为 base64
-   * 内联在同一个请求里的，所以总预算比这里高多少，就多出多少「管线答应得了、线上
-   * 送不到」的空头承诺（express 会先回 413，`prepareIncomingImages` 连话都说不上）。
-   * 参考实现的 200MiB 在那里花得起，是因为它的附件按引用传：消息里只有 id，字节留
-   * 在存储里。上界由 `server/routes.ts` 的 `JSON_BODY_LIMIT` 反推，两个数不许漂。
-   */
-  maxMessageImageBytes: 24 * 1024 * 1024,
+  ...IMAGE_LIMITS,
   maxImagePixels: 64_000_000,
   maxImageDimension: 8192,
   normalizedImageMaxPixels: 2048 * 2048,
