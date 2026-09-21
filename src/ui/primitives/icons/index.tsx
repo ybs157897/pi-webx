@@ -1052,3 +1052,27 @@ export const IconLockOutline16 = ({ size = 16, className }: IconProps) => (
     <circle cx="8" cy="9.9" r="0.85" fill="currentColor" />
   </svg>
 )
+
+/**
+ * Shield + pen — the workspace-write tool tier in the composer's permission
+ * menu (hand-authored product glyph; lucide-react 0.562 ships ShieldCheck /
+ * ShieldAlert but no pen-inside-shield, and an unrelated stand-in would break
+ * the one-shield-per-tier language). The outline traces lucide's Shield scaled
+ * to the 16 grid; the pen is a small diagonal pencil inside it.
+ */
+export const IconShieldPenOutline16 = ({ size = 16, className }: IconProps) => (
+  <svg width={size} height={size} className={className} viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+    <path
+      d="M13.33 8.67c0 3.33-2.33 5-5.11 5.97a.67.67 0 0 1-.45-.01C5 13.67 2.67 12 2.67 8.67V4a.67.67 0 0 1 .67-.67c1.33 0 3-.8 4.16-1.81a.78.78 0 0 1 1.01 0C9.67 2.54 11.33 3.33 12.67 3.33a.67.67 0 0 1 .66.67z"
+      stroke="currentColor"
+      strokeWidth="1.3"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M10.6 5.6 11.3 6.3 9.2 8.4 8.1 8.8 8.5 7.7z"
+      stroke="currentColor"
+      strokeWidth="1.1"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
