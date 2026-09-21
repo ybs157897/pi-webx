@@ -1048,6 +1048,13 @@ check('images: an attached image is carried, not just counted', () => {
   assert.equal(user.images?.[0]!.data, 'AAAA');
 });
 
+check('images: all six attachments survive history restoration', () => {
+  const state = applySnapshot(createTranscript(), [{ role: 'user', content: Array.from({ length: 6 }, (_, i) => pngBlock(`image-${i}`)), timestamp: 1 }]);
+  const user = state.entries.find(entry => entry.kind === 'user');
+  assert.equal(user?.kind, 'user');
+  if (user?.kind === 'user') assert.equal(user.images?.length, 6);
+});
+
 check('images: an unsupported media type or an oversized payload is dropped', () => {
   // Content comes from a model or a tool; it reaches an <img>, so it is
   // validated rather than trusted.
@@ -1056,7 +1063,7 @@ check('images: an unsupported media type or an oversized payload is dropped', ()
       role: 'user',
       content: [
         { type: 'image', data: 'AAAA', mimeType: 'image/svg+xml' },
-        { type: 'image', data: 'A'.repeat(8_000_001), mimeType: 'image/png' },
+        { type: 'image', data: 'A'.repeat(Math.ceil(20 * 1024 * 1024 / 3) * 4 + 1), mimeType: 'image/png' },
         { type: 'image', data: 'AAAA', mimeType: 'image/png' },
         { type: 'text', text: 'ok' },
       ],

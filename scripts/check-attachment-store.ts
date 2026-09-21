@@ -173,6 +173,12 @@ try {
   }
   assert.ok(overAggregate, '解码总量超过上限时要拒');
 
+  await assert.rejects(
+    prepareIncomingImages([{ type: 'image', data: source.toString('base64') + '!', mimeType: 'image/png' }]),
+    /图片数据不完整/,
+    'non-canonical base64 must not be silently decoded',
+  );
+
   // ---- 临时目录不留垃圾 --------------------------------------------------
   const leftover = await readdir(join(root, 'tmp')).catch(() => []);
   assert.equal(leftover.length, 0, `临时目录应当清空，实际留下 ${leftover.length} 个文件`);

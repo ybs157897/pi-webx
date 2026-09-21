@@ -203,7 +203,7 @@ const read = render(
   run({ toolName: 'read', args: { path: '/tmp/example.ts' }, output: longOutput }),
 );
 assert.ok(read.includes('class="bare"'), 'read 的结果区走无标签的 bare 区块');
-assert.ok(!read.includes('输出'), `read 卡不该再挂「输出」左栏标签：${read.slice(0, 200)}`);
+assert.ok(!textOf(read).includes('输出'), `read 卡不该再挂「输出」左栏标签：${read.slice(0, 200)}`);
 assert.ok(!read.includes('参数'), 'read 卡不该再渲染「参数」区块');
 
 // A tool whose arguments are NOT in the summary keeps its args block.
@@ -221,7 +221,7 @@ const css = readFileSync(new URL('../src/components/ToolCard.module.css', import
 const cap = /\.section\s*\{([^}]*)\}/.exec(css);
 assert.ok(cap, 'ToolCard.module.css 里要有 .section 规则');
 assert.match(cap[1]!, /max-height:\s*150px/, '.section 的高度上限要是 150px（对齐 dsh ioSection）');
-assert.match(cap[1]!, /overflow-y:\s*auto/, '.section 要自己滚动');
+assert.match(cap[1]!, /overflow(?:-y)?:\s*auto/, '.section 要自己滚动');
 
 // 「sticky 标签」是 objective 明确点名的形态：caption 必须在滚动容器**内部**粘住，
 // 而不是待在容器外面靠"不跟着滚"达到类似效果。
@@ -239,7 +239,7 @@ assert.match(grid[1]!, /grid-template-columns:\s*max-content\s+1fr/, 'caption �
 const bareRule = /\.bare\s*\{([^}]*)\}/.exec(css);
 assert.ok(bareRule, 'ToolCard.module.css 里要有 .bare 规则（不带 caption 的区块）');
 assert.match(bareRule[1]!, /max-height:\s*150px/, '.bare 与 .section 同一高度上限');
-assert.match(bareRule[1]!, /overflow-y:\s*auto/, '.bare 也要自己滚动');
+assert.match(bareRule[1]!, /overflow(?:-y)?:\s*auto/, '.bare 也要自己滚动');
 
 // 分隔符是 dsh 的 2x2 圆点（`.sep`），不是 `·` 字符；点自带 2px，因为行 gap 是 6。
 const sepRule = /\.sep\s*\{([^}]*)\}/.exec(css);
@@ -272,7 +272,7 @@ assert.match(
   /max-height:\s*var\(--dsl-terminal-output-max-height/,
   '输出区的高度上限由渲染点通过自定义属性给定',
 );
-assert.match(outputRule[1]!, /overflow-y:\s*auto/, '输出区要自己滚动（命令横幅钉住）');
+assert.match(outputRule[1]!, /overflow(?:-y)?:\s*auto/, '输出区要自己滚动（命令横幅钉住）');
 // 代码字体必须走 `font-family`：本仓库的代码字体令牌只是字体栈，而 `font: <字体栈>`
 // 是非法简写、会被浏览器整条丢掉（实测会让终端文字退回正文字体）。
 assert.match(
@@ -355,15 +355,13 @@ for (const name of RESULT_ONLY_TOOLS) {
     // 写文件类的结果是那份变更（带「变更」标签）；其余是结果区块——它已不带 caption，
     // 所以这里断言区块本身渲染出来，而不是找一个标签词。
     assert.ok(
-      textOf(markup).includes('变更') || markup.includes('class="bare"'),
+      markup.includes('class="bare"'),
       `${name} 卡要显示结果（变更区块或无 caption 的结果区块）`,
     );
   }
 }
 
-// A mutation that landed: the diff IS the result. pi's result text restates it
-// ("Successfully wrote 2 bytes to …"), so giving it its own section would only
-// push the card down — the thing this whole card was changed to stop doing.
+// Successful mutations show the actual tool response, never an args-derived diff.
 const wrote = render(
   run({
     toolName: 'write',
@@ -371,8 +369,10 @@ const wrote = render(
     output: 'Successfully wrote 22 bytes to /tmp/example.ts',
   }),
 );
-assert.ok(wrote.includes('变更'), '落地的 write 要画变更');
-assert.ok(!wrote.includes('输出'), '落地 write 的结果文本是变更的复述，不单列');
+assert.ok(!wrote.includes('变更'), 'write 不该把输入重画成 diff');
+assert.ok(textOf(wrote).includes('Successfully wrote 22 bytes'), 'write 显示实际返回的输出');
+assert.ok(!textOf(wrote).includes('export const x'), 'write 正文不重复传入的文件内容');
+assert.ok(!textOf(wrote).includes('输出'), '落地 write 的结果文本是变更的复述，不单列');
 
 // A mutation that FAILED. pi reports it in the result text with an empty patch
 // ("Could not find edits[14] in …", isError), so the args-derived diff is the

@@ -17,18 +17,12 @@ in a queue above the composer instead of being lost or cutting into the running 
 ## Quick start
 
 ```bash
-npm install
-npm run dev        # bridge on :8787 + Vite on :5173  → open http://127.0.0.1:5173
+npm install && npm run dev      # bridge :8787 + Vite :5173 → http://127.0.0.1:5173
+npm run build && npm start      # production, single process → http://127.0.0.1:8787
 ```
 
-Production (single process, serves the built SPA and the API):
-
-```bash
-npm run build
-npm start          # → http://127.0.0.1:8787
-```
-
-Requirements: Node 20+ only. The bridge logs the embedded pi SDK version at startup.
+Requires Node 20 or newer (nothing else — no CLI on PATH, no global install). The bridge
+logs the embedded pi SDK version at startup; on older Node it fails there, at boot.
 
 ## What it covers
 
