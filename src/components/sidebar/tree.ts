@@ -34,6 +34,12 @@ export interface SessionNode {
   alive: boolean
   /** blocked on the reader answering an extension dialog */
   pendingInteraction: boolean
+  /**
+   * A run finished while this row was not the open session, and the row has not
+   * been opened since — dsh's `completionUnread`, the green "done" reminder.
+   */
+  completed: boolean
+  /** when the conversation was last active; orders the list and labels the row */
   updatedAt: number
   live?: SessionSummary
   stored?: StoredSession
@@ -63,23 +69,52 @@ export interface SessionStatus {
 }
 
 /**
+ * The facts a status is read from: a session row, or one search result — both
+ * carry the same four live bits plus the row's kind.
+ */
+type StatusFacts = Pick<
+  SessionNode,
+  'pendingInteraction' | 'running' | 'alive' | 'kind' | 'completed'
+>
+
+/**
  * Session status presentation, adapted to pi-webx's facts and ordered by what
  * the reader has to do about it: a session blocked on an answer outranks one
  * that is merely running (a prompt nobody answers stalls the run forever), and
- * both outrank "nothing is happening".
+ * both outrank a finish.
  *
- * These are the three states the leading slot distinguishes — running, waiting
- * on you, and finished — the same three dsh's session dot paints. The leading
- * slot always paints one of them; there is no fourth "no dot" case, because a
- * row with no status is indistinguishable from a row whose status failed to
- * load.
+ * A finish has two flavours, and dsh names them separately: `已完成` is the run
+ * that ended while you were elsewhere (the green dot, cleared by opening the
+ * row), while `空闲`/`历史会话` are rows with nothing to say at all. The hover
+ * card spells both out; the row's leading slot paints only the telling half —
+ * see {@link sessionShowsDot}.
  */
-export function sessionStatuses(node: SessionNode): readonly SessionStatus[] {
+export function sessionStatuses(node: StatusFacts): readonly SessionStatus[] {
   if (node.pendingInteraction) return [{ state: 'warning', label: '等待你的确认' }]
   if (node.running) return [{ state: 'ongoing', label: '正在执行' }]
+  if (node.completed) return [{ state: 'done', label: '已完成' }]
   if (node.kind === 'stored') return [{ state: 'done', label: '历史会话' }]
   if (!node.alive) return [{ state: 'idle', label: '已结束' }]
   return [{ state: 'done', label: '空闲' }]
+}
+
+/**
+ * Whether a row's leading slot paints a dot at all.
+ *
+ * This is dsh's `showStatus`: the slot carries a dot only while something asks
+ * for the reader — a pending interaction, a run in flight, or the green reminder
+ * that a run finished while this row was not the open session. An idle, history
+ * or dead row paints nothing and leaves the 16px slot empty.
+ *
+ * pi-webx used to paint all three states permanently, which is why every stored
+ * transcript and every idle session carried the same green dot: a mark that is
+ * always there cannot say anything, and it made "finished while you were away"
+ * indistinguishable from "nothing is happening".
+ */
+export function sessionShowsDot(node: StatusFacts): boolean {
+  const primary = sessionStatuses(node)[0]
+  if (primary === undefined) return false
+  return primary.state === 'warning' || primary.state === 'ongoing' || node.completed
 }
 
 /** One flat search row: title plus the workspace it belongs to. */
@@ -91,6 +126,8 @@ export interface SearchResultNode {
   running: boolean
   alive: boolean
   pendingInteraction: boolean
+  /** dsh's `completionUnread` on the search row (see {@link SessionNode.completed}). */
+  completed: boolean
 }
 
 /** `/Users/x/work/api` → `~/work/api` when it lives under the reported home dir. */
@@ -123,8 +160,20 @@ function byRecency(a: SessionNode, b: SessionNode): number {
  * path: a row under a workspace header repeats that header at worst, where a
  * path repeats the whole filesystem. The hover card is where the path is
  * spelled out.
+ *
+ * `updatedAt` is the hosted transcript's own recency when the row hosts one,
+ * and only falls back to the bridge object's `createdAt` for a session with no
+ * log to read (in-memory, or one whose first prompt is still being written).
+ * Ordering by `createdAt` is the bug this avoids: re-opening an old conversation
+ * mints a new session object, and the row announced itself as "刚刚" and jumped
+ * to the top of the list.
  */
-export function liveNode(session: SessionSummary, hostedTitle?: string | undefined): SessionNode {
+export function liveNode(
+  session: SessionSummary,
+  hostedTitle?: string | undefined,
+  hostedUpdatedAt?: number | undefined,
+  completed = false,
+): SessionNode {
   return {
     id: session.id,
     kind: 'live',
@@ -132,7 +181,8 @@ export function liveNode(session: SessionSummary, hostedTitle?: string | undefin
     running: session.streaming,
     alive: session.alive,
     pendingInteraction: session.pendingDialogs > 0,
-    updatedAt: session.createdAt,
+    completed,
+    updatedAt: hostedUpdatedAt ?? session.createdAt,
     live: session,
   }
 }
@@ -146,9 +196,19 @@ function previewTitle(session: StoredSession): string {
   return session.id.slice(0, 12)
 }
 
+/**
+ * When a transcript was last active: the payload's recency key, falling back to
+ * its start timestamp for a payload that predates the field (a cached bundle
+ * talking to a newer server, or the reverse).
+ */
+export function storedUpdatedAt(session: StoredSession): number {
+  if (Number.isFinite(session.updatedAt)) return session.updatedAt
+  const parsed = Date.parse(session.startedAt)
+  return Number.isNaN(parsed) ? 0 : parsed
+}
+
 /** Persisted transcript → row node. */
 export function storedNode(session: StoredSession): SessionNode {
-  const parsed = Date.parse(session.startedAt)
   return {
     id: `stored:${session.path}`,
     kind: 'stored',
@@ -156,7 +216,10 @@ export function storedNode(session: StoredSession): SessionNode {
     running: false,
     alive: false,
     pendingInteraction: false,
-    updatedAt: Number.isNaN(parsed) ? 0 : parsed,
+    // Only a live session can finish a run; a transcript on disk has nothing
+    // the reader has not seen.
+    completed: false,
+    updatedAt: storedUpdatedAt(session),
     stored: session,
   }
 }
@@ -173,12 +236,18 @@ export function storedNode(session: StoredSession): SessionNode {
  * live row from the log — pi carries no session name for a log it resumed, so
  * without that the row would fall back to the folder name and read as a fresh
  * session in that folder all over again.
+ *
+ * The log also lends the live row its recency: the conversation's own last
+ * prompt is what the list orders by, and the bridge's session object knows only
+ * when it was created.
  */
 interface HostedView {
   /** `sessionFile` values a live session is hosting right now. */
   files: ReadonlySet<string>
   /** Log-derived titles, keyed by those same paths. */
   titles: ReadonlyMap<string, string>
+  /** Log-derived recency, keyed by those same paths. */
+  updatedAt: ReadonlyMap<string, number>
 }
 
 function hostedView(
@@ -190,16 +259,25 @@ function hostedView(
     if (session.sessionFile !== null) files.add(session.sessionFile)
   }
   const titles = new Map<string, string>()
+  const updatedAt = new Map<string, number>()
   for (const session of stored) {
-    if (files.has(session.path)) titles.set(session.path, previewTitle(session))
+    if (!files.has(session.path)) continue
+    titles.set(session.path, previewTitle(session))
+    updatedAt.set(session.path, storedUpdatedAt(session))
   }
-  return { files, titles }
+  return { files, titles, updatedAt }
 }
 
-/** Live row, titled by the transcript it resumed when pi reports no name. */
-function liveRow(session: SessionSummary, hosted: HostedView): SessionNode {
-  const hostedTitle = session.sessionFile === null ? undefined : hosted.titles.get(session.sessionFile)
-  return liveNode(session, hostedTitle)
+/** Live row, titled and dated by the transcript it resumed when it hosts one. */
+function liveRow(
+  session: SessionSummary,
+  hosted: HostedView,
+  completed: ReadonlySet<string>,
+): SessionNode {
+  const file = session.sessionFile
+  const hostedTitle = file === null ? undefined : hosted.titles.get(file)
+  const hostedUpdatedAt = file === null ? undefined : hosted.updatedAt.get(file)
+  return liveNode(session, hostedTitle, hostedUpdatedAt, completed.has(session.id))
 }
 
 /** Stored rows that are already represented by a live row. */
@@ -238,6 +316,10 @@ export function reconciledOrder(
  * with its live + stored sessions in the group's reconciled order. Only
  * expanded groups carry their rows; `containsCurrent` is computed here so the
  * renderer never scans.
+ *
+ * `completed` is the set of live sessions whose last run finished while they
+ * were not the open one (dsh's `completionUnread`): the flag rides on the row so
+ * the renderer only decides how to paint it.
  */
 export function deriveGroups(
   workspaces: readonly WorkspaceItem[],
@@ -246,6 +328,7 @@ export function deriveGroups(
   currentId: string | null,
   expansion: Readonly<Record<string, boolean>>,
   orderByAccount: Readonly<Record<string, readonly string[]>>,
+  completed: ReadonlySet<string>,
 ): GroupNode[] {
   const currentWorkspace = currentId === null
     ? undefined
@@ -254,7 +337,9 @@ export function deriveGroups(
   const free = unhosted(stored, hosted)
   return workspaces.map((workspace) => {
     const rows: SessionNode[] = [
-      ...live.filter(session => session.cwd === workspace.key).map(session => liveRow(session, hosted)),
+      ...live
+        .filter(session => session.cwd === workspace.key)
+        .map(session => liveRow(session, hosted, completed)),
       ...free.filter(session => session.cwd === workspace.key).map(session => storedNode(session)),
     ]
     // No pin tier: dsh's list is one recency-ordered run, so a session's place
@@ -280,10 +365,11 @@ export function deriveFlat(
   live: readonly SessionSummary[],
   stored: readonly StoredSession[],
   orderByAccount: Readonly<Record<string, readonly string[]>>,
+  completed: ReadonlySet<string>,
 ): SessionNode[] {
   const hosted = hostedView(live, stored)
   const rows: SessionNode[] = [
-    ...live.map(session => liveRow(session, hosted)),
+    ...live.map(session => liveRow(session, hosted, completed)),
     ...unhosted(stored, hosted).map(session => storedNode(session)),
   ]
   return reconciledOrder(rows, orderByAccount[FLAT_SESSION_ORDER_KEY])
@@ -293,49 +379,62 @@ export function deriveFlat(
  * Local metadata search across both session kinds: title, workspace label,
  * cwd, and — for live sessions — provider/model. pi-webx has no host content
  * index, so this stays deliberately simple: one case-insensitive substring
- * pass, results newest-first.
+ * pass, merged newest-first (both kinds share the one recency clock the tree
+ * orders by, so a search hit cannot claim a different position than the row it
+ * stands for).
  */
 export function deriveSearchResults(
   workspaces: readonly WorkspaceItem[],
   live: readonly SessionSummary[],
   stored: readonly StoredSession[],
   query: string,
+  completed: ReadonlySet<string>,
 ): SearchResultNode[] {
   const q = query.trim().toLowerCase()
   if (q === '') return []
   const labelOf = (cwd: string): string =>
     workspaces.find(workspace => workspace.key === cwd)?.title ?? workspaceLabel(cwd)
   const hosted = hostedView(live, stored)
-  const results: SearchResultNode[] = []
+  const matches: { row: SearchResultNode; updatedAt: number }[] = []
   for (const session of live) {
-    const node = liveRow(session, hosted)
+    const node = liveRow(session, hosted, completed)
     const haystack = [node.title, session.cwd, session.provider ?? '', session.model ?? '']
       .join('\n')
       .toLowerCase()
     if (!haystack.includes(q)) continue
-    results.push({
-      id: node.id,
-      kind: 'live',
-      title: node.title,
-      workspace: labelOf(session.cwd),
-      running: node.running,
-      alive: node.alive,
-      pendingInteraction: node.pendingInteraction,
+    matches.push({
+      updatedAt: node.updatedAt,
+      row: {
+        id: node.id,
+        kind: 'live',
+        title: node.title,
+        workspace: labelOf(session.cwd),
+        running: node.running,
+        alive: node.alive,
+        pendingInteraction: node.pendingInteraction,
+        completed: node.completed,
+      },
     })
   }
   for (const session of unhosted(stored, hosted)) {
     const node = storedNode(session)
     const haystack = [node.title, session.cwd, session.preview ?? ''].join('\n').toLowerCase()
     if (!haystack.includes(q)) continue
-    results.push({
-      id: node.id,
-      kind: 'stored',
-      title: node.title,
-      workspace: labelOf(session.cwd),
-      running: false,
-      alive: false,
-      pendingInteraction: false,
+    matches.push({
+      updatedAt: node.updatedAt,
+      row: {
+        id: node.id,
+        kind: 'stored',
+        title: node.title,
+        workspace: labelOf(session.cwd),
+        running: false,
+        alive: false,
+        pendingInteraction: false,
+        completed: false,
+      },
     })
   }
-  return results
+  return matches
+    .sort((a, b) => b.updatedAt - a.updatedAt || (a.row.id < b.row.id ? -1 : 1))
+    .map(match => match.row)
 }

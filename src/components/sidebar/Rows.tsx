@@ -25,7 +25,7 @@ import {
   relativeTime,
 } from '../../ui/primitives/index.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from './tree.ts'
-import { sessionStatuses, shortenCwd } from './tree.ts'
+import { sessionShowsDot, sessionStatuses, shortenCwd } from './tree.ts'
 import css from './Rows.module.css'
 
 /* ------------------------------------------------------------- time labels */
@@ -240,12 +240,17 @@ function SessionHoverContent({ node, now }: { node: SessionNode; now: number }) 
 
 /**
  * One top-level 32px session row: status slot, title, relative time, and the
- * row actions menu. Live rows offer rename/kill; stored rows (a persisted
- * transcript) offer resume/delete. The leading slot always carries the status
- * dot — running, waiting on the reader, or finished.
+ * row actions menu. Both kinds carry the same three verbs — rename, fork,
+ * archive (see `sessionMenuItems`); opening a row switches to a live session or
+ * resumes the stored transcript it stands for.
+ *
+ * The leading slot paints a dot only when the row has something to say — running,
+ * waiting on the reader, or finished while the reader was elsewhere. An idle row
+ * leaves the 16px slot empty (dsh's `showStatus`), and the flat list drops the
+ * empty slot rather than indenting its titles for a mark that is not there.
  */
 export function SessionNodeItem({
-  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag,
+  node, currentId, now, onOpen, onRename, onFork, onArchive, onReveal, drag, flat = false,
 }: {
   node: SessionNode
   currentId: string | undefined
@@ -265,10 +270,13 @@ export function SessionNodeItem({
   onReveal?: (() => void) | undefined
   /** Present only on draggable rows (grouped sessions outside search). */
   drag?: RowDragProps | undefined
+  /** The row is rendered without a parent workspace header ("In one list"). */
+  flat?: boolean | undefined
 }) {
   const row = node
   const selected = node.kind === 'live' && node.id === currentId
   const statuses = sessionStatuses(node)
+  const showStatus = sessionShowsDot(node)
   const [menuOpen, setMenuOpen] = useState(false)
   const rowRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
@@ -289,6 +297,7 @@ export function SessionNodeItem({
       ref={rowRef}
       className={clsx(
         css.sessionRow, selected && css.selected, menuOpen && css.menuOpen,
+        flat && !showStatus && css.flatSessionRowWithoutStatus,
         drag?.marker === 'before' && css.dropBefore, drag?.marker === 'after' && css.dropAfter,
       )}
       role="treeitem"
@@ -320,10 +329,14 @@ export function SessionNodeItem({
           drag.drop(rowHalf(e))
         }}
     >
-      <span className={css.slot}>
-        <StateDot state={statuses[0]?.state ?? 'idle'} />
-        {statuses.map(status => <span className={css.visuallyHidden} key={status.label}>{status.label}</span>)}
-      </span>
+      {(!flat || showStatus) && (
+        <span className={css.slot}>
+          {showStatus && <StateDot state={statuses[0]?.state ?? 'idle'} />}
+          {showStatus && statuses.map(status => (
+            <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
+          ))}
+        </span>
+      )}
       <span className={css.title}>
         {node.title}
       </span>
@@ -376,6 +389,8 @@ export function SearchResultItem({ result, currentId, onOpen }: {
   onOpen: (result: SearchResultNode) => void
 }) {
   const selected = result.kind === 'live' && result.id === currentId
+  const statuses = sessionStatuses(result)
+  const showStatus = sessionShowsDot(result)
   return (
     <button
       type="button"
@@ -386,17 +401,12 @@ export function SearchResultItem({ result, currentId, onOpen }: {
     >
       <span className={css.searchResultHeading}>
         <span className={css.slot}>
-          <StateDot
-            state={
-              result.pendingInteraction
-                ? 'warning'
-                : result.running
-                  ? 'ongoing'
-                  : result.kind === 'stored'
-                    ? 'done'
-                    : 'idle'
-            }
-          />
+          {/* Same rule as the tree row: a hit only carries a dot when it is
+              running, waiting on the reader, or finished unread. */}
+          {showStatus && <StateDot state={statuses[0]?.state ?? 'idle'} />}
+          {showStatus && statuses.map(status => (
+            <span className={css.visuallyHidden} key={status.label}>{status.label}</span>
+          ))}
         </span>
         <span className={css.searchResultTitle}>{result.title}</span>
       </span>

@@ -33,6 +33,7 @@ import {
   deriveSearchResults,
 } from './tree.ts'
 import { useWorkspaceView, viewActions } from './stores.ts'
+import { useCompletionUnread } from './completion.ts'
 import { ProjectRowItem, SearchResultItem, SessionNodeItem } from './Rows.tsx'
 import css from './WorkspaceBrowser.module.css'
 
@@ -169,6 +170,8 @@ interface TreeBodyProps {
   orderBy: 'manual' | 'updated'
   groupExpansion: Readonly<Record<string, boolean>>
   sessionOrderByAccount: Readonly<Record<string, readonly string[]>>
+  /** Live sessions whose last run finished while they were not the open one. */
+  completed: ReadonlySet<string>
   revealSessionId: string | undefined
   onSessionRevealed: (id: string) => void
   openNode: (node: SessionNode | { id: string; kind: 'live' | 'stored' }) => void
@@ -205,14 +208,14 @@ function rowSections(rows: readonly SessionNode[]): RowSection[] {
 function SessionTree(props: TreeBodyProps) {
   const {
     workspaces, live, stored, currentId, home, orderBy, groupExpansion, sessionOrderByAccount,
-    revealSessionId, onSessionRevealed, openNode,
+    completed, revealSessionId, onSessionRevealed, openNode,
     onSessionRename, onSessionFork, onSessionArchive,
     onWorkspacePick, onWorkspaceDefault, onWorkspaceForget, onNewSession,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
   const groups = useMemo(
-    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts),
-    [workspaces, live, stored, currentId, groupExpansion, orderAccounts],
+    () => deriveGroups(workspaces, live, stored, currentId, groupExpansion, orderAccounts, completed),
+    [workspaces, live, stored, currentId, groupExpansion, orderAccounts, completed],
   )
   const [expandedSessionGroups, setExpandedSessionGroups] = useState<string[]>([])
   const [drag, setDrag] = useState<DragState | null>(null)
@@ -451,14 +454,14 @@ function SessionTree(props: TreeBodyProps) {
 /** The flat "In one list" body: every session is one draggable top-level row. */
 function FlatList(props: TreeBodyProps) {
   const {
-    live, stored, currentId, orderBy, sessionOrderByAccount,
+    live, stored, currentId, orderBy, sessionOrderByAccount, completed,
     revealSessionId, onSessionRevealed, openNode,
     onSessionRename, onSessionFork, onSessionArchive,
   } = props
   const orderAccounts = orderBy === 'manual' ? sessionOrderByAccount : {}
   const rows = useMemo(
-    () => deriveFlat(live, stored, orderAccounts),
-    [live, stored, orderAccounts],
+    () => deriveFlat(live, stored, orderAccounts, completed),
+    [live, stored, orderAccounts, completed],
   )
   const [drag, setDrag] = useState<DragState | null>(null)
   const dropCommitted = useRef(false)
@@ -514,6 +517,7 @@ function FlatList(props: TreeBodyProps) {
                   onReveal={node.id === revealSessionId
                     ? () => { onSessionRevealed(node.id) }
                     : undefined}
+                  flat
                   drag={orderBy !== 'manual' ? undefined : {
                     start: () => {
                       dropCommitted.current = false
@@ -544,17 +548,18 @@ function FlatList(props: TreeBodyProps) {
 }
 
 /** The flat search body: local metadata matches across both session kinds. */
-function SearchResults({ query, workspaces, live, stored, currentId, openResult }: {
+function SearchResults({ query, workspaces, live, stored, currentId, completed, openResult }: {
   query: string
   workspaces: readonly WorkspaceItem[]
   live: readonly SessionSummary[]
   stored: readonly StoredSession[]
   currentId: string | null
+  completed: ReadonlySet<string>
   openResult: (node: SessionNode | { id: string; kind: 'live' | 'stored' }) => void
 }) {
   const results = useMemo(
-    () => deriveSearchResults(workspaces, live, stored, query),
-    [workspaces, live, stored, query],
+    () => deriveSearchResults(workspaces, live, stored, query, completed),
+    [workspaces, live, stored, query, completed],
   )
   return (
     <div className={clsx(css.treeBody, css.wide)}>
@@ -629,6 +634,13 @@ export function WorkspaceBrowser({
   const sessionOrderByAccount = useWorkspaceView(s => s.sessionOrderByAccount)
   const workspaceOrder = useWorkspaceView(s => s.workspaceOrder)
   const archivedSessions = useWorkspaceView(s => s.archivedSessions)
+  /**
+   * The green "finished while you were elsewhere" reminder (dsh's
+   * `completionUnread`). Tracked from the raw live list — not the archived-filtered
+   * one — so hiding a row cannot silently drop the fact that it finished; the
+   * filter below only decides whether a row is drawn.
+   */
+  const completed = useCompletionUnread(live, currentId)
   const archivedSet = useMemo(() => new Set(archivedSessions), [archivedSessions])
   /**
    * dsh's `归档会话`: hide the row; the transcript on disk is never touched.
@@ -794,6 +806,7 @@ export function WorkspaceBrowser({
     orderBy,
     groupExpansion,
     sessionOrderByAccount,
+    completed,
     revealSessionId,
     onSessionRevealed: acknowledgeSessionReveal,
     openNode,
@@ -922,6 +935,7 @@ export function WorkspaceBrowser({
               live={live}
               stored={stored}
               currentId={currentId}
+              completed={completed}
               openResult={openSearchResult}
             />
           )
