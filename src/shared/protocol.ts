@@ -614,6 +614,15 @@ export interface StoredSession {
   id: string;
   cwd: string;
   startedAt: string;
+  /**
+   * Epoch ms this conversation was last active: the time of its newest prompt,
+   * floored at its start (dsh's `max(createdAt, lastPromptAt)`).
+   *
+   * The sidebar orders and labels rows by this. `startedAt` cannot serve — a
+   * conversation resumed long after it began is *recent*, and a row labelled by
+   * its start would read as months old while being the session you are using.
+   */
+  updatedAt: number;
   sizeBytes: number;
   preview: string | null;
 }
