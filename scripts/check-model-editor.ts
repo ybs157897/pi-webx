@@ -1,7 +1,8 @@
 /**
- * 模型编辑器：输入类型那行画哪些 chip，以及一次保存会动到 `piWebx` 的哪些键。
+ * 模型编辑器：输入类型那行画哪些 chip，一次保存会动到 `piWebx` 的哪些键，
+ * 以及推理等级行的勾选契约。
  *
- * 两件事在这里被钉住，因为它们在浏览器里都不好看出来：
+ * 三件事在这里被钉住，因为它们在浏览器里都不好看出来：
  *
  * 1. **参考实现的行是 文本 / 图片 / 视频 / PDF**，没有音频。音频这个键仍然是
  *    合法的*存储*键（`ModelExtension['inputFormat']` 收），所以它不能因为"表单
@@ -10,6 +11,10 @@
  * 2. 因此保存的规则是一句话：**表单画出来的键按表单写，没画的键原样继承**。
  *    这条规则在 `buildModelExtension` 里只写一次，所以它可以在没有 DOM 的情况下
  *    被断言——不然它只能靠点浏览器来验，而点浏览器进不了 `npm run check`。
+ * 3. 推理等级是一排勾选框（用户要求，有意偏离参考的光名 chip + ＋ 下拉）。
+ *    勾选集的词表序与幂等收在纯函数 `toggleThinkingLevel` 里；顺序一旦漂掉，
+ *    写进 models.json 的 `thinkingLevelMap` 键序就跟着输入顺序走而不是 pi 的
+ *    低→高，且只在重开弹窗时才看得见。
  */
 import assert from 'node:assert/strict';
 
@@ -19,7 +24,10 @@ import {
   buildModelExtension,
 } from '../src/components/settings/model-extension';
 import type { ExtensionSelection } from '../src/components/settings/model-extension';
-import { t } from '../src/components/settings/copy';
+import { toggleThinkingLevel } from '../src/components/settings/thinking-levels';
+import { copy, t } from '../src/components/settings/copy';
+import { PI_THINKING_LEVELS } from '../src/shared/protocol';
+import type { PiThinkingLevel } from '../src/shared/protocol';
 import { IconLockOutline16 } from '../src/ui/primitives/icons';
 import type { ModelExtension } from '../src/shared/models-config';
 
@@ -114,4 +122,38 @@ assert.equal(typeof IconLockOutline16, 'function', '锁定态要有一个能用�
 const lockSvg = IconLockOutline16({ size: 13 });
 assert.ok(lockSvg && lockSvg.props && lockSvg.props.viewBox === '0 0 16 16', '锁字形要是 16 格画布');
 
-console.log('PASS 模型编辑器：输入类型只有 视频/PDF（无音频），保存只动表单画出来的键、其余原样继承');
+// 推理等级行是一排词表序勾选框：勾一个等级后数组必须严格回到 pi 的低→高序，
+// 而不是把新等级追加到尾部——顺序漂了，thinkingLevelMap 的键序就跟着漂。
+assert.equal(PI_THINKING_LEVELS.length, 7, '等级行一排 7 档：off 到 max，词表变了这里先红');
+assert.deepEqual(
+  toggleThinkingLevel(['max', 'off'], 'medium'),
+  ['off', 'medium', 'max'],
+  '勾选 medium 后必须按词表序排成 off → medium → max，不能追加到尾部',
+);
+
+// 勾选是集合语义：反复点击收敛到一份，不累积；取消勾选要删干净。
+assert.deepEqual(
+  toggleThinkingLevel(toggleThinkingLevel(toggleThinkingLevel([], 'low'), 'low'), 'low'),
+  ['low'],
+  '勾 → 取消 → 再勾后 low 恰好一份：重复点击必须收敛，不得长出重复项',
+);
+assert.deepEqual(
+  toggleThinkingLevel(['off', 'low', 'max'], 'low'),
+  ['off', 'max'],
+  '取消勾选 low 后要删干净，其余等级原样保留',
+);
+assert.deepEqual(
+  PI_THINKING_LEVELS.reduce((acc, level) => toggleThinkingLevel(acc, level), [] as PiThinkingLevel[]),
+  [...PI_THINKING_LEVELS],
+  '从空开始把 7 档全勾一遍，结果必须恰为整张词表各一份、低→高',
+);
+
+// 下拉追加的交互不许回流：copy 里那对「添加 / 移除推理等级」文案是随
+// chipButton + ＋ 下拉一起删的，它们回来就说明那套交互也跟着回来了。
+const copyKeys = Object.keys(copy) as (keyof typeof copy)[];
+assert.ok(
+  !copyKeys.includes('addLevel') && !copyKeys.includes('removeLevel'),
+  'copy.ts 不该再有 addLevel/removeLevel：等级行已改成勾选框，下拉式交互不得回流',
+);
+
+console.log('PASS 模型编辑器：输入类型只有 视频/PDF（无音频），保存只动表单画出来的键、其余原样继承；推理等级行是一排词表序勾选框，下拉交互已删');
