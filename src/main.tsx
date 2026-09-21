@@ -1,9 +1,10 @@
 import { ConfigProvider } from '@lobehub/ui';
 import { motion } from 'motion/react';
-import { StrictMode } from 'react';
+import { lazy, StrictMode, Suspense } from 'react';
 import { createRoot } from 'react-dom/client';
 
-import App from './App';
+const App = lazy(() => import('./App'));
+const Workbench = lazy(() => import('./workbench/Workbench'));
 // ThemeProvider's CDN font injection is disabled, so ship the math stylesheet locally.
 import 'katex/dist/katex.min.css';
 import '@jboltai/tokui/css';
@@ -16,11 +17,20 @@ import './ui/theme/base.css';
 
 const container = document.getElementById('root');
 if (!container) throw new Error('#root not found in index.html');
+const showAgent =
+  window.location.pathname === '/chat' ||
+  new URLSearchParams(window.location.search).has('session');
 
 createRoot(container).render(
   <StrictMode>
     <ConfigProvider motion={motion}>
-      <App />
+      <Suspense
+        fallback={
+          <div style={{ padding: 32, color: '#37634d' }}>正在打开工作台…</div>
+        }
+      >
+        {showAgent ? <App /> : <Workbench />}
+      </Suspense>
     </ConfigProvider>
   </StrictMode>,
 );
