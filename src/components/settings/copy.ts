@@ -128,8 +128,6 @@ export const copy = {
   capabilityHint: '能力标记为记录项：pi 暂不消费这三项。',
   reasoningLevels: '推理等级（从低到高）',
   reasoningLevelsHint: '选中的等级写入 pi 的 thinkingLevelMap，直接决定该模型可用的推理等级。',
-  addLevel: '添加推理等级',
-  removeLevel: '移除该等级',
   reasoningMap: '推理参数映射',
   reasoningMapHint: 'JSONata 表达式为记录项：pi 没有表达式机制，暂不消费。',
   resetForm: '重置表单',

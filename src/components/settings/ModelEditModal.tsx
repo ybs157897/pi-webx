@@ -30,6 +30,7 @@ import {
   type CapabilityKey,
   type ExtensionChip,
 } from './model-extension.ts'
+import { toggleThinkingLevel } from './thinking-levels.ts'
 import type { ModelDraft } from './capacity.ts'
 import { t } from './copy.ts'
 import styles from './ModelsSection.module.css'
@@ -46,7 +47,11 @@ export interface ModelEditModalProps {
   onSubmit: (draft: ModelDraft) => void
 }
 
-/** Chinese labels for the thinking-level chips, in pi's low→high order. */
+/**
+ * The reasoning-level chips' texts: the level names themselves (they are the
+ * words the saved map's keys spell), not translations — `off` reads as
+ * 「disabled」 to say what choosing it does. Keys sit in pi's low→high order.
+ */
 const LEVEL_LABELS: Record<PiThinkingLevel, string> = {
   off: 'disabled',
   minimal: 'minimal',
@@ -177,8 +182,6 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
     if (checked) void runSmartFill(id)
     else setSmartNote(undefined)
   }
-
-  const remainingLevels = PI_THINKING_LEVELS.filter((level) => !levels.includes(level))
 
   const contextValue = parseCapacity(context)
   const maxValue = parseCapacity(maxTokens)
@@ -388,40 +391,25 @@ export function ModelEditModal(props: ModelEditModalProps): ReactNode {
 
           <div className={styles['modalField']}>
             <FieldLabel text={t('reasoningLevels')} hint={t('reasoningLevelsHint')} />
+            {/* A tick writes the level into the saved `thinkingLevelMap`; the
+                row order is pi's own low→high. Deliberately not the
+                reference's bare-name chips with a ＋ dropdown — the user asked
+                for one checkbox row speaking the same language as the two rows
+                above. */}
             <div className={styles['chipRow']}>
-              {levels.map((level) => (
-                <button
+              {PI_THINKING_LEVELS.map((level) => (
+                <label
                   key={level}
-                  type="button"
-                  className={`${styles['chip']} ${styles['chipButton']}`}
-                  title={t('removeLevel')}
-                  aria-label={`移除推理等级 ${LEVEL_LABELS[level]}`}
-                  onClick={() => { setLevels((current) => current.filter((entry) => entry !== level)) }}
+                  className={`${styles['chip']} ${levels.includes(level) ? styles['chipOn'] : ''}`}
                 >
+                  <input
+                    type="checkbox"
+                    checked={levels.includes(level)}
+                    onChange={() => { setLevels((current) => toggleThinkingLevel(current, level)) }}
+                  />
                   {LEVEL_LABELS[level]}
-                  {/* The reference's level chips are the bare name — the ✕ is an
-                      addition of ours, so it waits for a hover (the same
-                      rest-vs-hover swap dsh's tool rows do with their glyph), and
-                      it stays out of the accessible name, which is the level. */}
-                  <span className={styles['chipClose']} aria-hidden>✕</span>
-                </button>
+                </label>
               ))}
-              {remainingLevels.length > 0 ? (
-                <select
-                  className={`${styles['chip']} ${styles['chipAdd']}`}
-                  value=""
-                  aria-label={t('addLevel')}
-                  onChange={(event) => {
-                    const level = event.target.value as PiThinkingLevel
-                    if (level.length > 0) setLevels((current) => PI_THINKING_LEVELS.filter(entry => entry === level || current.includes(entry)))
-                  }}
-                >
-                  <option value="">＋</option>
-                  {remainingLevels.map((level) => (
-                    <option key={level} value={level}>{LEVEL_LABELS[level]}</option>
-                  ))}
-                </select>
-              ) : null}
             </div>
           </div>
 

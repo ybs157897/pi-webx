@@ -955,30 +955,6 @@ select.input {
 .chipLocked { cursor: default; }
 .chipLocked svg { color: var(--dsw-alias-label-tertiary); }
 
-.chipButton { position: relative; min-width: 64px; justify-content: center; padding-right: 18px; background: transparent; font-size: 14px; }
-
-/*
- * The removal mark on a selected reasoning-level chip. The reference's chips
- * are the bare level name, so the mark only appears while the pointer is on the
- * chip (or the chip is focused, so it is reachable by keyboard) — at rest the
- * row reads exactly like the reference's.
- */
-.chipClose {
-  position: absolute; right: 5px; font-size: 10px;
-  opacity: 0;
-  transition: opacity 0.12s ease;
-}
-
-.chipButton:hover .chipClose,
-.chipButton:focus-visible .chipClose {
-  opacity: 1;
-}
-
-.chipAdd {
-  appearance: none; width: 32px; height: 32px; padding: 0; text-align: center;
-  color: var(--dsw-alias-label-secondary);
-}
-
 .modalCode {
   width: 100%;
   box-sizing: border-box;
