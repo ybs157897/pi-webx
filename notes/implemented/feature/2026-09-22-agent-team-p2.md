@@ -47,7 +47,7 @@ Status: **implemented on `feat/user-subagents`（已提交 `1ae3b0a`；P2 代码
 
 | 项 | 状态 |
 |---|---|
-| **P3 持久化与结果注入** | **未做**。`grep -rn durable server/agent-team/` = 0；消息只到 `queued`，`fresh-reader-visible` 留给 P3；跨重启可见性依赖 P3 的 journal |
+| **P3 持久化与结果注入** | **当时未做**（`grep -rn durable server/agent-team/` = 0；消息只到 `queued`）。**后续（P3-A，2026-09-22）**：TeamJournal（append-only、每 team 一文件）与启动重放已落地 ⇒ **Team 投影现在可跨重启重放**；**结果注入仍属 P3-B，未实现**。见 [P3-A 记录](2026-09-22-agent-team-p3.md) |
 | **P4 Team 面板** | **未做**（无 UI；只有上面两个只读路由可手工验） |
 | **P5 隔离** | **未做**（worktree / 进程级隔离都不在 P2） |
 | **模型侧定义 CRUD** | **永不**：模型不能创建/改写定义（这与本功能「定义只由用户管」的冻结契约一致） |

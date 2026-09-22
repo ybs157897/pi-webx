@@ -323,7 +323,7 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 **Then** `Tool dispatch_agent not found`（成员只有 `update_team_task` 仅自己任务 + `send_team_message` 仅发给 lead）  
 
 **When** 重启进程后再 `GET /api/teams/<sessionId>`  
-**Then** **404**——P2 状态全内存（`sessionId` 是内存 run 标识，不是持久会话 id）  
+**Then** **P2 时期是 404**（状态全内存）；**P3-A 起**按 journal 重放后应为 **200**（append 到磁盘、**无 fsync**，不承诺掉电安全）——见下文「P3-A 怎么手工验」  
 
 #### 真模型 smoke 结论（2026-09-22，task-94）
 
@@ -333,6 +333,24 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 **未验证（手工也验不了）**：真模型下 **`wait_team` 未用上**、**`running→cancelling→cancelled` 未在真模型触发**、**成员在真模型里未调用任务板工具且成员会话 in-memory ⇒ 成员内部工具调用事后不可审计（P3 需投影或落盘）**；被中止 turn 真实退出并释放槽位的时机；`cancelling` 与写入的真并发竞态；P3 持久化边界。
 
 **P4 输入（验证者独立观察）**：① **`teamMode` 是每次创建/恢复请求上的选项、不随会话存档**——恢复 team 会话不带 `teamMode` → 201 但 `GET /api/teams/<id>` **404**；带上 → 别名 GET/cancel 均 **200** ⇒ **P4 的 UI 刷新/重开必须带 `teamMode`**。② **没有 assistant 回合的 team 会话转录不落盘**（`POST /api/sessions {sessionId}` → **404 no stored session**），重启后连会话都恢复不了。
+
+### P3-A 怎么手工验（无 UI）
+
+> P3-A = append-only TeamJournal + 启动重放 + 投递机会账本。完整记录见 [`notes/implemented/feature/2026-09-22-agent-team-p3.md`](../../notes/implemented/feature/2026-09-22-agent-team-p3.md)。
+
+**Given** 建一个 `teamMode: true` 的会话，并用 `POST /api/teams/<sessionId>/cancel` 或 `GET /api/teams/<sessionId>` 拿到规范 `teamId`（响应里本来没有 `teamId`）  
+**When** kill 进程，再用**同一 `PI_CODING_AGENT_DIR` / journal 目录**重启  
+**Then** `GET /api/teams/<teamId>` **与** `GET /api/teams/<sessionId>` 都应 **200**，且**逐字节相同**（返回重放后的 `members` / `tasks`）  
+**And** 原本 in-flight 的成员应为 **`interrupted`**、**只有曾 settle 的成员恢复 `resultText`**（**成员不可复活**）  
+**And** 未知 id 仍 **404**；`teamId` 优先级不变  
+
+**When** 看启动日志  
+**Then** 成功重放时打印 **`files` / `teams` / `unusable` / `skipped`** 四个量（`teams` = 重放后内存里的 team 数）；**journal 不可用**（路径被占位/不可写，`EEXIST`/`ENOTDIR`/`EACCES`）→ 打印 `team journal unavailable (<原因>)` 并**退化为纯内存模式**，服务器照常启动  
+
+**When** 重启后 `POST /api/sessions {sessionId}`  
+**Then** 仍 **404 `no stored session`**——**会话本身仍不可 resume**（没有 assistant 回合就没有转录）；这与「Team 投影可重放」**不矛盾**  
+
+**未验证 / 不能承诺（写清楚）**：**不承诺掉电安全**（每行 `appendFileSync`、**无 fsync**）；**不支持多进程并发写**同一 journal；真实 `kill -9` 未验；**P3-B 注入未实现**（`claimDelivery` 只记「投递机会已用掉」）；真模型下「重启 → 恢复 → 继续派成员」未跑。证据（仓库外）：自测 `check-agent-team-journal.ts` 15/15 与 `check-agent-team.ts` 33/33；独立验证 `/tmp/pi-webx-p3-verify/verify-p3a.md`（j1 21/21 · j3 10/10 · j2 14/2）与 `/tmp/pi-webx-p3-verify/verify-p3a-followup.md`（**j2 25/25 · j3 15/15 · j1 21/21** + 真进程重启 E2E）。
 
 ### 工程门禁（**本轮 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
 
