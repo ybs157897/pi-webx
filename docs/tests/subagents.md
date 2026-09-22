@@ -211,7 +211,7 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 
 要点（下表带 ✅/⚠ 标注现行有效性）：
 
-**现行覆盖矩阵（task-87 实跑，`/Users/yin/Documents/ybs/code/pi-webx-subagents` @ `0edebd0` + 脏工作树）**：
+**现行覆盖矩阵（task-87 实跑，worktree `pi-webx-subagents` @ `0edebd0` + 脏工作树）**：
 
 | 声称 | 现行证据（文件 + 行号 + 命令） | 判定 |
 |---|---|---|
@@ -307,24 +307,32 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 
 > P2 = 编排角色 + Team 运行时 + 受控成员工具面 + 2 个只读路由；**无 Team 面板**。完整记录见 [`notes/implemented/feature/2026-09-22-agent-team-p2.md`](../../notes/implemented/feature/2026-09-22-agent-team-p2.md)。
 
-**Given** 8788（带该特性的检出）可用，**When** 用带 `teamMode: true` 的 body 建会话（`server/routes.ts:656` 本地解析，不改 shared 契约）  
+**Given** 用带 `teamMode: true` 的 body 建会话（`server/routes.ts:656` 本地解析，不改 shared 契约）  
 **Then** 该会话 active 出现 **9 个 Team 工具**（`list_team_members`/`dispatch_agent`/`send_team_message`/`list_team_tasks`/`get_team_task`/`create_team_task`/`update_team_task`/`wait_team`/`interrupt_agent`）  
 **And** **`subagent` 既不激活也不注册**（`customTools.length === 9`）  
+**And** 响应里**没有 `teamId`**（`SessionSummary` 冻结（`src/shared/protocol.ts:546-566` 无 `teamId` 字段）、WS 帧未变）——**你只需要记住 session id**  
 
-**When** `GET /api/teams/:id`（`server/routes.ts:617`）  
-**Then** `from`/`to`/`teamId` **由宿主填写**；模型写的这些字段只出现在 `untrustedPayload`、任务标题只在 `untrusted.title`  
-**And** 投影**不含**定义 `systemPrompt`；成员视图只给 `hasResult`（不给 `resultText`）；未知 id → **404**  
+**When** `GET /api/teams/<sessionId>`（**别名**：`GET /api/teams/:idOrSessionId`，`server/routes.ts:617`；解析在 `PiHost.resolveTeamId`，`server/pi/host.ts:814-816`）  
+**Then** 能拿到投影（**不必先知道 teamId**）；**teamId 优先**（同 id 的会话不遮蔽 team）、**非 team 会话 id 仍 404**、未知 id → **404**  
+**And** `from`/`to`/`teamId` **由宿主填写**；模型写的这些字段只出现在 `untrustedPayload`、任务标题只在 `untrusted.title`；投影**不含**定义 `systemPrompt`；成员视图只给 `hasResult`（不给 `resultText`）  
 
-**When** `POST /api/teams/:id/cancel`（`:634`）  
-**Then** 返回 `cancelled: <n>`，成员进 `cancelling`，settle 后可读；非字符串 `reason` 不被注入  
+**When** `POST /api/teams/<sessionId>/cancel`（`:634`）  
+**Then** 返回 **`{teamId, cancelled, reason}`**——**回显的 `teamId` 就是规范 teamId**，此后可用它寻址；成员进 `cancelling`，settle 后可读；非字符串 `reason` 不被注入  
 
 **When** 在成员会话里试 `dispatch_agent`  
 **Then** `Tool dispatch_agent not found`（成员只有 `update_team_task` 仅自己任务 + `send_team_message` 仅发给 lead）  
 
-**When** 重启进程后再 `GET /api/teams/:id`  
-**Then** 查不到——**P2 状态全内存**（`sessionId` 是内存 run 标识，不是持久会话 id）  
+**When** 重启进程后再 `GET /api/teams/<sessionId>`  
+**Then** **404**——P2 状态全内存（`sessionId` 是内存 run 标识，不是持久会话 id）  
 
-**未验证（手工也验不了）**：真模型下成员真实作答、被中止 turn 真实退出并释放槽位的时机、`cancelling` 与写入的真并发竞态、P3 持久化边界。
+#### 真模型 smoke 结论（2026-09-22，task-94）
+
+**可用（端到端走通）**：1 条 prompt 内建 3 个任务（含 1 条 `blockedBy`）、**同一轮并发派 2 个成员**、依赖解锁后派第 3 个、CAS 收尾前先吃 **两次 `TEAM_TASK_STALE_REVISION`** 再读回、最终汇总；**0 abort / 0 timeout / 0 retry / 0 次 `subagent`**（会话 `http://127.0.0.1:8789/?session=01a0c9a2-d856-7744-beba-bbffc2fe54e1`；证据在**仓库外** `/tmp/pi-webx-p2-smoke/verify-p2-live.md`）。3 个成员 `effectiveTools` **不含** 7 个禁止的编排工具与 `subagent`。  
+**F1 修复的独立复验**：`/tmp/pi-webx-p2-verify/a5-team-alias.ts` **14 pass / 0 fail**（含验证者自造歧义用例）；红绿 **8 pass / 6 fail**（别名分支改红）；报告 `/tmp/pi-webx-p2-verify/verify-f1-fix.md`。
+
+**未验证（手工也验不了）**：真模型下 **`wait_team` 未用上**、**`running→cancelling→cancelled` 未在真模型触发**、**成员在真模型里未调用任务板工具且成员会话 in-memory ⇒ 成员内部工具调用事后不可审计（P3 需投影或落盘）**；被中止 turn 真实退出并释放槽位的时机；`cancelling` 与写入的真并发竞态；P3 持久化边界。
+
+**P4 输入（验证者独立观察）**：① **`teamMode` 是每次创建/恢复请求上的选项、不随会话存档**——恢复 team 会话不带 `teamMode` → 201 但 `GET /api/teams/<id>` **404**；带上 → 别名 GET/cancel 均 **200** ⇒ **P4 的 UI 刷新/重开必须带 `teamMode`**。② **没有 assistant 回合的 team 会话转录不落盘**（`POST /api/sessions {sessionId}` → **404 no stored session**），重启后连会话都恢复不了。
 
 ### 工程门禁（**本轮 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
 
