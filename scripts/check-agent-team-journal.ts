@@ -44,6 +44,9 @@ import {
 import { createWorkerTeamTools } from '../server/agent-team/team-tools';
 import {
   TEAM_ERROR_CODES,
+  TEAM_FAILURE_REASONS,
+  TEAM_INTERRUPT_REASONS,
+  TEAM_PENDING_REASONS,
   type TeamError,
   type TeamProjection,
 } from '../server/agent-team/team-types';
@@ -105,6 +108,7 @@ function seedTeam(journal: TeamJournal, parentSessionId: string): {
   taskId: string;
   blockedTaskId: string;
   messageId: string;
+  hostFieldsId: string;
 } {
   const runtime = new AgentTeamRuntime({ journal, now: () => 1_700_000_000_000 });
   const team = runtime.createTeam(parentSessionId);
@@ -145,7 +149,25 @@ function seedTeam(journal: TeamJournal, parentSessionId: string): {
     to: 'lead',
     kind: 'result',
     payload: { summary: 'done' },
+    origin: 'member-message',
+    deliveredAsToolResult: false,
   });
+  // A second item carries the five P3-B host fields with **non-default** values, so
+  // the round-trip proves the journal persists them (condition (c) of the approval).
+  // Kept separate from the first message so the delivery-claim group still has a
+  // queued item to offer.
+  const hostFields = runtime.appendMessage({
+    teamId: team.id,
+    from: settled.id,
+    to: 'lead',
+    kind: 'result',
+    payload: { summary: 'host fields' },
+    origin: 'member-settle',
+    deliveredAsToolResult: false,
+  });
+  runtime.setMessagePendingReason(team.id, hostFields.id, TEAM_PENDING_REASONS.noLiveSession);
+  runtime.setMessageDeliveryState(team.id, hostFields.id, 'candidate', { deliveryMode: 'steered' });
+  runtime.setMessageDeliveryState(team.id, hostFields.id, 'failed', { failureReason: TEAM_FAILURE_REASONS.memberCancelled });
   return {
     runtime,
     teamId: team.id,
@@ -154,6 +176,7 @@ function seedTeam(journal: TeamJournal, parentSessionId: string): {
     taskId: first.id,
     blockedTaskId: blocked.id,
     messageId: message.id,
+    hostFieldsId: hostFields.id,
   };
 }
 
@@ -170,11 +193,15 @@ function replay(journal: TeamJournal, teamId: string): AgentTeamRuntime {
  * A projection prepared for a round-trip comparison.
  *
  * One transformation is *allowed* across a restart: a member whose last recorded
- * status was `running`/`cancelling` comes back `interrupted` with a reason, because
- * its worker session was in memory. Everything else — ids, revisions, task state,
- * message order, `lastSeq` cursors, sequence numbers — must be identical, and that
- * is what the comparisons using this helper assert. The revive itself is asserted
- * on its own, where its exact status and reason are pinned.
+ * status was `running`/`cancelling` comes back `interrupted`, because its worker
+ * session was in memory. Everything else — ids, revisions, task state, message order,
+ * `lastSeq` cursors, sequence numbers — must be identical, and that is what the
+ * comparisons using this helper assert.
+ *
+ * The revive itself is **not** blanked out into nothing: its exact status, prose reason
+ * and closed-set `statusReason` are pinned in the dedicated group below (`restart-replay`,
+ * never `host-shutdown`). Blanking those three fields here only keeps this helper about
+ * everything *else*.
  */
 function forRoundTrip(view: TeamProjection | undefined): unknown {
   if (view === undefined) return undefined;
@@ -182,7 +209,7 @@ function forRoundTrip(view: TeamProjection | undefined): unknown {
     ...view,
     members: view.members.map((member) => (
       member.status === 'running' || member.status === 'cancelling' || member.status === 'interrupted'
-        ? { ...member, status: '<mid-flight>', hasResult: '<mid-flight>' }
+        ? { ...member, status: '<mid-flight>', hasResult: '<mid-flight>', statusReason: '<mid-flight>' }
         : member
     )),
   };
@@ -303,8 +330,18 @@ await check('members that were mid-flight replay as interrupted and cannot write
   const running = replayed.requireMember(seeded.teamId, seeded.memberId);
   assert.equal(running.status, 'interrupted', 'a running member cannot come back alive');
   assert.match(running.resultText ?? '', /重启/, 'and the reason says why');
+  // The closed-set code is pinned here, and it is *this* one: a replay is not a graceful
+  // shutdown, and a reader that cannot tell them apart cannot tell "we shut down" from
+  // "the last process never finished".
+  assert.equal(
+    running.statusReason,
+    TEAM_INTERRUPT_REASONS.restartReplay,
+    'a replayed member carries the restart-replay code',
+  );
+  assert.notEqual(running.statusReason, TEAM_INTERRUPT_REASONS.hostShutdown, 'which is not the shutdown code');
   const settled = replayed.requireMember(seeded.teamId, seeded.settledId);
   assert.equal(settled.status, 'idle', 'a member that had finished stays finished');
+  assert.equal(settled.statusReason, undefined, 'and no replay code is stamped onto it');
 
   const tools = createWorkerTeamTools({
     teamId: seeded.teamId,
@@ -585,6 +622,44 @@ await check('blank lines are counted, except the one a trailing newline produces
   const withBlank = parseJournal('inline', `${record}\n\n${record}\n`, 't');
   assert.deepEqual(withBlank.skipped.map((entry) => entry.reason), ['blank-line'], 'a blank line between records is counted');
   assert.equal(withBlank.records.length, 2, 'and both records still replay');
+});
+
+await check('the five P3-B host fields survive the round trip, each with a non-default value', () => {
+  const journal = freshJournal('host-fields');
+  const seeded = seedTeam(journal, 'parent-host-fields');
+  const before = seeded.runtime.requireTeam(seeded.teamId).messages.find((m) => m.id === seeded.hostFieldsId);
+  assert.equal(before?.origin, 'member-settle');
+  assert.equal(before?.deliveredAsToolResult, false);
+  assert.equal(before?.deliveryMode, 'steered');
+  assert.equal(before?.failureReason, TEAM_FAILURE_REASONS.memberCancelled);
+
+  const replayed = replay(journal, seeded.teamId);
+  const after = replayed.requireTeam(seeded.teamId).messages.find((m) => m.id === seeded.hostFieldsId);
+  assert.equal(after?.origin, before?.origin, 'origin is restored');
+  assert.equal(after?.deliveredAsToolResult, before?.deliveredAsToolResult, 'deliveredAsToolResult is restored');
+  assert.equal(after?.deliveryMode, before?.deliveryMode, 'deliveryMode is restored');
+  assert.equal(after?.failureReason, before?.failureReason, 'failureReason is restored');
+  assert.equal(after?.deliveryState, before?.deliveryState, 'and the delivery state');
+  // A pending reason is a queued-only marker: the seeded item moved past it, so the
+  // journal must have dropped it exactly as the runtime did.
+  assert.equal(after?.pendingReason, undefined, 'a non-queued item carries no pendingReason');
+  assert.equal(after?.pendingReason, before?.pendingReason);
+
+  // The same item, still queued, keeps its reason across a replay.
+  const queued = replayed.appendMessage({
+    teamId: seeded.teamId,
+    from: seeded.settledId,
+    to: 'lead',
+    kind: 'result',
+    payload: 'not delivered yet',
+    origin: 'member-message',
+  });
+  replayed.setMessagePendingReason(seeded.teamId, queued.id, TEAM_PENDING_REASONS.noLiveSession);
+  const read = journal.readTeam(seeded.teamId);
+  assert.notEqual(read, undefined);
+  const again = new AgentTeamRuntime({ journal });
+  again.hydrate({ teamId: seeded.teamId, records: (read as { records: readonly never[] }).records });
+  assert.equal(again.requireTeam(seeded.teamId).messages.at(-1)?.pendingReason, TEAM_PENDING_REASONS.noLiveSession);
 });
 
 /* ------------------------------------------------------------------ summary -- */

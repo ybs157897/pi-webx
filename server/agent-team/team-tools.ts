@@ -368,6 +368,10 @@ export function createOrchestratorTeamTools(
           signal: controller.signal,
           onUpdate: ctx.onUpdate,
         });
+        // The member's final text leaves through the tool result below — that IS the
+        // delivery. No inbox item is appended for it: a second copy would only be text the
+        // model already has (and the member record already journals `resultText`), so
+        // "settle ⇒ nothing to inject" is a fact this check asserts, not an accident.
         runtime.settleMember({
           teamId,
           memberId: member.id,
@@ -437,6 +441,10 @@ export function createOrchestratorTeamTools(
         to,
         kind,
         payload: args.payload ?? null,
+        // Recorded as the lead's own message for provenance. Delivery needs no marking:
+        // the injector only ever delivers items addressed to the lead, and this one goes
+        // to a member.
+        origin: 'lead-message',
       });
       if (requestId !== undefined) runtime.rememberRequest(teamId, requestId, message.id);
       return {
@@ -712,6 +720,11 @@ export function createWorkerTeamTools(deps: WorkerTeamToolDeps): ToolDefinition[
         to: TEAM_LEAD_ID,
         kind,
         payload: args.payload ?? null,
+        // The member is talking to the orchestrator in its own words: this text has NOT
+        // reached the model yet (only the member's *final* text travels back as
+        // `dispatch_agent`'s tool result), so this is exactly the item P3-B injects.
+        origin: 'member-message',
+        deliveredAsToolResult: false,
       });
       if (requestId !== undefined) runtime.rememberRequest(teamId, requestId, message.id);
       return {

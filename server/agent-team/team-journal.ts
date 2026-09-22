@@ -10,6 +10,13 @@
  * stable storage). The honest phrasing everywhere in this module is therefore
  * "appended via appendFile", never the word for power-loss safety.
  *
+ * **One exception, on purpose**: {@link TeamJournal.appendSynced} writes a given set
+ * of records and fsyncs them before returning. The injector uses it for exactly one
+ * pair of lines per delivery attempt (the claim plus the `inflight` state), because
+ * at-most-once injection depends on the claim being on stable storage *before* the
+ * text is sent. Every other record keeps the cheap path; the module-wide "no fsync"
+ * statement above is about the general journal, not about that one call.
+ *
  * **Layout**: `<dir>/<teamId>.jsonl`, one file per team. Per-team files are what
  * the design actually needs (a team's writers are already serialised), and they
  * keep a corrupt line's blast radius to one team.
@@ -34,7 +41,7 @@
  * single appended line already is from the reader's point of view.
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, readdirSync, writeSync } from 'node:fs';
 import { join } from 'node:path';
 
 /** The only schema version this build writes and reads. */
@@ -92,10 +99,28 @@ export interface TeamJournalReadResult {
   readonly bytes: number;
 }
 
-/** The slice of the journal the runtime needs; a test can pass a recording double. */
+/**
+ * The slice of the journal the runtime needs; a test can pass a recording double.
+ *
+ * `appendSynced` is separate from `append` because it is the **only** call that
+ * forces bytes to stable storage, and a double that does not implement it is
+ * honestly saying "I cannot promise a flush" — which the injector then
+ * treats as "do not deliver" (see `claimDeliverySynced`).
+ */
 export interface TeamJournalLike {
   /** Returns the written record, or `undefined` when the journal is unavailable. */
   append(teamId: string, record: { readonly type: string } & Record<string, unknown>): TeamJournalRecord | undefined;
+  /**
+   * Append records and **fsync** them before returning.
+   *
+   * Returns `undefined` when the journal is unavailable or the write/flush failed —
+   * and that answer is what keeps a delivery from happening on top of a claim that
+   * never landed.
+   */
+  appendSynced?(
+    teamId: string,
+    records: readonly ({ readonly type: string } & Record<string, unknown>)[],
+  ): readonly TeamJournalRecord[] | undefined;
 }
 
 export interface TeamJournalOptions {
@@ -172,6 +197,56 @@ export class TeamJournal implements TeamJournalLike {
     };
     // `appendFileSync` creates the file when missing; no fsync (see the module note).
     appendFileSync(this.fileFor(teamId), `${JSON.stringify(full)}\n`);
+    return full;
+  }
+
+  /**
+   * Append these records and **fsync** them before returning — the one flushed path.
+   *
+   * Deliberately narrow: the whole journal keeps its `appendFileSync`-speed path, and
+   * only the delivery claim pays the flush. That is an explicit trade: one fsync per
+   * delivery attempt costs a disk round trip on a path that is already handing text to
+   * a model, and it buys the guarantee the injector needs — **the claim is on stable
+   * storage before a single byte of the message is sent**. Without it the claim can sit
+   * in the page cache, and a crash that loses the tail brings the item back as
+   * deliverable, which is exactly how the same text reached one model context twice.
+   *
+   * Returns `undefined` when nothing was flushed, so the caller must not proceed.
+   * Records are written in one `open`/`write`/`fsync`/`close`, so a caller appending a
+   * claim *and* the state change it implies gets both or neither.
+   */
+  appendSynced(
+    teamId: string,
+    records: readonly ({ readonly type: string } & Record<string, unknown>)[],
+  ): readonly TeamJournalRecord[] | undefined {
+    if (this.unavailable !== undefined) return undefined;
+    safeTeamId(teamId);
+    const file = this.fileFor(teamId);
+    const full: TeamJournalRecord[] = [];
+    for (const record of records) {
+      const seq = this.sequenceFor(teamId);
+      this.nextSeq.set(teamId, seq + 1);
+      full.push({ v: TEAM_JOURNAL_SCHEMA_VERSION, seq, ts: this.now(), teamId, ...record });
+    }
+    const payload = full.map((record) => `${JSON.stringify(record)}\n`).join('');
+    let fd: number | undefined;
+    try {
+      fd = openSync(file, 'a');
+      writeSync(fd, payload);
+      fsyncSync(fd);
+    } catch {
+      // A failed flush is not a partial write we can reason about: the caller
+      // is told nothing landed and must not act as if it had.
+      return undefined;
+    } finally {
+      if (fd !== undefined) {
+        try {
+          closeSync(fd);
+        } catch {
+          // Closing a handle we already flushed changes nothing the caller can act on.
+        }
+      }
+    }
     return full;
   }
 

@@ -81,6 +81,14 @@ export interface TeamMember {
   readonly createdAt: number;
   /** 已交回的最终文本（`wait_team` 只回它，且按 {@link MAX_TEAM_RESULT_CHARACTERS} 截断）。 */
   resultText?: string;
+  /**
+   * 落到当前状态的稳定原因码（闭集，见 {@link TEAM_INTERRUPT_REASONS}）。
+   *
+   * 目前只有**优雅停机**写它（`host-shutdown`）。P3-A 的重放把 in-flight 成员记成
+   * `interrupted` 时仍然只写散文 `resultText`：那次的真实原因是「进程没能优雅收尾」，
+   * 与 `host-shutdown` 不是同一件事，不能借用同一个码。
+   */
+  statusReason?: string;
   /** 与该成员有关的最后一条消息 seq：读者用它做增量拉取游标。 */
   lastSeq: number;
 }
@@ -101,7 +109,12 @@ export interface TeamTask {
   writeScopes: string[];
 }
 
-/** 一条 Team 消息。`payload` 是模型给的不可信内容，读的人必须自己当数据看。 */
+/**
+ * 一条 Team 消息。`payload` 是模型给的不可信内容，读的人必须自己当数据看。
+ *
+ * P3-B 追加的五个字段**全部可选、全部由宿主填写**（模型侧工具的表单里没有它们），
+ * 因此它们属于可信侧，投影里平铺而不是放进 `untrustedPayload`。
+ */
 export interface TeamMessage {
   readonly id: string;
   readonly teamId: string;
@@ -113,7 +126,97 @@ export interface TeamMessage {
   readonly payload: unknown;
   deliveryState: TeamDeliveryState;
   readonly seq: number;
+  /** 这条项是怎么来的：成员结算、成员主动发言，还是编排者自己发的。 */
+  readonly origin?: TeamMessageOrigin;
+  /**
+   * 这段文本是否**已经**通过 `dispatch_agent` 的工具结果交给模型。
+   *
+   * `true` ⇒ 编排者已经读过它，再注入就是重复打扰（{@link TeamMessageOrigin} 为
+   * `member-settle` 的成功路径就是这种）。`false`/缺省 ⇒ 还没到过模型眼里，可投递。
+   */
+  deliveredAsToolResult?: boolean;
+  /**
+   * 为什么一个**可投递**的项还没被投递（硬要求：不烧掉唯一机会时的可观测原因）。
+   *
+   * 目前唯一的值是 {@link TEAM_PENDING_REASONS.noLiveSession}：宿主重启后重放出来的
+   * Team，其父会话没有活跃绑定 —— 此时不 claim、不注入、也不谎报 `failed`。
+   */
+  pendingReason?: string;
+  /** `failed` 的原因文本，让失败在投影里可读而不是一个光秃秃的状态。 */
+  failureReason?: string;
+  /** 这次注入实际走了哪条 SDK 分支（代价归属：起了一轮 vs 排队等下一轮边界）。 */
+  deliveryMode?: TeamDeliveryMode;
 }
+
+/** 一条 inbox 项的来源。 */
+export type TeamMessageOrigin = 'member-settle' | 'member-message' | 'lead-message';
+
+/**
+ * 注入实际走的分支。
+ *
+ * `turn-started` = 编排者当时空闲，`sendCustomMessage` 触发了新一轮（可能带来一次模型轮）；
+ * `steered` = 编排者正在跑，消息排队，会在当前轮 tool calls 跑完后、下一次 LLM 调用前被看到。
+ */
+export type TeamDeliveryMode = 'turn-started' | 'steered';
+
+/**
+ * 可投递项「还没投」的稳定原因码。
+ *
+ * **闭集**：这些值会进 journal、投影与测试断言，所以它们只能是常量——**绝不把成员产出的
+ * 文本拼进 reason**（那会把不可信内容洗成宿主字段）。要细节就放 `details` 里的宿主值。
+ */
+export const TEAM_PENDING_REASONS = {
+  /** 没有活的编排者会话可以投递：不 claim、不注入、不写 failed，项留在 queued。 */
+  noLiveSession: 'no-live-session',
+  /**
+   * 认领记录无法落地（journal 未配置、不可用，或写入/fsync 失败）⇒ **不投递**。
+   *
+   * at-most-once 的前提是「认领先落盘，再发送」；没有落地的认领就发送，正是同一份文本
+   * 进入模型上下文两次的来源。项留在 `queued`（不是 `failed`），所以 journal 恢复后下一
+   * 次扫描仍可投递。
+   */
+  journalUnavailable: 'journal-unavailable',
+} as const;
+
+/**
+ * 投递失败的稳定原因码（同样闭集，同样不含任何成员文本）。
+ *
+ * 只有两种情况会写 `failed`：**有活目标**但投递前置条件被否（发送者已取消/中断/失败），
+ * 或者 `sendCustomMessage` 真的抛了错。
+ */
+export const TEAM_FAILURE_REASONS = {
+  memberCancelled: 'member-cancelled',
+  /**
+   * 发送者处于 `cancelling`：**显式**取消已经下达、只是停止还没得到确认。
+   *
+   * 与 `memberInterrupted` 的区别是这整条规则的要点：取消是「别再说话了」，中断是
+   * 「宿主把它弄丢了」。前者拒投，后者照投（它中断前留下的消息是它自己的话）。
+   */
+  memberCancelling: 'member-cancelling',
+  memberInterrupted: 'member-interrupted',
+  memberFailed: 'member-failed',
+  sendFailed: 'send-failed',
+} as const;
+
+/**
+ * 成员被「未确认的停止」收尾时的稳定原因码（闭集）。
+ *
+ * 与 {@link TEAM_FAILURE_REASONS} 分开，因为这不是投递失败：`interrupted` 说的是**成员的停止
+ * 没有得到确认**——这一次是宿主优雅停机。人读的解释仍然写在 `resultText` 里，这里只放机器可
+ * 判定、可断言、可入 journal 的码。
+ */
+export const TEAM_INTERRUPT_REASONS = {
+  /** 宿主优雅停机：worker 的停止没有得到确认，成员记 interrupted。 */
+  hostShutdown: 'host-shutdown',
+  /**
+   * 重放归一：日志说明这个成员当时还在 `running`/`cancelling`，而进程已经不在了。
+   *
+   * 与 `host-shutdown` **不是同一件事**，所以是两个码：优雅停机是「我们关了它，它没回话」，
+   * 重放归一只是「它没能优雅收尾」——可能崩溃、可能被 kill，也可能日志之后才被读到。把两者
+   * 合并成一个码，面板与审计就再也分不出「正常收工」和「上次没收拾干净」。
+   */
+  restartReplay: 'restart-replay',
+} as const;
 
 /** 一个 Team：父会话 + 成员 + 任务板 + 消息。 */
 export interface Team {
@@ -150,6 +253,12 @@ export interface TeamMemberView {
   readonly createdAt: number;
   readonly lastSeq: number;
   readonly hasResult: boolean;
+  /**
+   * 成员为什么落到当前状态（闭集码）。目前只有一种：优雅停机把成员记成 `interrupted` 时写
+   * {@link TEAM_INTERRUPT_REASONS.hostShutdown}。与 `resultText` 分开：那是人读的散文，
+   * 这是可断言的稳定值——而且它**永远不含成员产出的文本**。
+   */
+  readonly statusReason?: string;
 }
 
 export interface TeamTaskView {
@@ -170,6 +279,12 @@ export interface TeamMessageView {
   readonly to: string;
   readonly kind: TeamMessageKind;
   readonly deliveryState: TeamDeliveryState;
+  /** 宿主填写的投递元数据（可信侧，平铺）。 */
+  readonly origin?: TeamMessageOrigin;
+  readonly deliveredAsToolResult?: boolean;
+  readonly pendingReason?: string;
+  readonly failureReason?: string;
+  readonly deliveryMode?: TeamDeliveryMode;
   /** 模型写的 payload，标注为不可信。 */
   readonly untrustedPayload: unknown;
 }

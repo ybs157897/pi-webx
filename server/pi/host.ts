@@ -77,12 +77,14 @@ import {
 import { createSubagentWorkerDispatch, type SubagentWorkerRunner } from './subagent-worker';
 import { AgentTeamRuntime } from '../agent-team/team-runtime';
 import { TeamJournal } from '../agent-team/team-journal';
+import { TeamInjector, type TeamLiveSession } from '../agent-team/team-inject';
 import {
   createOrchestratorTeamTools,
   createWorkerTeamTools,
   type TeamDispatchRequest,
 } from '../agent-team/team-tools';
 import {
+  TEAM_INTERRUPT_REASONS,
   TEAM_ORCHESTRATOR_TOOL_NAMES,
   type TeamProjection,
 } from '../agent-team/team-types';
@@ -341,6 +343,13 @@ export class PiHost {
    */
   private readonly journal: TeamJournal;
   private readonly teams: AgentTeamRuntime;
+  /**
+   * P3-B delivery: hands pending inbox items to the live orchestrator session.
+   *
+   * Constructed with a lookup, not the session table itself, so the injector stays
+   * a policy module with one dependency it can be tested against.
+   */
+  private readonly teamInjector: TeamInjector;
   private closing = false;
   private readonly workerRunner: SubagentWorkerRunner;
   private readonly definitions: Pick<AgentDefinitionStore, 'read'>;
@@ -356,7 +365,17 @@ export class PiHost {
     this.journal = new TeamJournal({
       dir: options.teamJournalDir ?? join(getAgentDir(), 'pi-webx', 'teams'),
     });
-    this.teams = new AgentTeamRuntime({ journal: this.journal });
+    this.teams = new AgentTeamRuntime({
+      journal: this.journal,
+      // The inbox has one birth point; observing it is what makes injection happen
+      // for both a member's out-of-band message and a settle result, without a tool
+      // having to cooperate.
+      onInboxItem: (message) => { void this.deliverTeamInbox(message.teamId); },
+    });
+    this.teamInjector = new TeamInjector({
+      runtime: this.teams,
+      liveSession: (teamId) => this.liveTeamSession(teamId),
+    });
     this.capacity = new SubagentCapacity({
       maxWorkers: MAX_WORKERS,
       budget: this.sessionCapacity,
@@ -822,6 +841,64 @@ export class PiHost {
   /** Where the Team journal lives; surfaced for operators and tests. */
   get teamJournalDir(): string {
     return this.journal.directory;
+  }
+
+  /* ----------------------------------------------------------- P3-B delivery */
+
+  /**
+   * The live session that orchestrates one team, if there is one.
+   *
+   * A team can exist without one: after a restart the journal rebuilds the team,
+   * but nobody has opened its parent session yet. The injector must be able to see
+   * that difference — "no target" is not "delivery failed" — which is exactly why
+   * this lookup returns `undefined` instead of throwing.
+   */
+  private liveTeamSession(teamId: string): TeamLiveSession | undefined {
+    const team = this.teams.get(teamId);
+    if (team === undefined) return undefined;
+    const hosted = [...this.sessions.values()].find((session) => session.teamId === teamId);
+    if (hosted === undefined || !hosted.alive) return undefined;
+    const session = hosted.session;
+    return {
+      get isStreaming(): boolean {
+        return session.isStreaming;
+      },
+      sendCustomMessage: (message, options) => session.sendCustomMessage(
+        {
+          customType: message.customType,
+          content: message.content,
+          display: message.display,
+          details: message.details,
+        },
+        { triggerTurn: options.triggerTurn, deliverAs: options.deliverAs },
+      ),
+      /**
+       * Read-back for the strongest state we may claim. The entry is in the
+       * session's own tree once the SDK appended it; an in-memory worker-free
+       * parent session has no file to reopen, so this is the reader we have.
+       */
+      readBack: (messageId: string): boolean => session.messages.some((message) => {
+        const record = message as { role?: string; details?: { messageId?: unknown } };
+        return record.role === 'custom' && record.details?.messageId === messageId;
+      }),
+    };
+  }
+
+  /**
+   * Sweep one team's inbox and hand what is deliverable to the orchestrator.
+   *
+   * Fire-and-forget by design: the inbox item is already recorded (P3-A made it
+   * recoverable), so a slow or failed delivery must never block the tool call that
+   * produced it. Every outcome — including a refusal — is recorded on the item, so
+   * "nothing happened" is always observable afterwards.
+   */
+  private async deliverTeamInbox(teamId: string): Promise<void> {
+    try {
+      await this.teamInjector.deliverPending(teamId);
+    } catch {
+      // The injector records its own failures; a throw here would be a bug in it,
+      // and losing an already-recorded message to a bug is the worse outcome.
+    }
   }
 
   /**
@@ -1388,7 +1465,13 @@ export class PiHost {
     // dropped by `kill` below. (P2 keeps this in memory only; P3's journal is what
     // would make it visible after a restart.)
     for (const hosted of this.sessions.values()) {
-      if (hosted.teamId !== null) this.teams.markInterrupted(hosted.teamId, '宿主已关闭，停止未得到确认。');
+      if (hosted.teamId !== null) {
+        this.teams.markInterrupted(
+          hosted.teamId,
+          '宿主已关闭，停止未得到确认。',
+          TEAM_INTERRUPT_REASONS.hostShutdown,
+        );
+      }
     }
     for (const id of [...this.sessions.keys()]) await this.kill(id);
   }

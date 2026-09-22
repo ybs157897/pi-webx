@@ -21,6 +21,7 @@ import type {
 } from './team-journal';
 import {
   TEAM_ERROR_CODES,
+  TEAM_INTERRUPT_REASONS,
   TEAM_LEAD_ID,
   TeamError,
   boundTeamText,
@@ -33,7 +34,9 @@ import {
   type TeamMemberStatus,
   type TeamMemberView,
   type TeamMessage,
+  type TeamDeliveryMode,
   type TeamMessageKind,
+  type TeamMessageOrigin,
   type TeamMessageView,
   type TeamProjection,
   type TeamTask,
@@ -59,6 +62,15 @@ export interface TeamRuntimeOptions {
    * passes one in.
    */
   readonly journal?: TeamJournalLike;
+  /**
+   * Called after an inbox item is recorded (P3-B's injection trigger).
+   *
+   * The inbox has exactly one birth point — {@link AgentTeamRuntime.appendMessage} —
+   * so an observer here covers both a member's out-of-band message and a settle
+   * result without any tool having to cooperate. It must not throw: a broken
+   * observer must not fail the message that was already recorded.
+   */
+  readonly onInboxItem?: (message: TeamMessage) => void;
 }
 
 /** 谁在改任务：编排者（宿主，不受 ownership 限制）或某个成员。 */
@@ -130,12 +142,14 @@ export class AgentTeamRuntime {
    * （模块顶部的边界说明），不承诺跨掉电的完整性。
    */
   private readonly journal: TeamJournalLike | undefined;
+  private readonly onInboxItem: ((message: TeamMessage) => void) | undefined;
 
   constructor(options: TeamRuntimeOptions = {}) {
     this.now = options.now ?? Date.now;
     this.newId = options.newId ?? randomUUID;
     this.delay = options.delay ?? DEFAULT_DELAY;
     this.journal = options.journal;
+    this.onInboxItem = options.onInboxItem;
   }
 
   /** Team ids currently in memory, sorted — the replay path uses this to skip. */
@@ -201,8 +215,14 @@ export class AgentTeamRuntime {
       tasks: [...team.tasks.values()].map(toTaskView),
       messages: team.messages.map(toMessageView),
       notes: [
-        'P2 的 Team 状态全部在内存（host 持有），进程重启即丢；落盘队列（TeamJournal）是 P3。',
-        '消息目前只到 deliveryState=queued：P2 不做会话注入，fresh-reader-visible 留给 P3 的读回。',
+        '投递语义是 **at-most-once**：认领记录先 fsync 落盘再发送，因此重启不会重复投递；'
+        + '代价是 fsync 之后、发送之前崩溃会让这一条丢一次，重放后表现为 inflight 且没有 candidate。'
+        + '残余边界（普通崩溃拿不到）：**已经 fsync 的认领记录本身被删除或截断**（不是崩溃丢尾），'
+        + '**且**目标会话的转录也读不回该 messageId（全新转录 / 无读回接缝）时，同一段文本会再次投递。',
+        '消息按 deliveryState 走：queued 待投、inflight 已认领（此刻它不该再被投第二次）、'
+        + 'candidate 已交出但读回未确认、fresh-reader-visible 读回已确认、failed 是闭集原因拒绝或发送失败。',
+        '没有 journal（或 journal 不可用）的运行时**不投递**：认领无法落盘时，项留在 queued 并把'
+        + 'pendingReason 记为 journal-unavailable —— 「没落地就不投」是 at-most-once 的前提。',
         'from/to/teamId 由宿主填写；消息 payload 与任务标题/描述是模型文本，读作不可信数据。',
         '成员的 sessionId 在 P2 是内存 run 标识（dispatch 的 runId），不是可恢复的持久会话 id，'
         + '不能据此 open() 回一个会话；跨重启的会话关联由 P3 的 TeamJournal 引入。',
@@ -288,15 +308,20 @@ export class AgentTeamRuntime {
   /**
    * 宿主收尾：把所有未 settle 的成员记成 `interrupted`（停止没有得到确认）。
    *
+   * `statusReason` 是**闭集码**（见 {@link TEAM_INTERRUPT_REASONS}），与 `reason`（人读的散文，
+   * 只在成员还没有结果文本时补上去）分开：前端与断言读的是码，人不该为了判断原因去 grep 散文。
+   * 已 settle 的成员（含协作式取消确认过的 `cancelled`）不动——它们不需要第二次结论。
+   *
    * P2 全内存，所以这个状态只在本次进程内可见；让它跨重启可见是 P3 的 journal 的事。
    */
-  markInterrupted(teamId: string, reason: string): number {
+  markInterrupted(teamId: string, reason: string, statusReason?: string): number {
     const team = this.requireTeam(teamId);
     let marked = 0;
     for (const member of team.members.values()) {
       if (isSettledMemberStatus(member.status)) continue;
       member.status = 'interrupted';
       member.resultText ??= reason;
+      if (statusReason !== undefined) member.statusReason = statusReason;
       this.appendRecord(teamId, { type: 'member-updated', member: memberSnapshot(member) });
       marked += 1;
     }
@@ -482,7 +507,17 @@ export class AgentTeamRuntime {
     readonly kind: TeamMessageKind;
     readonly payload: unknown;
     readonly deliveryState?: TeamDeliveryState;
+    /** P3-B host metadata; never accepted from a model-facing tool. */
+    readonly origin?: TeamMessageOrigin;
+    readonly deliveredAsToolResult?: boolean;
   }): TeamMessage {
+    // A `member-settle` item IS the member's final text, and in the synchronous dispatch
+    // design that text has already reached the orchestrator as `dispatch_agent`'s tool
+    // result — so it must never be injected on top of it. The default closes that hole in
+    // the runtime instead of trusting every producer to remember the flag; a producer that
+    // knows the text did *not* reach the model (a future async settle) passes `false`.
+    const deliveredAsToolResult = input.deliveredAsToolResult
+      ?? (input.origin === 'member-settle' ? true : undefined);
     const team = this.requireTeam(input.teamId);
     if (input.to !== TEAM_LEAD_ID && !team.members.has(input.to)) {
       throw new TeamError(
@@ -501,6 +536,8 @@ export class AgentTeamRuntime {
       payload: input.payload,
       deliveryState: input.deliveryState ?? 'queued',
       seq: team.seq,
+      ...(input.origin === undefined ? {} : { origin: input.origin }),
+      ...(deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult }),
     };
     team.messages.push(message);
     for (const memberId of [message.from, message.to]) {
@@ -514,20 +551,27 @@ export class AgentTeamRuntime {
     }
     this.appendRecord(team.id, { type: 'message-queued', message: messageSnapshot(message) });
     this.notify(team.id);
+    if (this.onInboxItem !== undefined) {
+      try {
+        this.onInboxItem(message);
+      } catch {
+        // An observer failure is not a reason to lose a message that is already
+        // recorded; the item simply waits for the next trigger.
+      }
+    }
     return message;
   }
 
   /**
-   * Claim the single delivery attempt for one message — the P3-A half of
-   * "at-least-once delivery, deduplicated by the target".
+   * Claim the single delivery attempt for one message, **in memory only**.
    *
-   * The claim is journaled **before** the caller does anything with it, so the
-   * answer survives a restart: a message claimed in an earlier process is refused
-   * here instead of being delivered a second time. `true` means "you own the one
-   * attempt"; `false` means it was already taken, or the message does not exist.
+   * The claim is journaled through the cheap path, so the answer survives a restart
+   * *as long as the journal's tail survives* — which is not the same as flushed. The
+   * injector must use {@link claimDeliverySynced} instead; this variant is the P3-A
+   * ledger view used by readers, tests and the wait/pending queries.
    *
-   * What this does **not** do: inject anything into a session. Injection is P3-B,
-   * and it must call this first so a replay cannot duplicate a delivery.
+   * `true` means "you own the one attempt"; `false` means it was already taken, or the
+   * message does not exist.
    */
   claimDelivery(teamId: string, messageId: string): boolean {
     const team = this.requireTeam(teamId);
@@ -540,6 +584,53 @@ export class AgentTeamRuntime {
     this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
     this.notify(teamId);
     return true;
+  }
+
+  /**
+   * Claim the one delivery attempt **and get the claim onto disk first**.
+   *
+   * This is the only claim the injector may use. The claim line and the `inflight`
+   * state line are written together and `fsync`ed before this returns `'claimed'`, so
+   * "the attempt is spent" is on stable storage *before* the caller sends anything.
+   * The localised cost (one fsync per delivery attempt) and what it buys are documented
+   * on {@link TeamJournalLike.appendSynced}.
+   *
+   * `'journalUnavailable'` means **nothing landed**: no journal is attached, the journal
+   * is disabled, or the write/flush failed. The message is left exactly as it was
+   * (`queued`, unclaimed, no in-memory claim) so a later sweep — after the journal
+   * recovers — can try again. A caller must never send in that case: delivering on a
+   * claim that is not on disk is what makes the same text reach a model twice.
+   *
+   * The failure mode this deliberately accepts is **at-most-once**: if the process dies
+   * after the flush and before the send, that item is never delivered. A replay shows it
+   * as `inflight` with no `candidate`, which is exactly how a reader can tell this apart
+   * from "delivered but unconfirmed".
+   */
+  claimDeliverySynced(teamId: string, messageId: string): 'claimed' | 'alreadyClaimed' | 'journalUnavailable' {
+    const team = this.requireTeam(teamId);
+    if (this.claimed.has(messageId)) return 'alreadyClaimed';
+    const message = team.messages.find((entry) => entry.id === messageId);
+    if (message === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
+    }
+    const appendSynced = this.journal?.appendSynced?.bind(this.journal);
+    if (appendSynced === undefined) return 'journalUnavailable';
+
+    const previous = message.deliveryState;
+    message.deliveryState = 'inflight';
+    const written = appendSynced(teamId, [
+      { type: 'delivery-claimed', messageId },
+      { type: 'message-updated', message: messageSnapshot(message) },
+    ]);
+    if (written === undefined) {
+      // Nothing was flushed, so nothing may look claimed: put the item back exactly as it
+      // was and let the next sweep try again.
+      message.deliveryState = previous;
+      return 'journalUnavailable';
+    }
+    this.claimed.add(messageId);
+    this.notify(teamId);
+    return 'claimed';
   }
 
   /** Whether a delivery attempt has already been claimed for this message. */
@@ -559,16 +650,51 @@ export class AgentTeamRuntime {
    * P3-B's acknowledgement steps (`host-ack`, then the read-back that earns
    * `fresh-reader-visible`) call this; P3-A only has to journal and replay it.
    */
-  setMessageDeliveryState(teamId: string, messageId: string, state: TeamDeliveryState): TeamMessage {
+  setMessageDeliveryState(
+    teamId: string,
+    messageId: string,
+    state: TeamDeliveryState,
+    extra: { readonly failureReason?: string; readonly deliveryMode?: TeamDeliveryMode } = {},
+  ): TeamMessage {
     const team = this.requireTeam(teamId);
     const message = team.messages.find((entry) => entry.id === messageId);
     if (message === undefined) {
       throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
     }
     message.deliveryState = state;
+    if (extra.failureReason !== undefined) message.failureReason = extra.failureReason;
+    if (extra.deliveryMode !== undefined) message.deliveryMode = extra.deliveryMode;
+    // A state change means the item is no longer merely waiting.
+    if (state !== 'queued') delete message.pendingReason;
     this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
     this.notify(teamId);
     return message;
+  }
+
+  /**
+   * Record why an injectable item has not been injected yet.
+   *
+   * `reason` must be one of the closed constants in `TEAM_PENDING_REASONS`: it is
+   * host-side metadata and must never carry text produced by a member. Nothing is
+   * claimed and no state moves — the item stays `queued`, which is the point:
+   * "no live session right now" is not a failure and must not burn the one
+   * delivery attempt.
+   */
+  setMessagePendingReason(teamId: string, messageId: string, reason: string): TeamMessage {
+    const team = this.requireTeam(teamId);
+    const message = team.messages.find((entry) => entry.id === messageId);
+    if (message === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
+    }
+    message.pendingReason = reason;
+    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
+    this.notify(teamId);
+    return message;
+  }
+
+  /** Every inbox item, in sequence order — what an injector sweeps. */
+  inbox(teamId: string): readonly TeamMessage[] {
+    return [...this.requireTeam(teamId).messages].sort((left, right) => left.seq - right.seq);
   }
 
   /* -------------------------------------------------------------- 等待/幂等 */
@@ -751,10 +877,17 @@ export class AgentTeamRuntime {
       return { teamId: input.teamId, created: false, members: 0, tasks: 0, messages: 0, interrupted: 0, claimed: 0 };
     }
     // The process is gone, so nothing that was mid-flight can still be running.
+    //
+    // These members are written here, not in the journal: the record that put them in
+    // `running` is the last word the process managed, and this replay is the reader that
+    // draws the conclusion. The code says *which* kind of unconfirmed stop this is —
+    // `restart-replay`, never `host-shutdown` (graceful shutdown is a different event,
+    // written by {@link markInterrupted} while the process was still alive).
     for (const member of team.members.values()) {
       if (member.status === 'running' || member.status === 'cancelling') {
         member.status = 'interrupted';
         member.resultText ??= '宿主重启：成员会话是内存态的，无法恢复，停止未得到确认。';
+        member.statusReason = TEAM_INTERRUPT_REASONS.restartReplay;
         interrupted += 1;
       }
     }
@@ -839,6 +972,7 @@ function memberSnapshot(member: TeamMember): Record<string, unknown> {
     status: member.status,
     createdAt: member.createdAt,
     ...(member.resultText === undefined ? {} : { resultText: member.resultText }),
+    ...(member.statusReason === undefined ? {} : { statusReason: member.statusReason }),
     lastSeq: member.lastSeq,
   };
 }
@@ -867,6 +1001,11 @@ function messageSnapshot(message: TeamMessage): Record<string, unknown> {
     payload: message.payload,
     deliveryState: message.deliveryState,
     seq: message.seq,
+    ...(message.origin === undefined ? {} : { origin: message.origin }),
+    ...(message.deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult: message.deliveredAsToolResult }),
+    ...(message.pendingReason === undefined ? {} : { pendingReason: message.pendingReason }),
+    ...(message.failureReason === undefined ? {} : { failureReason: message.failureReason }),
+    ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode }),
   };
 }
 
@@ -887,6 +1026,7 @@ function readMember(value: unknown, teamId: string): TeamMember | undefined {
     status: status as TeamMemberStatus,
     createdAt: typeof record['createdAt'] === 'number' ? record['createdAt'] : 0,
     ...(typeof record['resultText'] === 'string' ? { resultText: record['resultText'] } : {}),
+    ...(typeof record['statusReason'] === 'string' ? { statusReason: record['statusReason'] } : {}),
     lastSeq: typeof record['lastSeq'] === 'number' ? record['lastSeq'] : 0,
   };
 }
@@ -925,6 +1065,11 @@ function readMessage(value: unknown, teamId: string): TeamMessage | undefined {
     payload: record['payload'] ?? null,
     deliveryState: (typeof record['deliveryState'] === 'string' ? record['deliveryState'] : 'queued') as TeamDeliveryState,
     seq: typeof record['seq'] === 'number' ? record['seq'] : 0,
+    ...(typeof record['origin'] === 'string' ? { origin: record['origin'] as TeamMessageOrigin } : {}),
+    ...(typeof record['deliveredAsToolResult'] === 'boolean' ? { deliveredAsToolResult: record['deliveredAsToolResult'] } : {}),
+    ...(typeof record['pendingReason'] === 'string' ? { pendingReason: record['pendingReason'] } : {}),
+    ...(typeof record['failureReason'] === 'string' ? { failureReason: record['failureReason'] } : {}),
+    ...(typeof record['deliveryMode'] === 'string' ? { deliveryMode: record['deliveryMode'] as TeamDeliveryMode } : {}),
   };
 }
 
@@ -941,6 +1086,7 @@ function toMemberView(member: TeamMember): TeamMemberView {
     createdAt: member.createdAt,
     lastSeq: member.lastSeq,
     hasResult: member.resultText !== undefined,
+    ...(member.statusReason === undefined ? {} : { statusReason: member.statusReason }),
   };
 }
 
@@ -964,6 +1110,11 @@ function toMessageView(message: TeamMessage): TeamMessageView {
     to: message.to,
     kind: message.kind,
     deliveryState: message.deliveryState,
+    ...(message.origin === undefined ? {} : { origin: message.origin }),
+    ...(message.deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult: message.deliveredAsToolResult }),
+    ...(message.pendingReason === undefined ? {} : { pendingReason: message.pendingReason }),
+    ...(message.failureReason === undefined ? {} : { failureReason: message.failureReason }),
+    ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode }),
     untrustedPayload: message.payload,
   };
 }
