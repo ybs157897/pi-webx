@@ -15,6 +15,10 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import type { FrozenDefinition } from '../pi/subagent-tool';
+import type {
+  TeamJournalLike,
+  TeamJournalRecord,
+} from './team-journal';
 import {
   TEAM_ERROR_CODES,
   TEAM_LEAD_ID,
@@ -47,6 +51,14 @@ export interface TeamRuntimeOptions {
   readonly newId?: () => string;
   /** 等待窗口的计时器，测试可替换以便零延迟断言。 */
   readonly delay?: (ms: number) => Promise<void>;
+  /**
+   * Where state changes are appended so a restart can rebuild them (P3-A).
+   *
+   * Omitted means pure memory, which is exactly P2's behaviour — the many runtime
+   * doubles in tests keep working unchanged, and a host that wants the journal
+   * passes one in.
+   */
+  readonly journal?: TeamJournalLike;
 }
 
 /** 谁在改任务：编排者（宿主，不受 ownership 限制）或某个成员。 */
@@ -91,14 +103,44 @@ export class AgentTeamRuntime {
   private readonly requests = new Map<string, string>();
   /** 每个 team 的「状态变了」通知者，供 `wait_team` 精确唤醒而不是轮询。 */
   private readonly waiters = new Map<string, Set<() => void>>();
+  /**
+   * `parentSessionId → teamId`，**包括从日志重放出来的**。
+   *
+   * 它是 F1 那条会话别名在重启之后仍然可用的原因：team id 由 `newId()` 生成、从不发给客户端，
+   * 而客户端手里只有会话 id；会话本身可能连转录都没落盘（没有 assistant 回合），所以不能靠
+   * 「活会话表」来找。这里的映射来自 `team-created` 记录里宿主填的 `parentSessionId`。
+   */
+  private readonly parentIndex = new Map<string, string>();
+  /**
+   * messageId 的投递账本。
+   *
+   * P3-A 只记录「这条消息的投递机会已经被用掉」：真正的注入是 P3-B。账本跟着
+   * journal 走（`delivery-claimed` 记录），所以**重启之后同一条 messageId 也不会
+   * 拿到第二次机会**——这正是「至少一次投递 + 目标侧去重」里属于我们这一侧的那一半。
+   */
+  private readonly claimed = new Set<string>();
   private readonly now: () => number;
   private readonly newId: () => string;
   private readonly delay: (ms: number) => Promise<void>;
+  /**
+   * 追加式日志；不传就是纯内存（P2 的行为，测试与无日志场景）。
+   *
+   * 写入发生在**状态改变之后**：先改内存、再 append。崩溃窗口的后果是「内存里已经发生、
+   * 日志里没有」——重启后那次改变不见，这与「append 到磁盘、可重放」的诚实口径一致
+   * （模块顶部的边界说明），不承诺跨掉电的完整性。
+   */
+  private readonly journal: TeamJournalLike | undefined;
 
   constructor(options: TeamRuntimeOptions = {}) {
     this.now = options.now ?? Date.now;
     this.newId = options.newId ?? randomUUID;
     this.delay = options.delay ?? DEFAULT_DELAY;
+    this.journal = options.journal;
+  }
+
+  /** Team ids currently in memory, sorted — the replay path uses this to skip. */
+  listTeams(): string[] {
+    return [...this.teams.keys()].sort();
   }
 
   /* --------------------------------------------------------------- 生命周期 */
@@ -115,11 +157,18 @@ export class AgentTeamRuntime {
       seq: 0,
     };
     this.teams.set(team.id, team);
+    this.parentIndex.set(parentSessionId, team.id);
+    this.appendRecord(team.id, { type: 'team-created', parentSessionId, createdAt: team.createdAt });
     return team;
   }
 
   get(teamId: string): Team | undefined {
     return this.teams.get(teamId);
+  }
+
+  /** The team a session orchestrates, including one rebuilt from the journal. */
+  findTeamByParentSession(parentSessionId: string): string | undefined {
+    return this.parentIndex.get(parentSessionId);
   }
 
   /**
@@ -131,6 +180,7 @@ export class AgentTeamRuntime {
   dropTeam(teamId: string): boolean {
     const team = this.teams.get(teamId);
     if (team === undefined) return false;
+    if (this.parentIndex.get(team.parentSessionId) === teamId) this.parentIndex.delete(team.parentSessionId);
     for (const member of team.members.values()) this.cancels.delete(member.id);
     this.waiters.delete(teamId);
     for (const key of [...this.requests.keys()]) {
@@ -177,6 +227,7 @@ export class AgentTeamRuntime {
       lastSeq: team.seq,
     };
     team.members.set(member.id, member);
+    this.appendRecord(team.id, { type: 'member-added', member: memberSnapshot(member) });
     this.notify(team.id);
     return member;
   }
@@ -202,6 +253,7 @@ export class AgentTeamRuntime {
     member.status = input.status;
     if (input.sessionId !== undefined) member.sessionId = input.sessionId;
     if (input.text !== undefined) member.resultText = input.text;
+    this.appendRecord(input.teamId, { type: 'member-updated', member: memberSnapshot(member) });
     this.notify(input.teamId);
     return member;
   }
@@ -225,6 +277,7 @@ export class AgentTeamRuntime {
       );
     }
     member.status = 'cancelling';
+    this.appendRecord(input.teamId, { type: 'member-updated', member: memberSnapshot(member) });
     const reason = input.reason ?? '编排者取消了该成员。';
     const cancel = this.cancels.get(member.id);
     if (cancel !== undefined) cancel(reason);
@@ -244,6 +297,7 @@ export class AgentTeamRuntime {
       if (isSettledMemberStatus(member.status)) continue;
       member.status = 'interrupted';
       member.resultText ??= reason;
+      this.appendRecord(teamId, { type: 'member-updated', member: memberSnapshot(member) });
       marked += 1;
     }
     if (marked > 0) this.notify(teamId);
@@ -257,6 +311,7 @@ export class AgentTeamRuntime {
     for (const member of [...team.members.values()]) {
       if (isSettledMemberStatus(member.status)) continue;
       member.status = 'cancelling';
+      this.appendRecord(teamId, { type: 'member-updated', member: memberSnapshot(member) });
       const cancel = this.cancels.get(member.id);
       if (cancel !== undefined) cancel(reason ?? 'Team 被取消。');
       asked += 1;
@@ -297,6 +352,7 @@ export class AgentTeamRuntime {
     };
     if (isTaskBlocked(task, team.tasks)) task.status = 'blocked';
     team.tasks.set(task.id, task);
+    this.appendRecord(team.id, { type: 'task-created', task: { ...task, blockedBy: [...task.blockedBy], writeScopes: [...task.writeScopes] } });
     this.notify(team.id);
     return task;
   }
@@ -368,6 +424,10 @@ export class AgentTeamRuntime {
     if (input.patch.ownerMemberId !== undefined) task.ownerMemberId = input.patch.ownerMemberId;
     if (next !== undefined) task.status = next;
     task.revision += 1;
+    this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
+    // A derived blocked↔pending change is a real state change a replay must see, so
+    // each promoted/demoted task is appended too — but *without* a revision bump
+    // (see `refreshBlocked`), which is why the snapshot carries its own revision.
     this.refreshBlocked(team);
     this.notify(team.id);
     return task;
@@ -397,8 +457,13 @@ export class AgentTeamRuntime {
     for (const task of team.tasks.values()) {
       if (isTerminalTaskStatus(task.status) || task.status === 'in_progress') continue;
       const blocked = isTaskBlocked(task, team.tasks);
-      if (blocked && task.status === 'pending') task.status = 'blocked';
-      else if (!blocked && task.status === 'blocked') task.status = 'pending';
+      if (blocked && task.status === 'pending') {
+        task.status = 'blocked';
+        this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
+      } else if (!blocked && task.status === 'blocked') {
+        task.status = 'pending';
+        this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
+      }
     }
   }
 
@@ -440,9 +505,69 @@ export class AgentTeamRuntime {
     team.messages.push(message);
     for (const memberId of [message.from, message.to]) {
       const member = team.members.get(memberId);
-      if (member !== undefined) member.lastSeq = message.seq;
+      if (member === undefined) continue;
+      member.lastSeq = message.seq;
+      // The cursor move is part of the member's state (readers page with it), so it
+      // is journaled with the member — otherwise a replay would restore `lastSeq`
+      // from before this message and the round-trip would drift.
+      this.appendRecord(team.id, { type: 'member-updated', member: memberSnapshot(member) });
     }
+    this.appendRecord(team.id, { type: 'message-queued', message: messageSnapshot(message) });
     this.notify(team.id);
+    return message;
+  }
+
+  /**
+   * Claim the single delivery attempt for one message — the P3-A half of
+   * "at-least-once delivery, deduplicated by the target".
+   *
+   * The claim is journaled **before** the caller does anything with it, so the
+   * answer survives a restart: a message claimed in an earlier process is refused
+   * here instead of being delivered a second time. `true` means "you own the one
+   * attempt"; `false` means it was already taken, or the message does not exist.
+   *
+   * What this does **not** do: inject anything into a session. Injection is P3-B,
+   * and it must call this first so a replay cannot duplicate a delivery.
+   */
+  claimDelivery(teamId: string, messageId: string): boolean {
+    const team = this.requireTeam(teamId);
+    if (this.claimed.has(messageId)) return false;
+    const message = team.messages.find((entry) => entry.id === messageId);
+    if (message === undefined) return false;
+    this.claimed.add(messageId);
+    this.appendRecord(teamId, { type: 'delivery-claimed', messageId });
+    message.deliveryState = 'inflight';
+    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
+    this.notify(teamId);
+    return true;
+  }
+
+  /** Whether a delivery attempt has already been claimed for this message. */
+  deliveryClaimed(messageId: string): boolean {
+    return this.claimed.has(messageId);
+  }
+
+  /** Messages that are still `queued` and have never had their one attempt claimed. */
+  pendingDeliveries(teamId: string): readonly TeamMessage[] {
+    const team = this.requireTeam(teamId);
+    return team.messages.filter((message) => message.deliveryState === 'queued' && !this.claimed.has(message.id));
+  }
+
+  /**
+   * Record a delivery-state change for one message.
+   *
+   * P3-B's acknowledgement steps (`host-ack`, then the read-back that earns
+   * `fresh-reader-visible`) call this; P3-A only has to journal and replay it.
+   */
+  setMessageDeliveryState(teamId: string, messageId: string, state: TeamDeliveryState): TeamMessage {
+    const team = this.requireTeam(teamId);
+    const message = team.messages.find((entry) => entry.id === messageId);
+    if (message === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
+    }
+    message.deliveryState = state;
+    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
+    this.notify(teamId);
     return message;
   }
 
@@ -526,6 +651,131 @@ export class AgentTeamRuntime {
 
   /* ----------------------------------------------------------------- 内部 */
 
+  /** Append one record, when a journal is attached. A journal failure must not
+   * take the runtime down: the in-memory state is already the source of truth for
+   * this process, and the caller learns about a broken journal by the fact that a
+   * restart loses more than it should. */
+  private appendRecord(teamId: string, record: { readonly type: string } & Record<string, unknown>): void {
+    if (this.journal === undefined) return;
+    this.journal.append(teamId, record);
+  }
+
+  /**
+   * Rebuild one team from its journal records — the P3-A replay.
+   *
+   * Records are applied in order; each carries the entity **after** its change, so
+   * the last record for an entity wins and replaying twice is a no-op. Two things
+   * are deliberately *not* replayed from the file:
+   *
+   *   - **A live member cannot be revived.** A member whose last recorded status is
+   *     `running` or `cancelling` belonged to an in-memory worker session that died
+   *     with the process; it is recorded here as `interrupted` (the same state P2
+   *     used for an unconfirmed stop). Its `TEAM_MEMBER_NOT_ACTIVE` guard therefore
+   *     still refuses any attempt to write the task board from it.
+   *   - **A settled member's text is restored**, because it was appended while the
+   *     member settled.
+   *
+   * Returns what the rebuild changed, so a caller can report it instead of guessing.
+   */
+  hydrate(input: { readonly teamId: string; readonly records: readonly TeamJournalRecord[] }): {
+    readonly teamId: string;
+    /** Whether a team actually exists in memory after this replay. */
+    readonly created: boolean;
+    readonly members: number;
+    readonly tasks: number;
+    readonly messages: number;
+    readonly interrupted: number;
+    readonly claimed: number;
+  } {
+    let team = this.teams.get(input.teamId);
+    let interrupted = 0;
+    let maxSeq = 0;
+    for (const record of input.records) {
+      maxSeq = Math.max(maxSeq, record.seq);
+      switch (record.type) {
+        case 'team-created': {
+          const parentSessionId = typeof record['parentSessionId'] === 'string' ? record['parentSessionId'] : '';
+          const createdAt = typeof record['createdAt'] === 'number' ? record['createdAt'] : this.now();
+          team = {
+            id: input.teamId,
+            parentSessionId,
+            createdAt,
+            members: new Map(),
+            tasks: new Map(),
+            messages: [],
+            seq: 0,
+          };
+          this.teams.set(team.id, team);
+          // The alias index: a client only ever holds the session id, and after a
+          // restart the session may have no transcript at all.
+          this.parentIndex.set(parentSessionId, team.id);
+          break;
+        }
+        case 'member-added':
+        case 'member-updated': {
+          if (team === undefined) break;
+          const member = readMember(record['member'], input.teamId);
+          if (member === undefined) break;
+          team.members.set(member.id, member);
+          break;
+        }
+        case 'task-created':
+        case 'task-updated': {
+          if (team === undefined) break;
+          const task = readTask(record['task'], input.teamId);
+          if (task === undefined) break;
+          team.tasks.set(task.id, task);
+          break;
+        }
+        case 'message-queued':
+        case 'message-updated': {
+          if (team === undefined) break;
+          const message = readMessage(record['message'], input.teamId);
+          if (message === undefined) break;
+          const existing = team.messages.findIndex((entry) => entry.id === message.id);
+          if (existing === -1) team.messages.push(message);
+          else team.messages[existing] = message;
+          team.seq = Math.max(team.seq, message.seq);
+          break;
+        }
+        case 'delivery-claimed': {
+          const messageId = typeof record['messageId'] === 'string' ? record['messageId'] : undefined;
+          if (messageId !== undefined) this.claimed.add(messageId);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    if (team === undefined) {
+      return { teamId: input.teamId, created: false, members: 0, tasks: 0, messages: 0, interrupted: 0, claimed: 0 };
+    }
+    // The process is gone, so nothing that was mid-flight can still be running.
+    for (const member of team.members.values()) {
+      if (member.status === 'running' || member.status === 'cancelling') {
+        member.status = 'interrupted';
+        member.resultText ??= '宿主重启：成员会话是内存态的，无法恢复，停止未得到确认。';
+        interrupted += 1;
+      }
+    }
+    // Continue the record numbering after the highest replayed seq.
+    if (this.journal !== undefined && 'seed' in this.journal) {
+      (this.journal as { seed(teamId: string, seq: number): void }).seed(input.teamId, maxSeq);
+    }
+    return {
+      teamId: team.id,
+      // "A team exists in memory after this replay" — the only thing a caller may
+      // report as rebuilt. (`existed` is not part of the answer: replaying over live
+      // state is the caller's own decision to make, and the answer stays truthful.)
+      created: this.teams.has(team.id),
+      members: team.members.size,
+      tasks: team.tasks.size,
+      messages: team.messages.length,
+      interrupted,
+      claimed: this.claimed.size,
+    };
+  }
+
   requireTeam(teamId: string): Team {
     const team = this.teams.get(teamId);
     if (team === undefined) {
@@ -567,6 +817,115 @@ export class AgentTeamRuntime {
       void this.delay(timeoutMs).then(wake);
     });
   }
+}
+
+/* ------------------------------------------------------------ 快照与读回 ---- */
+
+/**
+ * The recorded shape of an entity.
+ *
+ * Snapshots rather than diffs: the replay is then "the last record for this id
+ * wins", which is what makes the round-trip assertion meaningful. The copies are
+ * shallow-but-explicit so a later in-memory mutation cannot rewrite history.
+ */
+function memberSnapshot(member: TeamMember): Record<string, unknown> {
+  return {
+    id: member.id,
+    teamId: member.teamId,
+    definitionId: member.definitionId,
+    definitionRevision: member.definitionRevision,
+    definitionSnapshotHash: member.definitionSnapshotHash,
+    sessionId: member.sessionId,
+    status: member.status,
+    createdAt: member.createdAt,
+    ...(member.resultText === undefined ? {} : { resultText: member.resultText }),
+    lastSeq: member.lastSeq,
+  };
+}
+
+function taskSnapshot(task: TeamTask): Record<string, unknown> {
+  return {
+    id: task.id,
+    teamId: task.teamId,
+    revision: task.revision,
+    title: task.title,
+    description: task.description,
+    status: task.status,
+    ...(task.ownerMemberId === undefined ? {} : { ownerMemberId: task.ownerMemberId }),
+    blockedBy: [...task.blockedBy],
+    writeScopes: [...task.writeScopes],
+  };
+}
+
+function messageSnapshot(message: TeamMessage): Record<string, unknown> {
+  return {
+    id: message.id,
+    teamId: message.teamId,
+    from: message.from,
+    to: message.to,
+    kind: message.kind,
+    payload: message.payload,
+    deliveryState: message.deliveryState,
+    seq: message.seq,
+  };
+}
+
+/** Read one member snapshot back. A record that does not describe a member is dropped. */
+function readMember(value: unknown, teamId: string): TeamMember | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = record['id'];
+  const status = record['status'];
+  if (typeof id !== 'string' || typeof status !== 'string') return undefined;
+  return {
+    id,
+    teamId,
+    definitionId: typeof record['definitionId'] === 'string' ? record['definitionId'] : '',
+    definitionRevision: typeof record['definitionRevision'] === 'number' ? record['definitionRevision'] : 0,
+    definitionSnapshotHash: typeof record['definitionSnapshotHash'] === 'string' ? record['definitionSnapshotHash'] : '',
+    sessionId: typeof record['sessionId'] === 'string' ? record['sessionId'] : '',
+    status: status as TeamMemberStatus,
+    createdAt: typeof record['createdAt'] === 'number' ? record['createdAt'] : 0,
+    ...(typeof record['resultText'] === 'string' ? { resultText: record['resultText'] } : {}),
+    lastSeq: typeof record['lastSeq'] === 'number' ? record['lastSeq'] : 0,
+  };
+}
+
+/** Read one task snapshot back. */
+function readTask(value: unknown, teamId: string): TeamTask | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = record['id'];
+  if (typeof id !== 'string') return undefined;
+  return {
+    id,
+    teamId,
+    revision: typeof record['revision'] === 'number' ? record['revision'] : 1,
+    title: typeof record['title'] === 'string' ? record['title'] : '',
+    description: typeof record['description'] === 'string' ? record['description'] : '',
+    status: (typeof record['status'] === 'string' ? record['status'] : 'pending') as TeamTaskStatus,
+    ...(typeof record['ownerMemberId'] === 'string' ? { ownerMemberId: record['ownerMemberId'] } : {}),
+    blockedBy: Array.isArray(record['blockedBy']) ? (record['blockedBy'] as string[]) : [],
+    writeScopes: Array.isArray(record['writeScopes']) ? (record['writeScopes'] as string[]) : [],
+  };
+}
+
+/** Read one message snapshot back. */
+function readMessage(value: unknown, teamId: string): TeamMessage | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  const record = value as Record<string, unknown>;
+  const id = record['id'];
+  if (typeof id !== 'string') return undefined;
+  return {
+    id,
+    teamId,
+    from: typeof record['from'] === 'string' ? record['from'] : '',
+    to: typeof record['to'] === 'string' ? record['to'] : '',
+    kind: (typeof record['kind'] === 'string' ? record['kind'] : 'result') as TeamMessageKind,
+    payload: record['payload'] ?? null,
+    deliveryState: (typeof record['deliveryState'] === 'string' ? record['deliveryState'] : 'queued') as TeamDeliveryState,
+    seq: typeof record['seq'] === 'number' ? record['seq'] : 0,
+  };
 }
 
 /* ------------------------------------------------------------------ 投影 ---- */

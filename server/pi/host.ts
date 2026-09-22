@@ -76,6 +76,7 @@ import {
 } from './subagent-tool';
 import { createSubagentWorkerDispatch, type SubagentWorkerRunner } from './subagent-worker';
 import { AgentTeamRuntime } from '../agent-team/team-runtime';
+import { TeamJournal } from '../agent-team/team-journal';
 import {
   createOrchestratorTeamTools,
   createWorkerTeamTools,
@@ -293,6 +294,15 @@ export interface PiHostOptions {
    * session can never write the user's defaults.
    */
   settingsManagerFactory?: (cwd: string) => SettingsManager;
+  /**
+   * Directory the append-only Team journal is kept in (P3-A).
+   *
+   * Defaults to `<agentDir>/pi-webx/teams`, i.e. a `pi-webx` subtree of pi's own
+   * config directory: next to the sessions the Teams describe, never inside the
+   * user's definition file (`agent-definitions.json`) and never in the repository.
+   * A test passes a temp directory.
+   */
+  teamJournalDir?: string;
 }
 
 export class PiHost {
@@ -324,10 +334,13 @@ export class PiHost {
   /**
    * Every Agent Team this process orchestrates, keyed by team id.
    *
-   * **In memory only**: a restart leaves no members, tasks or messages behind
-   * (the recording layer is P3). Nothing here writes a file.
+   * Live state is memory; the **append-only journal** below is what lets a restart
+   * rebuild it (P3-A). The journal is written as state changes, so a restart sees
+   * every change that had already happened — see `team-journal.ts` for the honest
+   * scope of that promise (append, no fsync).
    */
-  private readonly teams = new AgentTeamRuntime();
+  private readonly journal: TeamJournal;
+  private readonly teams: AgentTeamRuntime;
   private closing = false;
   private readonly workerRunner: SubagentWorkerRunner;
   private readonly definitions: Pick<AgentDefinitionStore, 'read'>;
@@ -340,6 +353,10 @@ export class PiHost {
     this.modelRuntimeFactory = options.modelRuntimeFactory ?? (() => ModelRuntime.create());
     this.sessionDir = options.sessionDir;
     this.settingsManagerFactory = options.settingsManagerFactory;
+    this.journal = new TeamJournal({
+      dir: options.teamJournalDir ?? join(getAgentDir(), 'pi-webx', 'teams'),
+    });
+    this.teams = new AgentTeamRuntime({ journal: this.journal });
     this.capacity = new SubagentCapacity({
       maxWorkers: MAX_WORKERS,
       budget: this.sessionCapacity,
@@ -526,6 +543,11 @@ export class PiHost {
       };
 
       createdHost = hosted;
+      // A Team-mode session is the point where the process proves what it knows:
+      // replay the journal first, so Teams from before the restart are in memory
+      // again (their members come back as `interrupted` — an in-memory worker
+      // session cannot be revived), and only then add this session's own Team.
+      if (hosted.teamMode) await this.hydrateTeams();
       // The Team exists before the tool面 is refreshed, because that refresh is
       // what decides between `subagent` and the nine orchestration tools. Its id
       // is the parent session's own id, so a team is addressable by the session
@@ -712,6 +734,97 @@ export class PiHost {
   /* --------------------------------------------------------------- team mode */
 
   /**
+   * Rebuild every Team the journal knows about, and report what changed.
+   *
+   * This is the P3-A replay entry point, called once at process start (and again
+   * before a Team-mode session is assembled, as a safety net).
+   *
+   * Three properties it has to keep, because it sits on the boot path:
+   *
+   *   - **It never throws.** A journal directory that cannot be listed, or a file
+   *     that cannot be read, is counted (`unreadable`) and skipped: a damaged log
+   *     degrades to "fewer Teams rebuilt", never to "the host did not start".
+   *   - **It is idempotent.** A Team already in memory is left alone, so a second
+   *     call adds nothing, changes nothing and does not move a sequence number.
+   *   - **Its cost is bounded and reported.** It scans exactly one directory for
+   *     `*.jsonl`, and returns the file count, the bytes read and the wall time, so
+   *     the caller can log what the replay actually cost instead of assuming.
+   *
+   * Members that were mid-flight come back `interrupted` (an in-memory worker
+   * session cannot be revived) and stay refused by `TEAM_MEMBER_NOT_ACTIVE`.
+   */
+  async hydrateTeams(): Promise<{
+    /** Teams that exist in memory after this call — not files that happened to parse. */
+    readonly teams: number;
+    readonly members: number;
+    readonly tasks: number;
+    readonly messages: number;
+    readonly interrupted: number;
+    readonly skipped: number;
+    /** Journal files that yielded no team (empty, or every record belonged elsewhere). */
+    readonly unusable: number;
+    readonly files: number;
+    readonly bytes: number;
+    readonly durationMs: number;
+    /** Set when the journal cannot be written at all; the host then runs in memory. */
+    readonly journalDisabled?: string;
+  }> {
+    const startedAt = Date.now();
+    const known = new Set(this.teams.listTeams());
+    let teams = 0;
+    let members = 0;
+    let tasks = 0;
+    let messages = 0;
+    let interrupted = 0;
+    let skipped = 0;
+    let unusable = 0;
+    let files = 0;
+    let bytes = 0;
+
+    let teamIds: string[] = [];
+    try {
+      teamIds = this.journal.listTeamIds();
+    } catch {
+      // An unreadable journal directory is a reason to start with no Teams, not a
+      // reason to refuse to start.
+      teamIds = [];
+    }
+    for (const teamId of teamIds) {
+      if (known.has(teamId)) continue;
+      try {
+        const read = this.journal.readTeam(teamId);
+        if (read === undefined) continue;
+        files += 1;
+        bytes += read.bytes;
+        skipped += read.skipped.length;
+        const result = this.teams.hydrate({ teamId, records: read.records });
+        // Only a team that is really in memory counts. A file that parsed but held
+        // no `team-created` record (empty file, or every record foreign) rebuilds
+        // nothing, and reporting it as a team is exactly the over-report the
+        // independent verification caught.
+        if (result.created) teams += 1;
+        else unusable += 1;
+        members += result.members;
+        tasks += result.tasks;
+        messages += result.messages;
+        interrupted += result.interrupted;
+      } catch {
+        skipped += 1;
+      }
+    }
+    return {
+      teams, members, tasks, messages, interrupted, skipped, unusable, files, bytes,
+      durationMs: Date.now() - startedAt,
+      ...(this.journal.disabled === undefined ? {} : { journalDisabled: this.journal.disabled }),
+    };
+  }
+
+  /** Where the Team journal lives; surfaced for operators and tests. */
+  get teamJournalDir(): string {
+    return this.journal.directory;
+  }
+
+  /**
    * Team mode's tool面: the nine orchestration tools, re-rendered per turn.
    *
    * Two things this deliberately does **not** do:
@@ -813,6 +926,12 @@ export class PiHost {
    */
   resolveTeamId(idOrSessionId: string): string | undefined {
     if (this.teams.get(idOrSessionId) !== undefined) return idOrSessionId;
+    // A Team rebuilt from the journal knows the session that created it, even when
+    // that session never wrote a transcript (a run with no assistant turn) and so
+    // cannot be found in the live table — which is why this index exists and comes
+    // before it.
+    const replayed = this.teams.findTeamByParentSession(idOrSessionId);
+    if (replayed !== undefined) return replayed;
     return this.sessions.get(idOrSessionId)?.teamId ?? undefined;
   }
 
