@@ -1,7 +1,7 @@
 /** SDK session composition. No scheduling or host session registry access. */
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
-  type AgentSession, type ModelRuntime, type ExtensionUIContext,
+  type AgentSession, type ModelRuntime, type ExtensionUIContext, type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import type { FrozenDefinition } from './subagent-tool';
@@ -86,6 +86,26 @@ export interface WorkerSessionOptions {
   readonly denied: readonly string[];
   readonly signal?: AbortSignal;
   readonly uiContext?: ExtensionUIContext;
+  /**
+   * The only tools a worker may have registered on top of its allowlist.
+   *
+   * This seam exists for exactly one caller: the Agent Team runtime, which hands a
+   * member its two team tools (`update_team_task` — its own task only — and
+   * `send_team_message` — to the lead only). Everything else must stay out:
+   * **dispatch or configuration tools may never be injected here.** A worker able to
+   * register `dispatch_agent`/`subagent`/definition management would be exactly the
+   * recursion this module refuses.
+   *
+   * What actually keeps them out is the `tools:` allowlist, not this field: that
+   * allowlist filters custom tools **too**, so a name passed here which the allowlist
+   * does not carry never reaches the registry at all. The SDK references and the
+   * verifier's four-way control are with the activation note in `createWorkerSession`
+   * below (`:176-195`); `denied` is the second veto on top of it.
+   *
+   * Omitted (the ordinary subagent path and every caller before teams existed)
+   * means `customTools: []`: no worker-registered tool at all.
+   */
+  readonly memberTools?: readonly ToolDefinition[];
 }
 
 /**
@@ -136,9 +156,12 @@ export async function createWorkerSession(options: WorkerSessionOptions): Promis
     resourceLoader: loader,
     tools: [...toolNames],
     excludeTools: [...denied],
-    // Deliberately no `customTools`: the dispatch tool must not exist inside a
-    // worker, and the host must never proxy the parent's tool closures here.
-    customTools: [],
+    // A worker gets no registered tool of its own unless its caller injects the
+    // Team member tools (see `WorkerSessionOptions.memberTools`): the dispatch tool
+    // must not exist inside a worker, and the host must never proxy the parent's
+    // tool closures here. `denied` lists the same names a second time, so the
+    // allowlist is not the only thing standing between a worker and recursion.
+    customTools: [...(options.memberTools ?? [])],
   });
   const abort = (): void => { void session.abort().catch(() => undefined); };
   options.signal?.addEventListener('abort', abort, { once: true });
@@ -155,6 +178,31 @@ export async function createWorkerSession(options: WorkerSessionOptions): Promis
       },
     });
     options.signal?.throwIfAborted();
+    /**
+     * Insurance, not the mechanism. The reason this used to claim ("a custom tool
+     * is not subject to `tools:`") was backwards; the SDK's own behaviour, checked
+     * by the independent verifier against `dist/core/agent-session.js`:
+     *
+     *   - `isAllowedTool` (`agent-session.js:2100-2112`) filters **custom tools by
+     *     the `tools:` allowlist too**. A member tool whose name is not in that
+     *     allowlist is not merely inactive — it never reaches the registry at all,
+     *     so no amount of later activation can revive it.
+     *   - `:2153-2159` re-activates allowlisted **registered** names when the
+     *     runtime is rebuilt (which `bindExtensions` does).
+     *
+     * So the load-bearing requirement is that both member tool names stay in
+     * `toolNames` (the `tools:` allowlist); the verifier's four-way control
+     * confirmed that with the names listed they are active and callable without
+     * this block. What follows is therefore redundant under the current allowlist
+     * and kept only as a guard against a future runtime that stops auto-activating
+     * registered names. `denied` still vetoes every orchestration name, and the
+     * names added here are exactly the ones the caller passed.
+     */
+    if (options.memberTools !== undefined && options.memberTools.length > 0) {
+      const active = new Set(session.getActiveToolNames());
+      for (const tool of options.memberTools) active.add(tool.name);
+      session.setActiveToolsByName([...active]);
+    }
     return session;
   } catch (error) {
     await disposeWorkerSession(session);

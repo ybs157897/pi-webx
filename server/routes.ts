@@ -603,11 +603,60 @@ export function createApiRouter(manager: PiHost): Router {
     }
   });
 
+  /**
+   * Team runtime projection (P2, read-only).
+   *
+   * The body is the host's projection as-is: host-filled fields (`from`, `to`,
+   * teamId, statuses) sit at the top level, and everything a model wrote — task
+   * titles/descriptions and message payloads — is nested under an explicit
+   * `untrusted` wrapper. Nothing a worker wrote is ever promoted into a field a
+   * consumer would read as host-authored.
+   *
+   * Unknown id → 404. The team is in memory only, so a restart empties this.
+   */
+  router.get('/teams/:id', (req: Request, res: Response) => {
+    const teamId = paramId(req);
+    const projection = manager.teamSnapshot(teamId);
+    if (projection === undefined) {
+      return sendError(res, 404, `unknown team: ${teamId}`);
+    }
+    res.json(projection);
+  });
+
+  /**
+   * Ask every running member of a team to stop (P2).
+   *
+   * Cancellation is cooperative: the response reports how many were asked, not
+   * that they have stopped. The member state machine is visible in the
+   * projection — `running → cancelling → cancelled`, and `interrupted` when a stop
+   * was never confirmed.
+   */
+  router.post('/teams/:id/cancel', (req: Request, res: Response) => {
+    const teamId = paramId(req);
+    const body = isRecord(req.body) ? req.body : {};
+    const reason = optionalString(body['reason']);
+    const result = manager.cancelTeam(teamId, reason);
+    if (result === undefined) {
+      return sendError(res, 404, `unknown team: ${teamId}`);
+    }
+    res.json({ teamId, cancelled: result.cancelled, reason: reason ?? null });
+  });
+
   return router;
 }
 
+/**
+ * A parsed create-session body.
+ *
+ * `teamMode` is parsed here rather than added to `CreateSessionRequest`: the
+ * shared contract is frozen for this task, and P2 has no UI that would send it —
+ * the flag exists so the Team runtime can be reached through the one create path
+ * (P4 owns the panel that will surface it).
+ */
+type CreateSessionBody = CreateSessionRequest & { teamMode?: boolean };
+
 type ParseResult =
-  | { ok: true; value: CreateSessionRequest }
+  | { ok: true; value: CreateSessionBody }
   | { ok: false; error: string };
 
 /**
@@ -636,7 +685,7 @@ function parseCreateSessionRequest(raw: unknown): ParseResult {
     return { ok: false, error: 'request body must be a JSON object' };
   }
 
-  const value: CreateSessionRequest = {};
+  const value: CreateSessionBody = {};
 
   if (raw.cwd !== undefined) {
     const cwd = requireString(raw.cwd, 'cwd');
@@ -702,6 +751,16 @@ function parseCreateSessionRequest(raw: unknown): ParseResult {
       }
     }
     value.toolNames = raw.toolNames as string[];
+  }
+
+  // Team mode (P2): the session gets the nine orchestration tools plus whatever
+  // its preset already had, and an in-memory team to orchestrate. Strictly typed
+  // here — a truthy string should be a 400, not a silent "yes".
+  if (raw.teamMode !== undefined) {
+    if (typeof raw.teamMode !== 'boolean') {
+      return { ok: false, error: 'teamMode must be a boolean' };
+    }
+    value.teamMode = raw.teamMode;
   }
 
   return { ok: true, value };

@@ -152,6 +152,17 @@ export interface SubagentDispatchRequest {
   readonly signal: AbortSignal | undefined;
   /** Short progress notes, already free of secrets and model reasoning. */
   readonly onUpdate: ((note: string) => void) | undefined;
+  /**
+   * Tools to register **inside the child**, on top of its allowlist.
+   *
+   * One caller only: the Agent Team runtime, handing a member its two team tools
+   * (`update_team_task` for its own task, `send_team_message` to the lead). The
+   * ordinary `subagent` path never sets it, so a plain dispatch still registers
+   * nothing — and no caller may pass a dispatch or configuration tool here: the
+   * dispatcher additionally deny-lists every orchestration name, so such a tool
+   * would be excluded even if it were passed.
+   */
+  readonly memberTools?: readonly ToolDefinition[];
 }
 
 /** What the tool needs from the host. Everything here is injected, nothing imported. */

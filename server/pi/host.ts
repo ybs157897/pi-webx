@@ -75,6 +75,16 @@ import {
   type SubagentToolDeps,
 } from './subagent-tool';
 import { createSubagentWorkerDispatch, type SubagentWorkerRunner } from './subagent-worker';
+import { AgentTeamRuntime } from '../agent-team/team-runtime';
+import {
+  createOrchestratorTeamTools,
+  createWorkerTeamTools,
+  type TeamDispatchRequest,
+} from '../agent-team/team-tools';
+import {
+  TEAM_ORCHESTRATOR_TOOL_NAMES,
+  type TeamProjection,
+} from '../agent-team/team-types';
 
 const MAX_SESSIONS = 12;
 /** Sweep dead sessions with no subscribers after this long. */
@@ -160,6 +170,18 @@ export interface HostedSession {
    * recreating the session.
    */
   customTools: ToolDefinition[];
+  /**
+   * The Agent Team this session orchestrates, or `null` for an ordinary session.
+   *
+   * Set once at creation (and again after an in-place reset) and never cleared:
+   * it is what makes `refreshSubagentTool` mount the Team tool面 instead of the
+   * single-shot `subagent` tool. The Team's own state lives in
+   * {@link PiHost.teams} — **in memory only**, so a restart loses every member,
+   * task and message (the journal is P3).
+   */
+  teamId: string | null;
+  /** Whether this session was created in Team mode (survives an in-place reset). */
+  teamMode: boolean;
   /** Ordered in-memory log every subscriber's stream is cut from. */
   journal: SessionJournal;
   /** requestId ledger: duplicate-submit guard + echo-retire annotation. */
@@ -184,6 +206,16 @@ export interface CreateHostedSessionOptions {
    * what the session was last run with, which the client cannot know.
    */
   toolNames?: string[];
+  /**
+   * Team mode: swap the single-shot `subagent` tool for the nine orchestration
+   * tools and attach an in-memory Agent Team.
+   *
+   * Not a UI feature yet (P4 owns the panel); it exists so the P2 runtime can be
+   * exercised through the normal create path. The session keeps the tools its
+   * preset already had — the orchestrator reads files and checks facts itself —
+   * and simply gains the nine Team tools.
+   */
+  teamMode?: boolean;
 }
 
 function errorText(error: unknown): string {
@@ -289,6 +321,13 @@ export class PiHost {
    */
   private readonly capacity: SubagentCapacity;
   private readonly sessionCapacity = new SessionCapacity(MAX_SESSIONS);
+  /**
+   * Every Agent Team this process orchestrates, keyed by team id.
+   *
+   * **In memory only**: a restart leaves no members, tasks or messages behind
+   * (the recording layer is P3). Nothing here writes a file.
+   */
+  private readonly teams = new AgentTeamRuntime();
   private closing = false;
   private readonly workerRunner: SubagentWorkerRunner;
   private readonly definitions: Pick<AgentDefinitionStore, 'read'>;
@@ -475,6 +514,8 @@ export class PiHost {
         session,
         extensionsResult,
         customTools,
+        teamId: null,
+        teamMode: options.teamMode === true,
         pendingDialogs: new Map(),
         toolSelection: options.toolNames ?? null,
         journal: new SessionJournal(),
@@ -485,6 +526,11 @@ export class PiHost {
       };
 
       createdHost = hosted;
+      // The Team exists before the tool面 is refreshed, because that refresh is
+      // what decides between `subagent` and the nine orchestration tools. Its id
+      // is the parent session's own id, so a team is addressable by the session
+      // the user is talking to.
+      if (hosted.teamMode) hosted.teamId = this.teams.createTeam(hosted.id).id;
       hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
       this.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
       await this.bindExtensions(session, hosted);
@@ -497,6 +543,10 @@ export class PiHost {
       if (createdHost !== undefined) {
         createdHost.alive = false;
         createdHost.unsubscribe?.();
+        // A team created for a session that never finished coming up would linger
+        // in memory as an orphan: nothing else can reach it, so drop it here.
+        // (A fork never has one, so this is a no-op on that path.)
+        if (createdHost.teamId !== null) this.teams.dropTeam(createdHost.teamId);
         for (const dialog of createdHost.pendingDialogs.values()) {
           dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
         }
@@ -623,6 +673,11 @@ export class PiHost {
    */
   private async refreshSubagentTool(hosted: HostedSession): Promise<void> {
     if (!hosted.alive) return;
+    // Team mode has its own tool面, and it is not additive to `subagent`: the
+    // orchestrator dispatches through `dispatch_agent` only, so the single-shot
+    // tool is never registered there (two dispatch mechanisms in one session
+    // would be two ways to do the same thing, with different lifecycles).
+    if (hosted.teamId !== null) return this.refreshTeamTools(hosted);
     let definitions: AgentDefinition[] = [];
     try {
       // Merged: the built-ins are enabled by construction, so a user who has
@@ -652,6 +707,106 @@ export class PiHost {
   /** Stop every worker this parent owns and wait until each has cleaned up. */
   private async cancelWorkersFor(parentId: string): Promise<void> {
     await this.workerRunner.cancelParent(parentId);
+  }
+
+  /* --------------------------------------------------------------- team mode */
+
+  /**
+   * Team mode's tool面: the nine orchestration tools, re-rendered per turn.
+   *
+   * Two things this deliberately does **not** do:
+   *
+   *   - it does not take the session's own tools away. The user is talking to the
+   *     orchestrator, and an orchestrator that cannot read a file to decide who
+   *     should get the work is useless — the set is the session's existing active
+   *     tools **plus** the nine Team tools;
+   *   - it does not register `subagent`: Team mode dispatches through
+   *     `dispatch_agent` only, so the single-shot tool is spliced out of the
+   *     custom-tool array (and therefore cannot come back through a later preset
+   *     change either — an unregistered tool cannot be activated).
+   *
+   * The definition list is rendered into `dispatch_agent`'s description on every
+   * refresh, which is what lets the description demand a current
+   * `expectedDefinitionRevision`: the refresh runs before every prompt that could
+   * call the tool (the same five call sites as the subagent refresh).
+   */
+  private async refreshTeamTools(hosted: HostedSession): Promise<void> {
+    const teamId = hosted.teamId;
+    if (teamId === null || !hosted.alive) return;
+    let definitions: AgentDefinition[] = [];
+    try {
+      definitions = enabledDefinitions(await this.mergedDefinitions());
+    } catch (error) {
+      this.broadcastError(hosted, `子智能体定义读取失败：${errorText(error)}`);
+    }
+
+    const tools = createOrchestratorTeamTools({
+      teamId,
+      runtime: this.teams,
+      definitions: () => this.mergedDefinitions(),
+      parentActiveTools: () => hosted.session.getActiveToolNames(),
+      dispatch: (request) => this.dispatchTeamMember(hosted, request),
+    }, definitions);
+    hosted.customTools.splice(0, hosted.customTools.length, ...tools);
+    hosted.extensionsResult.runtime.refreshTools();
+
+    const activeBefore = hosted.session.getActiveToolNames();
+    const carried = activeBefore.filter((name) => (
+      name !== SUBAGENT_TOOL_NAME && !TEAM_ORCHESTRATOR_TOOL_NAMES.includes(name)
+    ));
+    const next = [
+      ...carried,
+      ...TEAM_ORCHESTRATOR_TOOL_NAMES.filter((name) => hosted.session.getToolDefinition(name) !== undefined),
+    ];
+    if (!sameNames(next, hosted.session.getActiveToolNames())) {
+      hosted.session.setActiveToolsByName(next);
+    }
+  }
+
+  /**
+   * Run one Team member through the **existing** dispatch path.
+   *
+   * Same capacity, leases, timeout, lifecycle and cancellation as a `subagent`
+   * call — the only differences are the member's tool surface and the two member
+   * tools registered inside its session. The member's `memberId` is bound here, so
+   * the tools it receives can only ever touch its own task and talk to the lead.
+   */
+  private dispatchTeamMember(hosted: HostedSession, request: TeamDispatchRequest): Promise<SubagentDispatchOutcome> {
+    if (!hosted.alive) return Promise.reject(new Error('父会话已关闭，不能派发成员。'));
+    return this.workerRunner.dispatch({
+      sessionId: hosted.id,
+      cwd: hosted.cwd,
+      agentDir: getAgentDir(),
+      session: hosted.session,
+      createUiScope: (origin, signal) => createExtensionUiScope(this.extensionUiOwner(hosted), { origin, signal }),
+    }, {
+      definition: request.definition,
+      task: request.instruction,
+      surface: request.surface,
+      signal: request.signal,
+      onUpdate: request.onUpdate,
+      memberTools: createWorkerTeamTools({
+        teamId: request.teamId,
+        memberId: request.memberId,
+        runtime: this.teams,
+      }),
+    });
+  }
+
+  /** The read-only projection `GET /api/teams/:id` serves; `undefined` means 404. */
+  teamSnapshot(teamId: string): TeamProjection | undefined {
+    return this.teams.snapshot(teamId);
+  }
+
+  /**
+   * `POST /api/teams/:id/cancel`: ask every running member to stop.
+   *
+   * Cancellation is cooperative — this reports how many were asked, not that they
+   * have stopped. `undefined` means the team does not exist.
+   */
+  cancelTeam(teamId: string, reason?: string): { cancelled: number } | undefined {
+    if (this.teams.get(teamId) === undefined) return undefined;
+    return { cancelled: this.teams.cancelTeam(teamId, reason) };
   }
 
   /**
@@ -711,6 +866,10 @@ export class PiHost {
         session,
         extensionsResult,
         customTools,
+        // A fork is never a Team: it copies a transcript, and a team is runtime
+        // state the source session's log says nothing about.
+        teamId: null,
+        teamMode: false,
         pendingDialogs: new Map(),
         // A fork keeps pi's default tool set until someone chooses otherwise; the
         // source session's selection describes that session, not this one.
@@ -734,6 +893,10 @@ export class PiHost {
       if (createdHost !== undefined) {
         createdHost.alive = false;
         createdHost.unsubscribe?.();
+        // A team created for a session that never finished coming up would linger
+        // in memory as an orphan: nothing else can reach it, so drop it here.
+        // (A fork never has one, so this is a no-op on that path.)
+        if (createdHost.teamId !== null) this.teams.dropTeam(createdHost.teamId);
         for (const dialog of createdHost.pendingDialogs.values()) {
           dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
         }
@@ -1032,6 +1195,14 @@ export class PiHost {
     session.alive = false;
     void session.session.abort().catch(() => undefined);
     await this.cancelWorkersFor(id);
+    // The team goes with the session: its members were just asked to stop above
+    // (`cancelWorkersFor` cancels every run this parent owns), and a team nobody
+    // can address any more is only a memory leak. Anything the cancellation did
+    // not confirm stays invisible rather than being reported as finished.
+    if (session.teamId !== null) {
+      this.teams.cancelTeam(session.teamId, '父会话已关闭。');
+      this.teams.dropTeam(session.teamId);
+    }
     this.sessions.delete(id);
     session.streaming = false;
     // An extension awaiting a dialog would otherwise hang forever: answer every
@@ -1062,6 +1233,13 @@ export class PiHost {
     // Workers first: their parent sessions are about to be killed, and a run
     // cancelled mid-answer must not be reported as a finished one.
     await this.workerRunner.cancelAll();
+    // Anything that did not confirm its stop is recorded as `interrupted` — the
+    // honest state for "we asked, we never heard back" — before the teams are
+    // dropped by `kill` below. (P2 keeps this in memory only; P3's journal is what
+    // would make it visible after a restart.)
+    for (const hosted of this.sessions.values()) {
+      if (hosted.teamId !== null) this.teams.markInterrupted(hosted.teamId, '宿主已关闭，停止未得到确认。');
+    }
     for (const id of [...this.sessions.keys()]) await this.kill(id);
   }
 
@@ -1547,6 +1725,15 @@ export class PiHost {
     hosted.alive = true;
     // A new conversation has no wait list: the rows named messages of the old one.
     hosted.queue = [];
+    // A team belonged to the conversation that was just replaced: its members were
+    // cancelled above, and its task board would otherwise describe work nobody can
+    // address. Team mode keeps its mode and gets a fresh, empty team.
+    if (hosted.teamId !== null) {
+      this.teams.cancelTeam(hosted.teamId, '会话已重置。');
+      this.teams.dropTeam(hosted.teamId);
+      hosted.teamId = null;
+    }
+    if (hosted.teamMode) hosted.teamId = this.teams.createTeam(hosted.id).id;
     hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
     await this.bindExtensions(session, hosted);
     await this.refreshSubagentTool(hosted);

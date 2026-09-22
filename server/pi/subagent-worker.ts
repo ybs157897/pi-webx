@@ -3,6 +3,10 @@ import { randomUUID } from 'node:crypto';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import { SUBAGENT_TOOL_NAME } from '../../src/shared/agent-definitions';
 import { isRestrictedAgentTool } from '../agent-definitions';
+// The Team tool names are imported rather than duplicated: a member session must
+// never see any of them, and this is the one place that decides what a child is
+// denied. `team-types.ts` imports nothing, so this stays a leaf dependency.
+import { TEAM_WORKER_FORBIDDEN_TOOL_NAMES } from '../agent-team/team-types';
 import { SubagentCapacity, SubagentCapacityError, type WorkerSlot } from './subagent-capacity';
 import { SubagentRunError } from './subagent-error';
 import { executeWorkerSession, type WorkerSessionLike } from './subagent-execution';
@@ -98,8 +102,23 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
               definition: request.definition, parent, model, runtime, signal,
               uiContext: ui?.context,
               toolNames: request.surface.toolNames,
-              denied: [...new Set([SUBAGENT_TOOL_NAME, ...parent.session.getAllTools()
-                .map((tool) => tool.name).filter(isRestrictedAgentTool)])],
+              // Two layers, deliberately: the allowlist above simply does not name
+              // the orchestration tools, and this deny list names every one a
+              // member must never have — including `subagent` and every restricted
+              // name this session knows.
+              //
+              // It denies the **seven** orchestration names a member must not hold,
+              // not all nine: `update_team_task` and `send_team_message` are two of
+              // the nine and are exactly what a member is supposed to get. Denying
+              // all nine (the literal reading of the earlier instruction) made the
+              // member's own two tools unreachable — the deny list wins over
+              // `customTools`, so they were registered and immediately excluded.
+              ...(request.memberTools === undefined ? {} : { memberTools: request.memberTools }),
+              denied: [...new Set([
+                SUBAGENT_TOOL_NAME,
+                ...TEAM_WORKER_FORBIDDEN_TOOL_NAMES,
+                ...parent.session.getAllTools().map((tool) => tool.name).filter(isRestrictedAgentTool),
+              ])],
             });
             signal.throwIfAborted();
             const effectiveTools = session.getActiveToolNames();

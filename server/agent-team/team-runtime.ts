@@ -1,0 +1,610 @@
+/**
+ * P2 Team 运行时：**内存态**的成员、任务板与消息账本。
+ *
+ * 不落盘、不注入、不调度——调度（capacity、worker 会话、abort）复用现有
+ * `SubagentWorkerRunner`，由 `host.ts` 注入（见 `TeamRuntimeDispatch`）。这一层只负责：
+ * 记录状态、跑 CAS、判 `blockedBy`、把 settle 事件通知给 `wait_team`，以及给出只读投影。
+ *
+ * 边界（照 spike 结论，P2 不越界）：
+ *   - 全部状态在内存：进程重启即丢，磁盘上没有任何 Team 文件（`TEAM_STATE_IS_IN_MEMORY`）。
+ *   - 消息只记 `deliveryState: 'queued'`，**不做**会话注入（`sendCustomMessage` 的投递与读回是 P3）；
+ *     因此类型里虽然留了 `fresh-reader-visible` 等状态，这里永远不推进到它们。
+ *   - 不声明「稳定存储」级别：那要等 fsync 之后才配说（spike 复核的措辞边界）。
+ */
+
+import { createHash, randomUUID } from 'node:crypto';
+
+import type { FrozenDefinition } from '../pi/subagent-tool';
+import {
+  TEAM_ERROR_CODES,
+  TEAM_LEAD_ID,
+  TeamError,
+  boundTeamText,
+  isSettledMemberStatus,
+  isTaskBlocked,
+  isTerminalTaskStatus,
+  type Team,
+  type TeamDeliveryState,
+  type TeamMember,
+  type TeamMemberStatus,
+  type TeamMemberView,
+  type TeamMessage,
+  type TeamMessageKind,
+  type TeamMessageView,
+  type TeamProjection,
+  type TeamTask,
+  type TeamTaskStatus,
+  type TeamTaskView,
+  type TeamWaitView,
+} from './team-types';
+
+/** `wait_team` 的默认与最大等待窗口；默认值让「忘记传 timeoutMs」也不会挂住一个 turn。 */
+export const DEFAULT_TEAM_WAIT_MS = 30_000;
+export const MAX_TEAM_WAIT_MS = 600_000;
+
+export interface TeamRuntimeOptions {
+  readonly now?: () => number;
+  readonly newId?: () => string;
+  /** 等待窗口的计时器，测试可替换以便零延迟断言。 */
+  readonly delay?: (ms: number) => Promise<void>;
+}
+
+/** 谁在改任务：编排者（宿主，不受 ownership 限制）或某个成员。 */
+export interface TeamTaskActor {
+  readonly memberId?: string;
+}
+
+export interface TeamTaskPatch {
+  readonly status?: TeamTaskStatus;
+  readonly title?: string;
+  readonly description?: string;
+  readonly ownerMemberId?: string;
+}
+
+/**
+ * The `wait_team` timer.
+ *
+ * **Known boundary**, registered by the independent verifier and deliberately not
+ * changed: the timer is `unref()`d, so it does not by itself keep the event loop
+ * alive. In a process with no other handle — a one-off script that calls
+ * `wait_team` and nothing else — Node can therefore exit 0 mid-wait instead of
+ * reporting a timeout. The server is unaffected: express keeps handles open for
+ * the whole request, so the wait ends with a result or a timeout as documented.
+ * Un-ref'ing is kept because the opposite (a referenced timer) would pin the
+ * process awake for up to `MAX_TEAM_WAIT_MS` after the caller is gone.
+ */
+const DEFAULT_DELAY = (ms: number): Promise<void> => new Promise((resolve) => {
+  const timer = setTimeout(resolve, ms);
+  timer.unref?.();
+});
+
+/** 冻结定义的内容指纹：同一 revision 下内容变了也能看出来（前 16 位十六进制）。 */
+export function definitionSnapshotHash(definition: FrozenDefinition): string {
+  return createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 16);
+}
+
+export class AgentTeamRuntime {
+  private readonly teams = new Map<string, Team>();
+  /** memberId → 取消该成员的钩子（由宿主在派发时登记）。 */
+  private readonly cancels = new Map<string, (reason: string) => void>();
+  /** `${teamId}:${requestId}` → 该请求已经创建/记录的实体 id。 */
+  private readonly requests = new Map<string, string>();
+  /** 每个 team 的「状态变了」通知者，供 `wait_team` 精确唤醒而不是轮询。 */
+  private readonly waiters = new Map<string, Set<() => void>>();
+  private readonly now: () => number;
+  private readonly newId: () => string;
+  private readonly delay: (ms: number) => Promise<void>;
+
+  constructor(options: TeamRuntimeOptions = {}) {
+    this.now = options.now ?? Date.now;
+    this.newId = options.newId ?? randomUUID;
+    this.delay = options.delay ?? DEFAULT_DELAY;
+  }
+
+  /* --------------------------------------------------------------- 生命周期 */
+
+  /** 建一个 Team。父会话 id 是宿主给的真实会话身份，模型无法指定。 */
+  createTeam(parentSessionId: string): Team {
+    const team: Team = {
+      id: this.newId(),
+      parentSessionId,
+      createdAt: this.now(),
+      members: new Map(),
+      tasks: new Map(),
+      messages: [],
+      seq: 0,
+    };
+    this.teams.set(team.id, team);
+    return team;
+  }
+
+  get(teamId: string): Team | undefined {
+    return this.teams.get(teamId);
+  }
+
+  /**
+   * 丢掉一个 Team（父会话被杀、装配中途失败）。
+   *
+   * 只清内存引用与等待者/取消钩子，**不**假装取消：调用方负责先 `cancelTeam`（或先
+   * `markInterrupted`），否则会有成员在别人的账上继续跑。返回它是否真的存在过。
+   */
+  dropTeam(teamId: string): boolean {
+    const team = this.teams.get(teamId);
+    if (team === undefined) return false;
+    for (const member of team.members.values()) this.cancels.delete(member.id);
+    this.waiters.delete(teamId);
+    for (const key of [...this.requests.keys()]) {
+      if (key.startsWith(`${teamId}:`)) this.requests.delete(key);
+    }
+    return this.teams.delete(teamId);
+  }
+
+  /** 只读投影；未知名返回 `undefined`（路由据此回 404）。 */
+  snapshot(teamId: string): TeamProjection | undefined {
+    const team = this.teams.get(teamId);
+    if (team === undefined) return undefined;
+    return {
+      teamId: team.id,
+      parentSessionId: team.parentSessionId,
+      createdAt: team.createdAt,
+      members: [...team.members.values()].map(toMemberView),
+      tasks: [...team.tasks.values()].map(toTaskView),
+      messages: team.messages.map(toMessageView),
+      notes: [
+        'P2 的 Team 状态全部在内存（host 持有），进程重启即丢；落盘队列（TeamJournal）是 P3。',
+        '消息目前只到 deliveryState=queued：P2 不做会话注入，fresh-reader-visible 留给 P3 的读回。',
+        'from/to/teamId 由宿主填写；消息 payload 与任务标题/描述是模型文本，读作不可信数据。',
+        '成员的 sessionId 在 P2 是内存 run 标识（dispatch 的 runId），不是可恢复的持久会话 id，'
+        + '不能据此 open() 回一个会话；跨重启的会话关联由 P3 的 TeamJournal 引入。',
+      ],
+    };
+  }
+
+  /* ------------------------------------------------------------------ 成员 */
+
+  /** 登记一个成员。`sessionId` 在派发返回后由 {@link settleMember} 补上（runId）。 */
+  addMember(input: { readonly teamId: string; readonly definition: FrozenDefinition }): TeamMember {
+    const team = this.requireTeam(input.teamId);
+    const member: TeamMember = {
+      id: this.newId(),
+      teamId: team.id,
+      definitionId: input.definition.id,
+      definitionRevision: input.definition.revision,
+      definitionSnapshotHash: definitionSnapshotHash(input.definition),
+      sessionId: '',
+      status: 'running',
+      createdAt: this.now(),
+      lastSeq: team.seq,
+    };
+    team.members.set(member.id, member);
+    this.notify(team.id);
+    return member;
+  }
+
+  registerMemberCancel(memberId: string, cancel: (reason: string) => void): void {
+    this.cancels.set(memberId, cancel);
+  }
+
+  /**
+   * 收尾一个成员：写状态、结果文本与 `sessionId`（= 派发返回的 `runId`）。
+   *
+   * 结果文本按 {@link MAX_TEAM_RESULT_CHARACTERS} 截断后**原样存**（不裁剪），
+   * 由 `wait_team` 输出时再报 `truncated`——这样只读投影与工具看到的是同一份事实。
+   */
+  settleMember(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly status: TeamMemberStatus;
+    readonly text?: string;
+    readonly sessionId?: string;
+  }): TeamMember {
+    const member = this.requireMember(input.teamId, input.memberId);
+    member.status = input.status;
+    if (input.sessionId !== undefined) member.sessionId = input.sessionId;
+    if (input.text !== undefined) member.resultText = input.text;
+    this.notify(input.teamId);
+    return member;
+  }
+
+  /**
+   * 请求取消一个成员：状态先到 `cancelling`，再把原因交给宿主登记的取消钩子
+   * （AbortSignal 经现有 adapter 下传 worker）。真正落到 `cancelled` 由派发方在
+   * worker 收尾时调 {@link settleMember} —— 取消是协作式的，不假装立刻停住。
+   */
+  interruptMember(input: {
+    readonly teamId: string;
+    readonly memberId: string;
+    readonly reason?: string;
+  }): TeamMember {
+    const member = this.requireMember(input.teamId, input.memberId);
+    if (isSettledMemberStatus(member.status)) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.memberSettled,
+        `成员 ${member.id} 已经结束（${member.status}），不能取消。`,
+        { memberId: member.id, status: member.status },
+      );
+    }
+    member.status = 'cancelling';
+    const reason = input.reason ?? '编排者取消了该成员。';
+    const cancel = this.cancels.get(member.id);
+    if (cancel !== undefined) cancel(reason);
+    this.notify(input.teamId);
+    return member;
+  }
+
+  /**
+   * 宿主收尾：把所有未 settle 的成员记成 `interrupted`（停止没有得到确认）。
+   *
+   * P2 全内存，所以这个状态只在本次进程内可见；让它跨重启可见是 P3 的 journal 的事。
+   */
+  markInterrupted(teamId: string, reason: string): number {
+    const team = this.requireTeam(teamId);
+    let marked = 0;
+    for (const member of team.members.values()) {
+      if (isSettledMemberStatus(member.status)) continue;
+      member.status = 'interrupted';
+      member.resultText ??= reason;
+      marked += 1;
+    }
+    if (marked > 0) this.notify(teamId);
+    return marked;
+  }
+
+  /** 取消整个 Team（宿主关闭或 `POST /cancel`）：逐个请求取消，返回被请求的数量。 */
+  cancelTeam(teamId: string, reason?: string): number {
+    const team = this.requireTeam(teamId);
+    let asked = 0;
+    for (const member of [...team.members.values()]) {
+      if (isSettledMemberStatus(member.status)) continue;
+      member.status = 'cancelling';
+      const cancel = this.cancels.get(member.id);
+      if (cancel !== undefined) cancel(reason ?? 'Team 被取消。');
+      asked += 1;
+    }
+    if (asked > 0) this.notify(teamId);
+    return asked;
+  }
+
+  /* ------------------------------------------------------------------ 任务 */
+
+  createTask(input: {
+    readonly teamId: string;
+    readonly title: string;
+    readonly description: string;
+    readonly blockedBy?: readonly string[];
+    readonly writeScopes?: readonly string[];
+  }): TeamTask {
+    const team = this.requireTeam(input.teamId);
+    const blockedBy = [...new Set(input.blockedBy ?? [])];
+    for (const dependency of blockedBy) {
+      if (!team.tasks.has(dependency)) {
+        throw new TeamError(
+          TEAM_ERROR_CODES.taskNotFound,
+          `blockedBy 里的任务 ${dependency} 不存在。`,
+          { taskId: dependency },
+        );
+      }
+    }
+    const task: TeamTask = {
+      id: this.newId(),
+      teamId: team.id,
+      revision: 1,
+      title: input.title,
+      description: input.description,
+      status: 'pending',
+      blockedBy,
+      writeScopes: [...new Set(input.writeScopes ?? [])],
+    };
+    if (isTaskBlocked(task, team.tasks)) task.status = 'blocked';
+    team.tasks.set(task.id, task);
+    this.notify(team.id);
+    return task;
+  }
+
+  getTask(teamId: string, taskId: string): TeamTask | undefined {
+    return this.teams.get(teamId)?.tasks.get(taskId);
+  }
+
+  /**
+   * 任务板 CAS 更新。
+   *
+   * 冲突（`expectedRevision` 不是当前 revision）抛 `TEAM_TASK_STALE_REVISION`，并把当前
+   * revision 放进 details —— 调用方据此 refresh 再试，而不是猜。
+   */
+  updateTask(input: {
+    readonly teamId: string;
+    readonly taskId: string;
+    readonly expectedRevision: number;
+    readonly patch: TeamTaskPatch;
+    readonly actor?: TeamTaskActor;
+  }): TeamTask {
+    const team = this.requireTeam(input.teamId);
+    const task = team.tasks.get(input.taskId);
+    if (task === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.taskNotFound, `任务 ${input.taskId} 不存在。`, { taskId: input.taskId });
+    }
+    if (input.expectedRevision !== task.revision) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.taskStaleRevision,
+        `任务 ${task.id} 的 revision 已经变了：期望 ${input.expectedRevision}，当前 ${task.revision}。`
+        + '请先用 get_team_task 读回最新 revision 再改。',
+        { taskId: task.id, currentRevision: task.revision },
+      );
+    }
+    const actor = input.actor;
+    if (actor?.memberId !== undefined) {
+      if (task.ownerMemberId !== actor.memberId) {
+        throw new TeamError(
+          TEAM_ERROR_CODES.taskNotOwned,
+          `任务 ${task.id} 不属于当前成员（owner=${task.ownerMemberId ?? '无'}），成员只能更新自己的任务。`,
+          { taskId: task.id, ownerMemberId: task.ownerMemberId ?? null },
+        );
+      }
+      if (input.patch.ownerMemberId !== undefined) {
+        throw new TeamError(
+          TEAM_ERROR_CODES.overrideRejected,
+          '成员不能改任务的 owner；指派由编排者用 dispatch_agent 的 taskId 完成。',
+          { taskId: task.id },
+        );
+      }
+    }
+    const next = input.patch.status;
+    if (next !== undefined && next !== task.status && isTerminalTaskStatus(task.status)) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.taskTerminal,
+        `任务 ${task.id} 已是终态 ${task.status}，不能再改状态。`,
+        { taskId: task.id, status: task.status },
+      );
+    }
+    if ((next === 'in_progress' || next === 'completed') && isTaskBlocked(task, team.tasks)) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.taskBlocked,
+        `任务 ${task.id} 的依赖还没完成（${task.blockedBy.join('、')}），不能进入 ${next}。`,
+        { taskId: task.id, blockedBy: [...task.blockedBy] },
+      );
+    }
+    if (input.patch.title !== undefined) task.title = input.patch.title;
+    if (input.patch.description !== undefined) task.description = input.patch.description;
+    if (input.patch.ownerMemberId !== undefined) task.ownerMemberId = input.patch.ownerMemberId;
+    if (next !== undefined) task.status = next;
+    task.revision += 1;
+    this.refreshBlocked(team);
+    this.notify(team.id);
+    return task;
+  }
+
+  /**
+   * 宿主侧的指派（`dispatch_agent` 带 `taskId` 时）：写上 owner 并进入 `in_progress`。
+   *
+   * 内部用当前 revision 做 CAS，因此和模型侧走的是同一条路径与同一套拒绝规则
+   * （被依赖挡住时照样 `TEAM_TASK_BLOCKED`）。
+   */
+  assignTask(teamId: string, taskId: string, memberId: string): TeamTask {
+    const task = this.getTask(teamId, taskId);
+    if (task === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.taskNotFound, `任务 ${taskId} 不存在。`, { taskId });
+    }
+    return this.updateTask({
+      teamId,
+      taskId,
+      expectedRevision: task.revision,
+      patch: { ownerMemberId: memberId, status: 'in_progress' },
+    });
+  }
+
+  /** 依赖变化后重算 `blocked` ↔ `pending`；终态任务不动。 */
+  private refreshBlocked(team: Team): void {
+    for (const task of team.tasks.values()) {
+      if (isTerminalTaskStatus(task.status) || task.status === 'in_progress') continue;
+      const blocked = isTaskBlocked(task, team.tasks);
+      if (blocked && task.status === 'pending') task.status = 'blocked';
+      else if (!blocked && task.status === 'blocked') task.status = 'pending';
+    }
+  }
+
+  /* ------------------------------------------------------------------ 消息 */
+
+  /**
+   * 记录一条消息。`from`/`to` 由调用方（宿主可信上下文）给，模型侧表单里没有这两个字段。
+   *
+   * P2 只记 `queued`：**不做会话注入**，所以没有投递尝试、也就没有 `inflight`/`candidate`/
+   * `fresh-reader-visible`。这不是「已投递」，只是「宿主记下了」。
+   */
+  appendMessage(input: {
+    readonly teamId: string;
+    readonly from: string;
+    readonly to: string;
+    readonly kind: TeamMessageKind;
+    readonly payload: unknown;
+    readonly deliveryState?: TeamDeliveryState;
+  }): TeamMessage {
+    const team = this.requireTeam(input.teamId);
+    if (input.to !== TEAM_LEAD_ID && !team.members.has(input.to)) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.memberNotFound,
+        `收件人 ${input.to} 不是本 Team 的成员。`,
+        { to: input.to },
+      );
+    }
+    team.seq += 1;
+    const message: TeamMessage = {
+      id: this.newId(),
+      teamId: team.id,
+      from: input.from,
+      to: input.to,
+      kind: input.kind,
+      payload: input.payload,
+      deliveryState: input.deliveryState ?? 'queued',
+      seq: team.seq,
+    };
+    team.messages.push(message);
+    for (const memberId of [message.from, message.to]) {
+      const member = team.members.get(memberId);
+      if (member !== undefined) member.lastSeq = message.seq;
+    }
+    this.notify(team.id);
+    return message;
+  }
+
+  /* -------------------------------------------------------------- 等待/幂等 */
+
+  /**
+   * 等到成员 settle（或超时）。**只返回已 settle 成员**的最终文本，仍在跑的只在 `pending` 里列 id。
+   *
+   * 等待是事件驱动的：`settleMember` / `interruptMember` / `message` 都会唤醒它，所以
+   * 「成员刚结束」与「wait 返回」之间没有轮询延迟。
+   *
+   * **已知边界（独立验证者登记，行为不改）**：超时**不取消**任何成员——它只是停止等待，
+   * 成员照旧跑。因此「超时之后并发槽位何时释放」取决于被中止的 turn 是否真的退出：验证者的
+   * 真装配实验里，一个不响应 abort 的 stream 在 2 秒后 `capacity.size` 仍是 1。要真正停下
+   * 成员得用 `interrupt_agent`（它下传 AbortSignal），而且即使那样，租约也要等 run 自己收尾
+   * 才归还——这是现有 worker 生命周期的语义，不是 `wait_team` 能保证的事。
+   */
+  async waitForSettled(
+    teamId: string,
+    options: { readonly memberIds?: readonly string[]; readonly timeoutMs?: number } = {},
+  ): Promise<TeamWaitView> {
+    const team = this.requireTeam(teamId);
+    const wanted = options.memberIds === undefined ? [...team.members.keys()] : [...options.memberIds];
+    for (const id of wanted) this.requireMember(teamId, id);
+    const timeoutMs = Math.min(Math.max(options.timeoutMs ?? DEFAULT_TEAM_WAIT_MS, 0), MAX_TEAM_WAIT_MS);
+    const deadline = this.now() + timeoutMs;
+    // A guard against a caller clock that never advances (a frozen `now` in a
+    // test, say): without it the loop below would wait forever instead of
+    // reporting a timeout. 10k rounds of an event-driven wait is far beyond any
+    // real conversation's lifetime.
+    for (let round = 0; round < 10_000; round += 1) {
+      const settled = wanted
+        .map((id) => team.members.get(id))
+        .filter((member): member is TeamMember => member !== undefined && isSettledMemberStatus(member.status))
+        .map((member) => {
+          const bounded = boundTeamText(member.resultText ?? '');
+          return { memberId: member.id, status: member.status, text: bounded.text, truncated: bounded.truncated };
+        });
+      const pending = wanted.filter((id) => {
+        const member = team.members.get(id);
+        return member !== undefined && !isSettledMemberStatus(member.status);
+      });
+      if (pending.length === 0) return { settled, pending, timedOut: false };
+      const remaining = deadline - this.now();
+      if (remaining <= 0) return { settled, pending, timedOut: true };
+      await this.raceChange(teamId, remaining);
+    }
+    // Only reachable with a non-advancing clock; reporting a timeout is the honest
+    // answer, since the window has been waited out by every measure available.
+    const settled = wanted
+      .map((id) => team.members.get(id))
+      .filter((member): member is TeamMember => member !== undefined && isSettledMemberStatus(member.status))
+      .map((member) => {
+        const bounded = boundTeamText(member.resultText ?? '');
+        return { memberId: member.id, status: member.status, text: bounded.text, truncated: bounded.truncated };
+      });
+    return {
+      settled,
+      pending: wanted.filter((id) => {
+        const member = team.members.get(id);
+        return member !== undefined && !isSettledMemberStatus(member.status);
+      }),
+      timedOut: true,
+    };
+  }
+
+  /**
+   * 幂等键查询。
+   *
+   * P2 的语义：**同一个 `requestId` 再来一次会被拒绝**（`TEAM_REQUEST_DUPLICATE`），而不是
+   * 静默重放——内存里没有足够信息证明「上次那次到底做完了什么」，假装成功比重说一遍更危险。
+   * 调用方可以列成员/任务或 `wait_team` 去看真实结果。
+   */
+  rememberRequest(teamId: string, requestId: string, entityId: string): void {
+    this.requests.set(`${teamId}:${requestId}`, entityId);
+  }
+
+  requestOwner(teamId: string, requestId: string): string | undefined {
+    return this.requests.get(`${teamId}:${requestId}`);
+  }
+
+  /* ----------------------------------------------------------------- 内部 */
+
+  requireTeam(teamId: string): Team {
+    const team = this.teams.get(teamId);
+    if (team === undefined) {
+      throw new TeamError(TEAM_ERROR_CODES.teamNotFound, `Team ${teamId} 不存在。`, { teamId });
+    }
+    return team;
+  }
+
+  requireMember(teamId: string, memberId: string): TeamMember {
+    const member = this.requireTeam(teamId).members.get(memberId);
+    if (member === undefined) {
+      throw new TeamError(
+        TEAM_ERROR_CODES.memberNotFound,
+        `成员 ${memberId} 不存在。`,
+        { teamId, memberId },
+      );
+    }
+    return member;
+  }
+
+  private notify(teamId: string): void {
+    const waiters = this.waiters.get(teamId);
+    if (waiters === undefined) return;
+    for (const wake of [...waiters]) wake();
+  }
+
+  private raceChange(teamId: string, timeoutMs: number): Promise<void> {
+    return new Promise<void>((resolve) => {
+      let done = false;
+      const wake = (): void => {
+        if (done) return;
+        done = true;
+        this.waiters.get(teamId)?.delete(wake);
+        resolve();
+      };
+      const waiters = this.waiters.get(teamId) ?? new Set<() => void>();
+      waiters.add(wake);
+      this.waiters.set(teamId, waiters);
+      void this.delay(timeoutMs).then(wake);
+    });
+  }
+}
+
+/* ------------------------------------------------------------------ 投影 ---- */
+
+function toMemberView(member: TeamMember): TeamMemberView {
+  return {
+    memberId: member.id,
+    definitionId: member.definitionId,
+    definitionRevision: member.definitionRevision,
+    definitionSnapshotHash: member.definitionSnapshotHash,
+    sessionId: member.sessionId,
+    status: member.status,
+    createdAt: member.createdAt,
+    lastSeq: member.lastSeq,
+    hasResult: member.resultText !== undefined,
+  };
+}
+
+function toTaskView(task: TeamTask): TeamTaskView {
+  return {
+    taskId: task.id,
+    revision: task.revision,
+    status: task.status,
+    ...(task.ownerMemberId === undefined ? {} : { ownerMemberId: task.ownerMemberId }),
+    blockedBy: [...task.blockedBy],
+    writeScopes: [...task.writeScopes],
+    untrusted: { title: task.title, description: task.description },
+  };
+}
+
+function toMessageView(message: TeamMessage): TeamMessageView {
+  return {
+    messageId: message.id,
+    seq: message.seq,
+    from: message.from,
+    to: message.to,
+    kind: message.kind,
+    deliveryState: message.deliveryState,
+    untrustedPayload: message.payload,
+  };
+}
