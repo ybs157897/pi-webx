@@ -6,7 +6,7 @@ Status: **封版 — 自动委派 3 次样本均已发生：**TC-12 记 PARTIAL*
 
 > **代码状态**：实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`）。子智能体阶段成果已提交为 `1ae3b0a`（未推送、未合并）；Agent Team P2 正在同一分支上进行中。本文的 verdict 只针对该工作区。
 > **怎么读结果**：每个 TC 的 verdict 都指向**证据来源**（独立验收报告路径 / 实跑命令）。**未执行的断言一律 NOT RUN，不得记 PASS**；含未验证项的标 PARTIAL。
-> 结果来源：`/tmp/pi-webx-subagents-implementation/verify-config-api.md`（配置存储/API/三态）、`verify-runtime.md`（运行时无模型探针）、`verify-runtime-races.md`（取消竞态与工具契约）、`verify-browser.md`（浏览器 UI）、`live-test-server-handoff.md`（隔离实例与调用范式）、**`verify-zcode-contract.md`（ZCode 新契约字段/名称规则/运行时注入）**、**`browser/t53*`（ZCode 1:1 界面三轮浏览器验收，截图与 wire）**、**`verify-builtins.md`（内置两个智能体契约/运行时 10/10）**、**`verify-t66-builtins-narrow.md`（内置 UI 分组/只读行 + 模型设置窄屏 A/B/C）**、**`verify-concurrency.md`（真并发/只读豁免/失败语义：A 7/7 · B 7/7 · C 12/12）**。
+> 结果来源：`/tmp/pi-webx-subagents-implementation/verify-config-api.md`（配置存储/API/三态）、`verify-runtime.md`（运行时无模型探针）、`verify-runtime-races.md`（取消竞态与工具契约）、`verify-browser.md`（浏览器 UI）、`live-test-server-handoff.md`（隔离实例与调用范式）、**`verify-zcode-contract.md`（ZCode 新契约字段/名称规则/运行时注入）**、**`browser/t53*`（ZCode 1:1 界面三轮浏览器验收，截图与 wire）**、**`verify-builtins.md`（内置两个智能体契约/运行时 10/10）**、**`verify-t66-builtins-narrow.md`（内置 UI 分组/只读行 + 模型设置窄屏 A/B/C）**、**`verify-concurrency.md`（task-71；**其 A/B 两段已过期**，见「工程门禁」后的降级说明；仅 C 段 12/12 仍有效）**。
 
 - Design Ref: `notes/implemented/feature/2026-09-22-user-subagents.md`（契约、决策与放弃项）
 - Wire contract: `src/shared/agent-definitions.ts`
@@ -134,8 +134,8 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 | **TC-16 注入 AGENTS.md `injectAgentsMd`** | P1/High | true 注入父 cwd `AGENTS.md`、false/缺省不注入、`systemPrompt` 不变、UI 开关 | **PASS** | `verify-zcode-contract.md` 用例 7a–7c（真 `PiHost` + 真 `createWorkerSession` 哨兵） |
 | **TC-17 内置两个智能体（契约/写保护/遮蔽）** | P0/Critical | 两条虚拟内置、`source/readOnly`、不落盘、内置 id 写请求 400、同名遮蔽 | **PASS** | `verify-builtins.md` §1–§4（含逐字 diff 与落盘纯度护栏） |
 | **TC-18 内置 UI 分组与只读行** | P1/High | 「内置子智能体」组在前、无开关/无删除/点击不进编辑、计数含内置、搜索整组隐藏 | **PASS** | `verify-t66-builtins-narrow.md` A1–A6 |
-| **TC-19 真并发与排队（新语义）** | P0/Critical | 同轮多派发并发执行、超 `maxConcurrentInstances` 排队、`capacity-timeout`、排队可 abort、`host-full` 立即拒绝 | **PASS（独立验收 A 7/7）** | `/tmp/pi-webx-subagents-implementation/verify-concurrency.md` §A（A1–A5 + A1'，含旧拒绝文案 grep=0） |
-| **TC-20 只读豁免（新语义）** | P0/Critical | `selected` 下 `read/grep/find/ls` 免父 active、其余仍 ⊆ 父 active、`all` 不变、写/命令类不豁免 | **PASS（独立验收 B 7/7）** | `/tmp/pi-webx-subagents-implementation/verify-concurrency.md` §B（B6a–B6e、B7、B8a–B8b） |
+| **TC-19 真并发与排队（新语义）** | P0/Critical | 同轮多派发并发执行、超 `maxConcurrentInstances` 排队、`capacity-timeout`、排队可 abort、`host-full` 立即拒绝 | **PARTIAL（证据已按 task-87 实跑重指）**：两 child 真并发、同定义排队、排队中取消清队列、配额回基线、`host-full` 拒绝**都有现行证据**；**FIFO 顺序与全局 `MAX_WORKERS` 上限仅仓库外 harness 覆盖**；`capacity-timeout` 真实墙钟**未验** | 仓库内：`scripts/check-subagent-boundaries.ts:140`（`peak===2`）、`scripts/check-subagent-lifecycle.ts:92-104`；仓库外：`/tmp/pi-webx-subagents-implementation/verify-runtime-races.ts`（sha256 `1214aa9c…`，C1–C6） |
+| **TC-20 只读豁免（新语义）** | P0/Critical | `selected` 下 `read/grep/find/ls` 免父 active、其余仍 ⊆ 父 active、`all` 不变、写/命令类不豁免 | **PASS，但证据要换**：`verify-concurrency.md` §B（B 7/7）**已过期**——其旧期望与「`selected` 缺工具现在会失败」相矛盾，今天实跑 B exit 1（4 pass / 1 fail） | 现行证据：`scripts/check-subagent-tool.ts`（豁免与 `unavailable` 断言）、`server/pi/subagent-tool.ts` 的 `planToolSurface` |
 | TC-02b N2：`thinkingLevel` 三态清除 | P0/Critical | set → 保留 → `null` 清除 → 重设；非法值拒绝 | PASS | 独立复现 `4/4b/9b`（DTO 与盘上都无该键；**真实 wire body 含 `"thinkingLevel":null`**） |
 | TC-03 坏输入：非法 JSON / 未知字段 / 超长 / 重名 | P0/Critical | 校验与拒绝语义 | PASS（仅 code point 长度这一种单位） | 独立复现 `1c/1e/7/7b/8c` + 截断 JSON 经完整 app 栈 → 400 且文件 sha 不变 |
 | TC-04 文件级 CAS | P0/Critical | 过期 `expectedRevision` → 409，无写入 | PASS（**单进程**；硬链接/跨进程/TOCTOU **不保证**） | 独立复现 `1a/1b/1d`：恰 1 成功 + 1 个 409；HTTP `[201,409,409,409,409]` |
@@ -178,9 +178,9 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 | 项 | 新语义 |
 |---|---|
 | 并发上限 | **每定义 `maxConcurrentInstances`**（契约 1..4、**默认 1**；UI 不展示）+ **全局 host worker 上限** |
-| 超限时 | **排队**（FIFO，**排队不占 capacity**；不同定义不互相排队）——**不再直接失败** |
-| 排队超时 | 新错误码 **`capacity-timeout`**（排队等待计入工具 **120s** 超时） |
-| `host-full` | host 会话预算（12）用尽 → **立即拒绝**（设计选择，**不排队**） |
+| 超限时 | **排队**（**排队不占 capacity**；不同定义不互相排队）——**不再直接失败**。**口径**：调度是**按到达顺序扫描放行**，**不是严格队头阻塞**——队头被某定义的上限挡住时，异定义的后到者仍可先走。**别写成「严格 FIFO」。** |
+| 排队超时 | 新错误码 **`capacity-timeout`**，由**生命周期层的排队期定时器**出码（`server/pi/subagent-lifecycle.ts:22-28`：`queued ? 'capacity-timeout' : 'timeout'`）。`subagent-worker.ts:90` 也有一处排队码，但在当前实现里**被生命周期层遮蔽、可观测行为上冗余**（Lead 已决定：**不改代码、只记录为设计观察**）。排队等待计入工具 **120s** 超时。 |
+| host 预算用尽 | **容量层码是 `host-full`**（`server/pi/subagent-capacity.ts:136`），**而调用方实际看到 `capacity-full`**（`server/pi/subagent-worker.ts:50` 把容量层错误包装成 `capacity-full`）。**立即拒绝、不排队**（设计选择）。写文档/断言时别把两层的码混用。 |
 | 排队中取消 | 父 abort / host `cancelParent` → **`parent-aborted`**，capacity 归零、**无僵尸** |
 
 - 触发原因：用户实测里「同一会话同时只能有一个子智能体」的硬拒挡住了正常的并发派发；该硬拒规则与错误文案**已删除**。
@@ -203,11 +203,33 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 - **判定口径**：**看 `isError` 或读错误文本**——**不要再**用 `details.ok === false` / `details.reason` 判失败（失败路径 `details` 是空对象）。
 - **成功路径不变**：`isError:false` + 八键 `details`（外加非空才出现的条件键）。
 
-**独立验收（task-71，`/tmp/pi-webx-subagents-implementation/verify-concurrency.md`，85 行）**：**A 7/7 · B 7/7 · C 12/12 · 回归 6/6 · 0 blocking**。要点：
+**独立验收（task-71，`/tmp/pi-webx-subagents-implementation/verify-concurrency.md`，85 行）——⚠ 覆盖已被 task-87 复核修正**：
 
-- **A**：同轮两不同定义**同时在飞各占一槽**；同定义 `maxConcurrentInstances=1` 时第二个**排队不建 child**、首个释放后自动开始；排队中 `cancelParent` → **`parent-aborted`**、队列清空、capacity 归零、**兄弟 run 不受影响**；排队超预算 → **`capacity-timeout`**（与**运行中**超墙钟的 `timeout` 是**两个不同码**）；**`host-full` 仍是立即拒绝**并给出原因文案；工具 description 确有并发/排队句；**旧拒绝文案 `grep` = 0**。
-- **B**：父 active 仅 `['read']` → `selected` 得 **`[read,grep,find,ls]`** 且 `unavailable=[]`；`bash/write/edit/powershell` **仍不放宽**（`leaked=[]`）；真 `createWorkerSession` 后子 active **恰四项**；**豁免不能凭空授权**（名字不在子 registry 就不 active）；**`all` 语义不变**（`find/ls` 未被豁免带入）。
-- **C**：报告**自行复核**并**自己写了 loop 式探针**证明「返回值里塞 `isError:true` 也没用，执行器仍报 `false`」——**返回结果无法表达失败**；只有 throw 得 `isError:true` + `details={}`。**九条失败路径**（invalid-arguments / unknown-agent / disabled / max-turns / capacity-timeout / unavailable-tools / no-output / parent-aborted / internal）**全部 `isError:true`** 且错误文本带 `reason=`；**成功路径仍是 `isError:false` + 八键 details**。
+> **原结论是 A 7/7 · B 7/7 · C 12/12**。**今天的实跑结果是：A → exit 1（`Probe A: 1 pass, 1 fail`，探针仍用重构前的 `SubagentCapacity({maxWorkers, hostSessions, maxHostSessions})` 构造 → `Cannot read properties of undefined (reading 'onRelease')`）；B → exit 1（`4 pass, 1 fail`，旧期望与「`selected` 缺工具现在会失败」相矛盾）；C → exit 0，12 pass / 0 fail（仍有效）。**
+> ⇒ **A/B 两段按「重构前历史口径、现行代码上不可复现」对待**（历史记录保留，不删）；**只有 C 段仍可引用**。
+> **现行证据见下方表格**（仓库内脚本 + 仓库外 `verify-runtime-races.ts` 的 C1–C6）。
+
+要点（下表带 ✅/⚠ 标注现行有效性）：
+
+**现行覆盖矩阵（task-87 实跑，`/Users/yin/Documents/ybs/code/pi-webx-subagents` @ `0edebd0` + 脏工作树）**：
+
+| 声称 | 现行证据（文件 + 行号 + 命令） | 判定 |
+|---|---|---|
+| 两 child **真并发**同时在飞 | `scripts/check-subagent-boundaries.ts:140`（`peak===2 / disposed===2 / live===0`）；`npx tsx scripts/check-subagent-boundaries.ts` | ✅ PASS |
+| 同定义超 `maxConcurrentInstances` **排队** | `scripts/check-subagent-lifecycle.ts:92-104`（`definitionLimit:1` 第二个排队、释放后放行、预算回基线）；`npx tsx scripts/check-subagent-lifecycle.ts` | ✅ PASS |
+| 排队中取消 → `parent-aborted`、**清队列无僵尸** | `scripts/check-subagent-lifecycle.ts:45-53`（`capacity.queued===1` → `cancelParent` → 码为 `parent-aborted`、`queued===0`） | ✅ PASS |
+| 配额回基线（成功/失败/取消） | `scripts/check-subagent-lifecycle.ts:52-53,71-72,85-87` | ✅ PASS |
+| `host-full` 立即拒绝 | `scripts/check-subagent-lifecycle.ts:99`（`capacity.acquire` 被拒）；**口径见上表：调用方见 `capacity-full`** | ✅ PASS（口径已改） |
+| 排队码 vs 运行期 `timeout` 两码可区分 | `scripts/check-subagent-lifecycle.ts:42` + 仓库外 C4 | ✅ PASS |
+| **异定义不互相排队** | **仅**仓库外 `/tmp/pi-webx-subagents-implementation/verify-runtime-races.ts` C2（`size=2 queued=1`，a1 释放后 b1 之后 a2 才起） | ⚠ 仅仓库外 |
+| **全局 `MAX_WORKERS` 上限** | **仅**同脚本 C3（`maxWorkers=2` → 第三个排队） | ⚠ 仅仓库外 |
+| **到达顺序放行（非严格 FIFO）** | **仅**同脚本 C1（单槽 + 三**不同**定义 → `admitted=[task-1,task-2,task-3]`）；变异 `waiting.unshift→LIFO` 能让 C1 变红 | ⚠ 仅仓库外，且**口径是「按到达顺序扫描放行」** |
+| 旧硬拒文案 `grep` = 0 / description 并发句 | `verify-concurrency.md` A5（**A 段唯一仍活着的用例**） | ✅ PASS（引用须注明 A 段其余 6 例已不可复现） |
+
+- 仓库外门禁：`/tmp/pi-webx-subagents-implementation/verify-runtime-races.ts`，sha256 **`1214aa9c624e6a22a74da177375cb13a5c7ab8ea671eef06b7fe85c7e5343b80`**；本轮实测 **`15 pass / 0 fail / 0 skip`（A6+B3+C6），连跑 6/6 一致**；8 个变异**全部咬人**（含 `MAX_WORKERS 2→3`、`waiting.unshift→LIFO`、取消只到最老 run 等）。
+- **不要用静态 `record(` 计数当通过数**（静态 18 处 ≠ 运行时 15 例）。
+- **B（⚠ 已过期）**：原报「父 active 仅 `['read']` → 得 `[read,grep,find,ls]`、写/命令类不放宽、`all` 不变」——**结论方向仍成立，但该报告的 B 段今天实跑 exit 1**（4 pass / 1 fail），**其旧期望与「`selected` 缺工具现在会失败」相矛盾**。**引用只读豁免请改用** `scripts/check-subagent-tool.ts` 的豁免/`unavailable` 断言与 `server/pi/subagent-tool.ts` 的 `planToolSurface`。
+- **C（✅ 仍有效，12/12）**：报告**自行复核**并**自己写了 loop 式探针**证明「返回值里塞 `isError:true` 也没用，执行器仍报 `false`」——**返回结果无法表达失败**；只有 throw 得 `isError:true` + `details={}`。**九条失败路径**（invalid-arguments / unknown-agent / disabled / max-turns / capacity-timeout / unavailable-tools / no-output / parent-aborted / internal）**全部 `isError:true`** 且错误文本带 `reason=`；**成功路径仍是 `isError:false` + 八键 details**。
 
 ### 内置两个智能体（本轮）
 
@@ -281,6 +303,29 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 - **最终口径（Lead 决议，逐字）**：**共 3 次父 prompt 全部发出；前 2 次因权限越权失败（历史记录保留），task-45 修复后第 3 次通过。** —— **不是 3/3 全过**；成功率**不泛化**（每领域各一次）；**不证明 OS 沙箱**。
 - 修后仅 1 次样本，**不得**把它当作稳定性概率（1/1 不是"通过率"）；也不得以"1 次没复现"否定历史 FAIL。
 
+### Agent Team P2 怎么手工验（无 UI）
+
+> P2 = 编排角色 + Team 运行时 + 受控成员工具面 + 2 个只读路由；**无 Team 面板**。完整记录见 [`notes/implemented/feature/2026-09-22-agent-team-p2.md`](../../notes/implemented/feature/2026-09-22-agent-team-p2.md)。
+
+**Given** 8788（带该特性的检出）可用，**When** 用带 `teamMode: true` 的 body 建会话（`server/routes.ts:656` 本地解析，不改 shared 契约）  
+**Then** 该会话 active 出现 **9 个 Team 工具**（`list_team_members`/`dispatch_agent`/`send_team_message`/`list_team_tasks`/`get_team_task`/`create_team_task`/`update_team_task`/`wait_team`/`interrupt_agent`）  
+**And** **`subagent` 既不激活也不注册**（`customTools.length === 9`）  
+
+**When** `GET /api/teams/:id`（`server/routes.ts:617`）  
+**Then** `from`/`to`/`teamId` **由宿主填写**；模型写的这些字段只出现在 `untrustedPayload`、任务标题只在 `untrusted.title`  
+**And** 投影**不含**定义 `systemPrompt`；成员视图只给 `hasResult`（不给 `resultText`）；未知 id → **404**  
+
+**When** `POST /api/teams/:id/cancel`（`:634`）  
+**Then** 返回 `cancelled: <n>`，成员进 `cancelling`，settle 后可读；非字符串 `reason` 不被注入  
+
+**When** 在成员会话里试 `dispatch_agent`  
+**Then** `Tool dispatch_agent not found`（成员只有 `update_team_task` 仅自己任务 + `send_team_message` 仅发给 lead）  
+
+**When** 重启进程后再 `GET /api/teams/:id`  
+**Then** 查不到——**P2 状态全内存**（`sessionId` 是内存 run 标识，不是持久会话 id）  
+
+**未验证（手工也验不了）**：真模型下成员真实作答、被中止 turn 真实退出并释放槽位的时机、`cancelling` 与写入的真并发竞态、P3 持久化边界。
+
 ### 工程门禁（**本轮 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
 
 | 命令 | 实测结果 | 出处 |
@@ -317,9 +362,11 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 - **曾经的窄屏缺陷已修**：390 下「模型设置」裁切不可达已修复并经独立复测 **B7–B9 PASS**（见上文专节）。
 - **本轮未验证（不得当 PASS）**：
   1. **真实模型的同轮双派端到端**：`verify-concurrency.md` 无真模型；用户复测会话暴露的「第二个被拒 + `details={}`」后端已换实现，但**未由真实模型重跑**。
-  2. **`capacity-timeout` 的真实墙钟路径**：独立验收只用可控 fake 预算复现。
-  3. **UI/会话面板对失败文本的渲染**：未验（无浏览器）。
-  4. `model-error` / `invalid-model` 未在本轮单独构造；`runId` 在部分失败码缺席是否**设计期望**未与实现者确认（报告按「若已分配」口径判读）。
+  2. **`capacity-timeout` 的真实墙钟路径**：独立验收与 task-87 的 C4 **都只用可控 fake 预算**（C4 用 40ms），**真实墙钟未验**。
+  3. **FIFO/到达顺序与全局 `MAX_WORKERS` 上限只在仓库外 harness 有证据**（`verify-runtime-races.ts` C1/C3），仓库内脚本未覆盖。
+  4. **`pump()` 不是严格全局 FIFO**：本轮只断言「单全局槽 + 三个不同定义」下的到达顺序。
+  5. **UI/会话面板对失败文本的渲染**：未验（无浏览器）。
+  6. `model-error` / `invalid-model` 未在本轮单独构造；`runId` 在部分失败码缺席是否**设计期望**未与实现者确认（报告按「若已分配」口径判读）。
 - **残余观察（独立验收者列出，不构成 FAIL）**：
   1. **ZCode 的 Environment 层（dispatch 期）未移植**（cwd / 是否 git / platform / shell / OS + 模型名）——**用户定义同样没有**，不是内置独有缺口。
   2. **`general-purpose` 的 prompt 保持 ZCode 原文**（仍写 `Use Read`）；**只有 Explore 做了工具名归一**。
@@ -705,7 +752,7 @@ curl -sS "$BASE/api/sessions/$SID_R/state"                                      
 **Given** 一个定义 D，`maxConcurrentInstances = 1`，父会话可派发  
 **When** 在同一轮里对同一 D 连续发起 **2 次**派发  
 **Then** 第一次**立即运行**，第二次**排队**（不报错、不失败）  
-**And** 第一次结束后第二次**自动开始**（FIFO），最终**两次都有结果**——**不再**出现任何「已有实例」拒绝  
+**And** 第一次结束后第二次**自动开始**（**按到达顺序放行**，非严格队头阻塞），最终**两次都有结果**——**不再**出现任何「已有实例」拒绝  
 
 **When** 把 D 的 `maxConcurrentInstances` 调到 **2** 后再连续派发 2 次  
 **Then** 两者**并发执行**（第二个不再等待第一个结束）  
@@ -720,7 +767,7 @@ curl -sS "$BASE/api/sessions/$SID_R/state"                                      
 
 **Given** host 会话预算（12）已用尽  
 **When** 再派发  
-**Then** **立即拒绝**，错误码 **`host-full`**——**它是设计上的立即拒绝，不排队**  
+**Then** **立即拒绝**——**容量层码是 `host-full`，调用方实际看到 `capacity-full`**；**不排队**（设计选择）  
 
 **And** 判失败看 **`isError`/错误文本**（不是 `details.ok`），且错误文本含 `reason=` 归因（见 TC-12 的失败口径）  
 

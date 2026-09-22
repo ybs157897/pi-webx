@@ -2,7 +2,7 @@
 
 > **2026-09-22 后续修复**：已修复 6 项运行时问题并拆分代码职责，现行规则见[生命周期与权限边界修复](../bug-fix/2026-09-22-subagent-lifecycle-boundaries.md)。新增 `check-subagent-lifecycle.ts` / `check-subagent-boundaries.ts`。`selected` 缺工具现在会失败，`all` 缺工具会在模型可见文本中说明；子扩展初始化与用户交互已接入父 UI；超时覆盖初始化。取消后不响应的同进程工作仍保留容量，待实际退出后释放。下方既有 TC / live 结果保留历史口径，不因本次修复重新宣称 live PASS。
 
-Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，已提交 `1ae3b0a`，未推送、未合并）· 配置/API/UI 已独立验收 · 真实模型 3 次测试已完成：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；门槛为 3/3 全条件通过）· 安全 blocker 已由独立 host 验 7/7 + live r3 确认修复 · 测试任务完成，不再追加模型轮次 · **界面已按 ZCode 1:1 重写（color/injectAgentsMd 新字段、名称 3..50 码点）** · **内置两个智能体已落地（`builtin:general-purpose` / `builtin:explore`，虚拟条目、只读、恒启用）** · **本轮语义已改：真并发（超限排队）、只读豁免（`selected` 下 `read/grep/find/ls` 免父 active）、失败走 throw（⇒ `isError:true`、`details={}`）+ 错误文本** · **提示词两处修正 + 逐字比对守卫已落地；验特性必须用 8788（主树无此功能）** · **工程门禁（本轮 task-76 / 提示词轮 task-77）四项 exit 0**（前端包仍 `assets/index-BvK7ArLb.js` sha256 `2587fad7…67b8`）**
+Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，已提交 `1ae3b0a`，未推送、未合并）· 配置/API/UI 已独立验收 · 真实模型 3 次测试已完成：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；门槛为 3/3 全条件通过）· 安全 blocker 已由独立 host 验 7/7 + live r3 确认修复 · 测试任务完成，不再追加模型轮次 · **界面已按 ZCode 1:1 重写（color/injectAgentsMd 新字段、名称 3..50 码点）** · **内置两个智能体已落地（`builtin:general-purpose` / `builtin:explore`，虚拟条目、只读、恒启用）** · **本轮语义已改：真并发（超限排队）、只读豁免（`selected` 下 `read/grep/find/ls` 免父 active）、失败走 throw（⇒ `isError:true`、`details={}`）+ 错误文本** · **提示词两处修正 + 逐字比对守卫已落地；验特性必须用 8788（主树无此功能）** · **工程门禁（本轮 task-76 / 提示词轮 task-77）四项 exit 0**（前端包仍 `assets/index-BvK7ArLb.js` sha256 `2587fad7…67b8`）· **Agent Team P2（编排角色 + 受控成员工具面）另见 [P2 记录](2026-09-22-agent-team-p2.md)**
 
 > **代码在哪**：全部实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`，已提交 `1ae3b0a`）。
 > **尚未合并进主工作区**，也**没有提交/推送**——本文所述行为只对**该 worktree 的当前工作区**成立，不要读成「已上线」。
@@ -24,9 +24,9 @@ Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，�
 **A｜真并发（超限排队，不再硬拒）**
 - **删除了**「每个父会话同时只允许一个子智能体实例」的硬拒规则与该错误文案（源码里已无该文案）。
 - 同一轮可以派发**多个独立任务并并发执行**；上限 = **每定义 `maxConcurrentInstances`**（契约 **1..4、默认 1**；**UI 不展示**，编辑时原样保留）+ **全局 host worker 上限**。
-- **超限不再失败，而是排队**：FIFO，**排队不占 capacity**；不同定义不会互相排在对方后面。
-- **新错误码 `capacity-timeout`**：排队等待计入工具的 **120s** 超时；等待结束仍未拿到名额即该码。
-- **`host-full`（host 会话预算 12 用尽）仍是立即拒绝**——这是设计选择，**不排队**。
+- **超限不再失败，而是排队**：**排队不占 capacity**；不同定义不会互相排在对方后面。**口径**：调度**按到达顺序扫描放行**，**不是严格队头阻塞**——队头被某定义上限挡住时，异定义的后到者仍可先走。**别再写成「严格 FIFO」**。
+- **新错误码 `capacity-timeout`**：由**生命周期层的排队期定时器**出码（`server/pi/subagent-lifecycle.ts:22-28`）。排队等待计入工具的 **120s** 超时；等待结束仍未拿到名额即该码。`subagent-worker.ts:90` 也有一处排队码，但在当前实现里**被生命周期层遮蔽、可观测行为上冗余**——**Lead 已决定不改代码，只记录为设计观察**。
+- **host 预算（12）用尽仍是立即拒绝**（设计选择，**不排队**）；**容量层码是 `host-full`**（`subagent-capacity.ts:136`），**而调用方实际看到 `capacity-full`**（`subagent-worker.ts:50` 包装）。**两层别混用**。
 - **排队项可立即清除**：父 abort / host `cancelParent` → `parent-aborted`，capacity 归零、**无僵尸**。
 - 工具 description 新增并发说明句。
 
@@ -70,7 +70,8 @@ Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，�
 | **ZCode 新契约与运行时注入（颜色/名称/隐藏字段/AGENTS.md）** | **PASS 12/12**（+ 5 个回归脚本全绿、0 blocking）：color 三态、名称 2/3/50/51 码点与逐字文案、读盘容忍与历史行可写性、隐藏字段不被重置、真 `PiHost`+真 `createWorkerSession` 哨兵注入且 `systemPrompt` 不变 | `/tmp/pi-webx-subagents-implementation/verify-zcode-contract.md` |
 | **ZCode 1:1 界面浏览器验收（三轮）** | 第一轮 A–H PASS / I FAIL（3 项偏离）；第二轮 ① 删除弹窗 PASS ② CDP `Network.setBlockedURLs` 真实触发重试 PASS ③ 窄屏 FAIL；**第三轮窄屏 PASS**（390 内容列 **348px**、按钮 `cw=sw=112`、rail 变横向 tab；1440 侧栏仍 **256px**） | `/tmp/pi-webx-subagents-implementation/browser/t53*` |
 | 父 active 权限接线（task-45 修复的独立复验） | **7/7 PASS**（**当时的口径**：`all`/`selected` 均 ⊆ 父 active、`unavailable` 点名不静默授予、父 active 空 → `surface=[]`、父含 bash/write 时不过度收紧；含 RED 自检）。**注意：该报告早于只读豁免（本轮）**，`selected` 的 `⊆ 父 active` 表述已被本轮改写；豁免行为本轮由 `check-subagent-tool.ts` 断言覆盖 | `/tmp/pi-webx-subagents-implementation/verify-parent-active.md` |
-| 真并发 / 只读豁免 / 失败语义（本轮） | **独立验收 PASS**：**A 7/7 · B 7/7 · C 12/12 · 回归 6/6 · 0 blocking**（含自建 loop 探针证明「返回值带不了 `isError`」与**九条失败路径** `isError:true`） | `/tmp/pi-webx-subagents-implementation/verify-concurrency.md`（85 行） |
+| 真并发 / 只读豁免 / 失败语义（本轮） | **部分有效（task-87 复核修正）**：报告的 **A 段与 B 段已过期**——今天实跑 **A exit 1**（探针仍用重构前 `SubagentCapacity({maxWorkers, hostSessions, maxHostSessions})` 构造 → `onRelease` 崩溃）、**B exit 1**（旧期望与「`selected` 缺工具现在会失败」矛盾）、**C 仍 12/12**（含自建 loop 探针与**九条失败路径** `isError:true`）。**A/B 按「重构前历史口径、现行代码不可复现」对待** | `/tmp/pi-webx-subagents-implementation/verify-concurrency.md`（历史；只有 C 段可引用） |
+| 真并发/排队/配额（现行证据，task-87 补实） | **仓库内**：`scripts/check-subagent-boundaries.ts:140`（`peak===2` 两 child 真并发）、`scripts/check-subagent-lifecycle.ts:92-104`（同定义排队 + 预算回基线）、`:45-53`（排队中取消清队列）、`:99`（host 预算拒绝）；**仓库外**：`/tmp/pi-webx-subagents-implementation/verify-runtime-races.ts` sha256 `1214aa9c…` → **15 pass / 0 fail / 0 skip**（C1 到达顺序 / C2 异定义不排队 / C3 全局上限 / C4 两层码 / C5 排队取消无僵尸 / C6 配额回基线），**连跑 6/6 一致**，**8 个变异全部咬人** | 见左列文件与行号 |
 
 **逐项独立结论（只列有证据的）**：
 - **存储/CAS**：`…/dir/../dir/…` 两种写法并发 → **恰 1 成功 + 1 个 409**；坏 JSON / `schemaVersion:2` / 带 `role` 的条目 → read 500、sha256 逐字未变；HTTP 5 并发同 revision → `[201,409,409,409,409]`。
@@ -311,9 +312,10 @@ Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，�
 ## 剩余的验证缺口
 
 1. **真实模型自动委派（测试完成，TC 记 PARTIAL）**：父 prompt **3 / 3 全部发出，三轮均自动委派**；**r1、r2 权限 FAIL（历史保留，不改写）+ 修复后 r3 PASS 13/13**。该 TC 的 PASS 门槛是 **3/3 全条件通过** → 实际前 2 次 FAIL，**故 PARTIAL**（不重定义为「只要自动委派就过」）；修后**只有 1 次样本**，不当作稳定性概率，**测试任务已完成，不再追加 LLM 轮次**。
-2. **安全 blocker（已闭合）**：r1/r2 的子会话越出父 active（拿到 `bash`/`write`/`edit`），根因 `server/pi/host.ts:563` 用 `getAllTools()`；task-45 改为 `parentActiveTools = getActiveToolNames()`，**独立 host 验 7/7**（`verify-parent-active.md`，含 RED 自检）+ **live r3 实测 `["read","grep"]`**。
-3. **ZCode 1:1 界面**：三轮浏览器验收已收敛（第三轮窄屏 PASS）；**原「390 模型设置裁切」缺陷已修并经独立复测 B7–B9 PASS**（见上文专节）。
-4. **浏览器 TC3（指定模型下拉）**：**已复验通过并关闭**（JSON tuple 完整保留 `deepseek/deepseek-v4.1-flash`，落盘/回读/清除/删除全链路实测）；`docs/tests/subagents.md` 的 **TC-11 记为 PASS（9 PASS / 0 FAIL）**——口径限于**无模型调用的 UI 维度**。
-5. **真实时钟/真实生命周期的四项（仍未独立验证）**：`sweep` 不杀有 active worker 的父、timeout 真实时钟、`maxTurns` 真实工具续轮、可信扩展 fixture 的独立 child ctx。
-6. **项目门禁**：**已跑并全绿**（typecheck / check / build / diff-check 均 exit 0，出处 `/tmp/final4-*.log`）；门禁**不再是未验证项**。
-7. **手测执行**：按 `docs/tests/subagents.md` 回填；**未跑的不打 PASS**；实例最终指纹与 stop 由 server owner 收尾。
+2. **并发证据的仓库外依赖**：**FIFO/到达顺序**与**全局 `MAX_WORKERS` 上限**目前**只有仓库外 harness** 覆盖（`verify-runtime-races.ts` C1/C3），仓库内脚本未覆盖；且 `pump()` **不是严格全局 FIFO**。`capacity-timeout` 的**真实墙钟路径仍未验**（C4 用 40ms 可控 fake 预算）。
+3. **安全 blocker（已闭合）**：r1/r2 的子会话越出父 active（拿到 `bash`/`write`/`edit`），根因 `server/pi/host.ts:563` 用 `getAllTools()`；task-45 改为 `parentActiveTools = getActiveToolNames()`，**独立 host 验 7/7**（`verify-parent-active.md`，含 RED 自检）+ **live r3 实测 `["read","grep"]`**。
+4. **ZCode 1:1 界面**：三轮浏览器验收已收敛（第三轮窄屏 PASS）；**原「390 模型设置裁切」缺陷已修并经独立复测 B7–B9 PASS**（见上文专节）。
+5. **浏览器 TC3（指定模型下拉）**：**已复验通过并关闭**（JSON tuple 完整保留 `deepseek/deepseek-v4.1-flash`，落盘/回读/清除/删除全链路实测）；`docs/tests/subagents.md` 的 **TC-11 记为 PASS（9 PASS / 0 FAIL）**——口径限于**无模型调用的 UI 维度**。
+6. **真实时钟/真实生命周期的四项（仍未独立验证）**：`sweep` 不杀有 active worker 的父、timeout 真实时钟、`maxTurns` 真实工具续轮、可信扩展 fixture 的独立 child ctx。
+7. **项目门禁**：**已跑并全绿**（typecheck / check / build / diff-check 均 exit 0，出处 `/tmp/final4-*.log`）；门禁**不再是未验证项**。
+8. **手测执行**：按 `docs/tests/subagents.md` 回填；**未跑的不打 PASS**；实例最终指纹与 stop 由 server owner 收尾。
