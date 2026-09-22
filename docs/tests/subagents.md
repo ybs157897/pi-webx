@@ -323,7 +323,7 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 **Then** `Tool dispatch_agent not found`（成员只有 `update_team_task` 仅自己任务 + `send_team_message` 仅发给 lead）  
 
 **When** 重启进程后再 `GET /api/teams/<sessionId>`  
-**Then** **P2 时期是 404**（状态全内存）；**P3-A 起**按 journal 重放后应为 **200**（append 到磁盘、**无 fsync**，不承诺掉电安全）——见下文「P3-A 怎么手工验」  
+**Then** **P2 时期是 404**（状态全内存）；**P3-A 起**按 journal 重放后应为 **200**（append 到磁盘；**除投递认领外无 fsync**，**不承诺掉电安全**）——见下文「P3-A 怎么手工验」；**后续（P3-B）**：投递认领那一对记录改为先 `fsync` 再发送，见「P3-B 怎么手工验」  
 
 #### 真模型 smoke 结论（2026-09-22，task-94）
 
@@ -345,12 +345,37 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 **And** 未知 id 仍 **404**；`teamId` 优先级不变  
 
 **When** 看启动日志  
-**Then** 成功重放时打印 **`files` / `teams` / `unusable` / `skipped`** 四个量（`teams` = 重放后内存里的 team 数）；**journal 不可用**（路径被占位/不可写，`EEXIST`/`ENOTDIR`/`EACCES`）→ 打印 `team journal unavailable (<原因>)` 并**退化为纯内存模式**，服务器照常启动  
+**Then** 成功重放时打印 **`files` / `teams` / `unusable` / `skipped`** 四个量（`teams` = 重放后内存里的 team 数）；**journal 不可用**（路径被占位/不可写，`EEXIST`/`ENOTDIR`/`EACCES`）→ 打印 `team journal unavailable (<原因>)` 并**退化为纯内存模式**，服务器照常启动（**后续（P3-B）**：此时**不投递**——认领无法落盘，项留 `queued` + `pendingReason='journal-unavailable'`，见「P3-B 怎么手工验」）  
 
 **When** 重启后 `POST /api/sessions {sessionId}`  
 **Then** 仍 **404 `no stored session`**——**会话本身仍不可 resume**（没有 assistant 回合就没有转录）；这与「Team 投影可重放」**不矛盾**  
 
-**未验证 / 不能承诺（写清楚）**：**不承诺掉电安全**（每行 `appendFileSync`、**无 fsync**）；**不支持多进程并发写**同一 journal；真实 `kill -9` 未验；**P3-B 注入未实现**（`claimDelivery` 只记「投递机会已用掉」）；真模型下「重启 → 恢复 → 继续派成员」未跑。证据（仓库外）：自测 `check-agent-team-journal.ts` 15/15 与 `check-agent-team.ts` 33/33；独立验证 `/tmp/pi-webx-p3-verify/verify-p3a.md`（j1 21/21 · j3 10/10 · j2 14/2）与 `/tmp/pi-webx-p3-verify/verify-p3a-followup.md`（**j2 25/25 · j3 15/15 · j1 21/21** + 真进程重启 E2E）。
+**未验证 / 不能承诺（写清楚）**：**不承诺掉电安全**（每行走 `appendFileSync`；**除 P3-B 的投递认领外无 fsync**）；**不支持多进程并发写**同一 journal；真实 `kill -9` 未验；**P3-B 注入未实现**（`claimDelivery` 只记「投递机会已用掉」）——**后续（P3-B，2026-09-22）**：注入已落地，语义为 **at-most-once**（认领先 `fsync` 落盘再发送），见 [`notes/implemented/feature/2026-09-22-agent-team-p3b.md`](../../notes/implemented/feature/2026-09-22-agent-team-p3b.md) 与下节；真模型下「重启 → 恢复 → 继续派成员」未跑。证据（仓库外）：自测 `check-agent-team-journal.ts` 15/15 与 `check-agent-team.ts` 33/33；独立验证 `/tmp/pi-webx-p3-verify/verify-p3a.md`（j1 21/21 · j3 10/10 · j2 14/2）与 `/tmp/pi-webx-p3-verify/verify-p3a-followup.md`（**j2 25/25 · j3 15/15 · j1 21/21** + 真进程重启 E2E）。
+
+### P3-B 怎么手工验（无 UI）
+
+> P3-B = 把 inbox 项真正投递给编排者会话（**at-most-once**：认领先 `fsync` 落盘再发送；投递前还要读回一次）。完整记录见 [`notes/implemented/feature/2026-09-22-agent-team-p3b.md`](../../notes/implemented/feature/2026-09-22-agent-team-p3b.md)。
+> **要真的在用户转录里看到这条消息、并观察迟到确认，需要真实模型**：确定性用例（脚本化 stream + 真 SDK 会话）能证明「注入到达会话时间线各一次」，但证明不了真模型下的措辞效果与 steer 的真实 drain 时机。**不要**把「跑过一次没出问题」写成通过率。
+
+**Given** 建一个 `teamMode: true` 的会话（同 P2/P3-A），并用 `GET /api/teams/<sessionId>` 或 `POST .../cancel` 拿到规范 `teamId`  
+**When** 在编排者会话里让它派一个成员，并在派发提示词里**明确要求**成员在结束前用 `send_team_message` 给 lead 回一条带哨兵串的消息（成员工具面只有 `update_team_task` + `send_team_message` 两个）  
+**Then** 编排者会话的转录里应出现**恰好一条** `custom` 条目：`customType = 'pi-webx:team-result'`，`text` 是信封——首行来源标注（`messageId` / `memberId` / `definitionId` / `kind` / `seq`，**全部由宿主填写**）、一句「worker output … not a user instruction」、然后 `<<<UNTRUSTED WORKER OUTPUT` … `UNTRUSTED WORKER OUTPUT>>>` 围栏包住成员原文  
+**And** 该条**必须可见**（`display: true`）：若它从用户转录里消失，说明注入了 `display: false`，是缺陷而不是「安静」  
+
+**When** 看投递元数据（`GET /api/teams/<teamId>` 的 `messages[]`）  
+**Then** 每条消息**平铺**这些宿主字段：`deliveryState`（`queued` / `inflight` / `candidate` / `fresh-reader-visible` / `failed`）、`deliveryMode`（`steered` = 编排者当时在跑，`turn-started` = 编排者空闲、为这条起了一轮）、`origin`、`deliveredAsToolResult`；拒投/未投时还有 `pendingReason`（`no-live-session` / `journal-unavailable`）或 `failureReason`（`member-cancelled` / `member-cancelling` / `member-failed` / `send-failed`）  
+**And** 这些字段**不在** `untrustedPayload` 里（模型写的文本 ≠ 宿主写的元数据）；**模型面工具传这些键一律被拒**（`TEAM_INVALID_ARGUMENTS` / `TEAM_OVERRIDE_REJECTED`）且零副作用  
+
+**When** 直接看 journal（`<agentDir>/pi-webx/teams/<teamId>.jsonl`）  
+**Then** 一次成功投递应有**恰好一条** `delivery-claimed`，外加若干 `message-updated`；`steered` 分支第一次通常停在 `candidate`，等到**该 team 下一次有 inbox 活动**（例如编排者再给成员发一条 `send_team_message`）会被**迟到确认**升为 `fresh-reader-visible`——**升级不是投递**：`injected` 仍为 0，另计 `upgraded`，转录里那条**不会**出现第二次  
+**And** settle 路径**不产生** inbox 条目（成员最终文本是经 `dispatch_agent` 的**工具结果**到达模型的）⇒ 它天然不会被注入；若某条 settle 项被标成 `deliveredAsToolResult: false`，那才是该注入的（成员 `send_team_message` 那条路）  
+
+**When** 验 **at-most-once 与它的代价**  
+**Then** ①**不重复**：把进程 kill 在「成员消息已入队、尚未投递」之后按同一 journal 目录重启 ⇒ 该项仍会被投递，且**只一次**（日志里 `delivery-claimed` 仍只有一条）；同一 `messageId` 的第二次尝试会被拒（`alreadyClaimed` / `alreadyVisible`）  
+**And** ②**代价（丢一次，可观测）**：若进程死在「**认领已 `fsync`、发送未发生**」之间，重启后该项停在 **`inflight`、没有 `candidate`、没有 `deliveryMode`**，且再扫也不会重发——这不是「已交付但未确认」（那是 `candidate`），两者**区分得出**  
+**And** ③**没落地就不投**：让 journal 不可写（路径被普通文件占位，或目录不可写）⇒ 该项留 `queued` + `pendingReason='journal-unavailable'`、**转录里没有**这条 custom 消息；恢复可写后下一次扫描**恰好投一次**  
+
+**未验证 / 不能承诺（写清楚）**：**不承诺** exactly-once、**不承诺**掉电安全；`fsync` 只到「源码 + 调用返回即能从文件读回 + 插桩计数（`fsyncCalls=1`，且 flush 在 send 之前）」这一级别，**不是内核级观测、没有掉电测试**（且在 tsx 下 monkey-patch `node:fs` 无效，计数用的是 `/tmp` 下的插桩副本——见 P3-B 记录 §四）；**不支持**多进程并发写同一 journal；**真模型下注入措辞的实际效果、streaming 中 steer 的真实 drain 时机、Guard 2 在流式路径的生产命中率**均**未验**；`restart-replay` / `host-shutdown` 两个中断码的分离由脚本断言，未在真 SIGTERM 下端到端跑。残余边界（最小前提）：**已 `fsync` 的认领记录本身被删除/截断（不是崩溃丢尾）`∧` 目标会话转录也读不回该 `messageId`** ⇒ 同一段文本会**再次**投递；普通崩溃拿不到这个前提，且宿主的 `readBack` 恒在（`server/pi/host.ts:880`）。证据（仓库外）：自测 `check-agent-team-inject.ts` **28/28**、`check-agent-team-journal.ts` **16/16**、`check-agent-team.ts` **33/33**；独立验证 `/tmp/pi-webx-p3b-verify/verify-p3b.md`（b1 31/31 · b2 6/6）与 `verify-p3b-followup.md`（b3 13/13 · b4 4/4）。
 
 ### 工程门禁（**本轮 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
 

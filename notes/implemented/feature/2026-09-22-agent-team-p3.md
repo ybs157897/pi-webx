@@ -1,6 +1,7 @@
 # Agent Team P3-A：TeamJournal（append-only）与可重放 inbox
 
 Status: **implemented on `feat/user-subagents`（P3-A 代码本人尚未提交，属在途工作）· 独立验证 PASS（task-100）+ 整改（task-101）+ 定向复验 PASS（task-102）· P3-B 注入未做**
+**后续（P3-B，2026-09-22）**：注入已落地，语义为 **at-most-once**——见 [`2026-09-22-agent-team-p3b.md`](./2026-09-22-agent-team-p3b.md)。本文保留 P3-A 当时的历史表述，不改写。
 
 > **范围一句话**：P3-A 让 Team 的状态**可跨重启按日志重放**，并让「消息投递机会」在重启后也不会被重复使用。**它不承诺掉电安全，也不支持多进程并发写**——这两条是边界，不是待办。
 > 本文所有「可重放」都指：**正常的进程重启后能从日志重建**。
@@ -24,6 +25,7 @@ Status: **implemented on `feat/user-subagents`（P3-A 代码本人尚未提交�
 
 - `claimDelivery`（`team-runtime.ts:532`）、`pendingDeliveries`（`:551`）、`setMessageDeliveryState`（`:562`）。
 - **P3-A 只记录「这条消息的投递机会已经被用掉」**：真正的注入是 **P3-B**。账本跟着 journal 走（`delivery-claimed` 记录），所以**重启之后同一条 `messageId` 也不会拿到第二次机会**——这是「至少一次投递 + 目标侧去重」里属于我们这一侧的那一半。
+- **后续（P3-B，2026-09-22）**：注入已实现（`TeamInjector`），并且**认领那一对记录改走 `appendSynced`（fsync）之后才发送**；`claimDelivery`（本文上面这个便宜变体）从此只作读侧账本视图，**注入一律用 `claimDeliverySynced`**。投递语义与两道守卫见 P3-B 记录。
 
 ### 4 路由解析顺序（本轮 F-C 的修复点）
 
@@ -39,7 +41,7 @@ Status: **implemented on `feat/user-subagents`（P3-A 代码本人尚未提交�
 
 | 边界 | 事实 |
 |---|---|
-| **不承诺掉电安全** | 每行都走 `appendFileSync`（`team-journal.ts:1-12` 的 JSDoc 用 `appended via appendFileSync; no fsync guarantee` 的措辞）——**没有 fsync**。这与 pi 自身会话存储的保证同级（对 SDK 的研究没在写路径上找到 `fsync`；新读者也分不清页缓存命中与稳定存储）。**「崩溃必只截尾行」是假设，不是承诺。** |
+| **不承诺掉电安全** | 每行都走 `appendFileSync`（`team-journal.ts:1-12` 的 JSDoc 用 `appended via appendFileSync; no fsync guarantee` 的措辞）——**没有 fsync**。这与 pi 自身会话存储的保证同级（对 SDK 的研究没在写路径上找到 `fsync`；新读者也分不清页缓存命中与稳定存储）。**「崩溃必只截尾行」是假设，不是承诺。** **后续（P3-B）**：投递**认领**那一对记录是唯一的例外——`appendSynced` 先 `fsync` 再返回（`team-journal.ts:13-18` 的「One exception, on purpose」）；「不承诺掉电安全」对**其它**记录仍然成立。 |
 | **不支持多进程并发写** | **没有锁文件**；构造前提是「一个宿主一个进程」。锁文件也活不过持有者死亡，所以第二个进程并发 append 同一 journal **不在支持范围内**。 |
 | **成员不可复活** | 重放把 in-flight 成员记 `interrupted`（带原因）；**只有曾 settle 的成员恢复 `resultText`**。成员会话 in-memory，重放不能恢复会话本身。 |
 | **会话本身仍不可 resume** | 没有 assistant 回合的 team 会话**转录不落盘** ⇒ `POST /api/sessions {sessionId}` → **404 `no stored session`**。P3-A 恢复的是 **Team 投影**，不是会话。 |
@@ -73,6 +75,6 @@ Status: **implemented on `feat/user-subagents`（P3-A 代码本人尚未提交�
 1. **真实掉电 / `kill -9`**：没有 fsync，独立验证也只验了「正常 append + 正常 kill 后重放」。**「崩溃必只截尾行」是假设。**
 2. **多进程并发写同一 journal**：不支持，**未测**。
 3. **真模型下「重启 → 恢复 → 继续派成员」**：未跑（harness 全 fake）。
-4. **P3-B 注入未实现**：`claimDelivery` 只记「机会已用掉」，真正的消息注入、以及「注入后目标侧去重」的另一半没有实现。
+4. **P3-B 注入未实现**：`claimDelivery` 只记「机会已用掉」，真正的消息注入、以及「注入后目标侧去重」的另一半没有实现。**后续（P3-B，2026-09-22）**：两项都已实现（注入 + 投递前读回），见 [`2026-09-22-agent-team-p3b.md`](./2026-09-22-agent-team-p3b.md)；本条作为 P3-A 当时的状态保留。
 5. **判断语义的两条观察**（来自独立复验，非缺陷）：`unusable` 把「空文件」与「全 foreign-team 文件」归为一类；`hydrateTeams()` 的读失败也算进 `skipped`（行级与文件级原因混在同一计数里）。P4 若要区分需再拆维度。
 6. 本轮未跑 `npm run check` / `build`（留给集成 owner 的统一门禁）。
