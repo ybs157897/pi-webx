@@ -1,6 +1,6 @@
 # 子智能体：生命周期、权限与宿主边界修复
 
-Status: implemented（`feat/user-subagents` 当前工作区；未提交、未合并）
+Status: implemented（`feat/user-subagents`；已提交 `1ae3b0a`，未推送、未合并）
 
 ## 决策与理由
 

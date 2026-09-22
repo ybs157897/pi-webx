@@ -2,9 +2,9 @@
 
 > **2026-09-22 后续修复**：已修复 6 项运行时问题并拆分代码职责，现行规则见[生命周期与权限边界修复](../bug-fix/2026-09-22-subagent-lifecycle-boundaries.md)。新增 `check-subagent-lifecycle.ts` / `check-subagent-boundaries.ts`。`selected` 缺工具现在会失败，`all` 缺工具会在模型可见文本中说明；子扩展初始化与用户交互已接入父 UI；超时覆盖初始化。取消后不响应的同进程工作仍保留容量，待实际退出后释放。下方既有 TC / live 结果保留历史口径，不因本次修复重新宣称 live PASS。
 
-Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，未合并、未提交）· 配置/API/UI 已独立验收 · 真实模型 3 次测试已完成：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；门槛为 3/3 全条件通过）· 安全 blocker 已由独立 host 验 7/7 + live r3 确认修复 · 测试任务完成，不再追加模型轮次 · **界面已按 ZCode 1:1 重写（color/injectAgentsMd 新字段、名称 3..50 码点）** · **内置两个智能体已落地（`builtin:general-purpose` / `builtin:explore`，虚拟条目、只读、恒启用）** · **本轮语义已改：真并发（超限排队）、只读豁免（`selected` 下 `read/grep/find/ls` 免父 active）、失败走 `isError` + 错误文本** · **提示词两处修正 + 逐字比对守卫已落地；验特性必须用 8788（主树无此功能）** · **工程门禁（本轮 task-76 / 提示词轮 task-77）四项 exit 0**（前端包仍 `assets/index-BvK7ArLb.js` sha256 `2587fad7…67b8`）**
+Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，已提交 `1ae3b0a`，未推送、未合并）· 配置/API/UI 已独立验收 · 真实模型 3 次测试已完成：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；门槛为 3/3 全条件通过）· 安全 blocker 已由独立 host 验 7/7 + live r3 确认修复 · 测试任务完成，不再追加模型轮次 · **界面已按 ZCode 1:1 重写（color/injectAgentsMd 新字段、名称 3..50 码点）** · **内置两个智能体已落地（`builtin:general-purpose` / `builtin:explore`，虚拟条目、只读、恒启用）** · **本轮语义已改：真并发（超限排队）、只读豁免（`selected` 下 `read/grep/find/ls` 免父 active）、失败走 throw（⇒ `isError:true`、`details={}`）+ 错误文本** · **提示词两处修正 + 逐字比对守卫已落地；验特性必须用 8788（主树无此功能）** · **工程门禁（本轮 task-76 / 提示词轮 task-77）四项 exit 0**（前端包仍 `assets/index-BvK7ArLb.js` sha256 `2587fad7…67b8`）**
 
-> **代码在哪**：全部实现位于隔离 worktree `/Users/yin/Documents/ybs/code/pi-webx-subagents`（分支 `feat/user-subagents`，HEAD `f31b4f1` + 未提交改动）。
+> **代码在哪**：全部实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`，已提交 `1ae3b0a`）。
 > **尚未合并进主工作区**，也**没有提交/推送**——本文所述行为只对**该 worktree 的当前工作区**成立，不要读成「已上线」。
 > 契约仍以 `src/shared/agent-definitions.ts` 为唯一真值；手测步骤见 `docs/tests/subagents.md`。
 
@@ -16,7 +16,7 @@ Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，�
 
 ## 实现现状与验证状态
 
-**实现清单（均在 worktree 内，未提交）**：`server/agent-definitions.ts`（store + 校验 + 文件级 CAS）、`server/agent-definitions-routes.ts`（4 条路由 + 跨站写保护）、`server/pi/subagent-tool.ts`、`server/pi/subagent-worker.ts`、`server/pi/subagent-capacity.ts`、`server/pi/host.ts`（装配与刷新）、`src/lib/agentDefinitions.ts`、`src/components/settings/AgentDefinitionsSection.tsx` + `agent-definitions-form.ts` + `.module.css`（界面按 ZCode 1:1 重写，含颜色标记与「注入 AGENTS.md」）、`src/components/settings/SettingsRoot.module.css`（设置页外壳 ≤768px 窄屏断点）。
+**实现清单（均在 worktree 内，已提交 `1ae3b0a`）**：`server/agent-definitions.ts`（store + 校验 + 文件级 CAS）、`server/agent-definitions-routes.ts`（4 条路由 + 跨站写保护）、`server/pi/subagent-tool.ts`、`server/pi/subagent-worker.ts`、`server/pi/subagent-capacity.ts`、`server/pi/host.ts`（装配与刷新）、`src/lib/agentDefinitions.ts`、`src/components/settings/AgentDefinitionsSection.tsx` + `agent-definitions-form.ts` + `.module.css`（界面按 ZCode 1:1 重写，含颜色标记与「注入 AGENTS.md」）、`src/components/settings/SettingsRoot.module.css`（设置页外壳 ≤768px 窄屏断点）。
 **内置相关新文件**：`server/builtin-agents.ts`（两个内置定义、`mergeBuiltinAndUserAgents`、`isBuiltinAgentId`、`nameKey`/NFKC 归一）。
 
 ### 真并发、只读豁免与失败语义（本轮三条语义变更）
@@ -285,7 +285,7 @@ Status: **封版 — implemented on `feat/user-subagents`（隔离 worktree，�
 > `scripts/check-agent-definitions.ts`、`-api.ts`、`-ui.ts`、`check-subagent-tool.ts`、`check-subagent-sdk.ts`、`check-subagents-test-server.ts`。
 > 无论脚本报多少，**脚本退出 0 只是脚本通过**；独立验收结论以上表引用的报告为准。
 
-**项目门禁**：已在**提示词修正后**重跑（task-76 / task-77，出处 `/tmp/final4-*.log`）：`npm run typecheck`、`npm run check`、`npm run build`、`git diff --check` **全部 exit 0**；唯一警告为 vite chunk >500 kB。产物 **`assets/index-BvK7ArLb.js`**，sha256 `2587fad70faa45c0bee320ea0c24b8743b697c7ba0be47c8650b4d2bb0af67b8`（**旧 `index-zaUfD3Dj.js` 已删**）。**工作树状态**：`git status --short` **31 项**（10 改 + 21 未跟踪），**未 add、未 commit、未合并、未推送**；HEAD `f31b4f1e18b42e0454be0ebe56d89243851c7c48`（branch `feat/user-subagents`）。
+**项目门禁**：已在**提示词修正后**重跑（task-76 / task-77，出处 `/tmp/final4-*.log`）：`npm run typecheck`、`npm run check`、`npm run build`、`git diff --check` **全部 exit 0**；唯一警告为 vite chunk >500 kB。产物 **`assets/index-BvK7ArLb.js`**，sha256 `2587fad70faa45c0bee320ea0c24b8743b697c7ba0be47c8650b4d2bb0af67b8`（**旧 `index-zaUfD3Dj.js` 已删**）。**工作树状态**：`git status --short` **31 项**（10 改 + 21 未跟踪），**未 add、未 commit、未合并、未推送**；HEAD `f31b4f1e18b42e0454be0ebe56d89243851c7c48`（branch `feat/user-subagents`）。**后续（2026-09-22 21:35）**：该工作区已提交为 `1ae3b0ad252da1eafcd1f2eb8ed45663b0d5195e`（42 files changed, 15645 insertions(+), 312 deletions(-)），未推送、未合并；提交后 Agent Team P2 在途。
 
 ## 怎么用（产品操作路径）
 

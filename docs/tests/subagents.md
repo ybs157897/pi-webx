@@ -4,7 +4,7 @@
 
 Status: **封版 — 自动委派 3 次样本均已发生：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；该 TC 门槛为 3/3 全条件通过）· 安全 blocker 已修复并经独立 host 验 7/7 + live r3 确认 · **界面已按 ZCode 1:1 重写（color / injectAgentsMd / 名称 3..50 码点）** · **内置两个智能体已落地（虚拟条目、只读、恒启用 ⇒ `subagent` 默认注册）** · **本轮语义已改：真并发（超限排队）、只读豁免、失败走 `isError` + 错误文本** · **提示词两处修正（preamble 逃生口 + Explore breadth 句）与逐字比对守卫已落地** · **验特性必须用 8788（主树 5173/8787 无此功能）** · **工程门禁：task-76 四项 exit 0；提示词轮 task-77 亦四项 exit 0** · 测试任务已完成，不再追加模型轮次**
 
-> **代码状态**：实现位于隔离 worktree `/Users/yin/Documents/ybs/code/pi-webx-subagents`（分支 `feat/user-subagents`，HEAD `f31b4f1` + 未提交改动），**未合并、未提交**。本文的 verdict 只针对该工作区。
+> **代码状态**：实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`）。子智能体阶段成果已提交为 `1ae3b0a`（未推送、未合并）；Agent Team P2 正在同一分支上进行中。本文的 verdict 只针对该工作区。
 > **怎么读结果**：每个 TC 的 verdict 都指向**证据来源**（独立验收报告路径 / 实跑命令）。**未执行的断言一律 NOT RUN，不得记 PASS**；含未验证项的标 PARTIAL。
 > 结果来源：`/tmp/pi-webx-subagents-implementation/verify-config-api.md`（配置存储/API/三态）、`verify-runtime.md`（运行时无模型探针）、`verify-runtime-races.md`（取消竞态与工具契约）、`verify-browser.md`（浏览器 UI）、`live-test-server-handoff.md`（隔离实例与调用范式）、**`verify-zcode-contract.md`（ZCode 新契约字段/名称规则/运行时注入）**、**`browser/t53*`（ZCode 1:1 界面三轮浏览器验收，截图与 wire）**、**`verify-builtins.md`（内置两个智能体契约/运行时 10/10）**、**`verify-t66-builtins-narrow.md`（内置 UI 分组/只读行 + 模型设置窄屏 A/B/C）**、**`verify-concurrency.md`（真并发/只读豁免/失败语义：A 7/7 · B 7/7 · C 12/12）**。
 
