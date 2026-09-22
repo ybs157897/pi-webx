@@ -21,10 +21,10 @@ import {
 import {
   type AgentSession,
   type AgentSessionEvent,
-  type ExtensionUIDialogOptions,
   type ExtensionUIContext,
-  type ExtensionWidgetOptions,
   type LoadExtensionsResult,
+  type SettingsManager,
+  type ToolDefinition,
   ModelRuntime,
   SessionManager,
   createAgentSession,
@@ -48,6 +48,7 @@ import type {
   SessionSummary,
 } from '../../src/shared/protocol';
 import { PromptRequests, SessionJournal } from './session-journal';
+import { createExtensionUiScope, type PendingExtensionDialog } from './extension-ui';
 import { prepareIncomingImages } from '../attachment/store';
 import {
   appendToolSelection,
@@ -55,6 +56,25 @@ import {
   validateToolSelection,
   withExtensionTools,
 } from '../tool-selection';
+import { agentDefinitionsStore, type AgentDefinitionStore } from '../agent-definitions';
+import {
+  SUBAGENT_TOOL_NAME,
+  type AgentDefinition,
+  type AgentDefinitionsResponse,
+} from '../../src/shared/agent-definitions';
+import { mergeBuiltinAndUserAgents } from '../builtin-agents';
+import { MAX_WORKERS, SubagentCapacity } from './subagent-capacity';
+import { SessionCapacity, type SessionReservation } from './session-capacity';
+import {
+  createSubagentTool,
+  enabledDefinitions,
+  freezeDefinition,
+  nextActiveTools,
+  type SubagentDispatchOutcome,
+  type SubagentDispatchRequest,
+  type SubagentToolDeps,
+} from './subagent-tool';
+import { createSubagentWorkerDispatch, type SubagentWorkerRunner } from './subagent-worker';
 
 const MAX_SESSIONS = 12;
 /** Sweep dead sessions with no subscribers after this long. */
@@ -88,6 +108,7 @@ export class HostError extends Error {
 }
 
 export interface HostedSession {
+  reservation: SessionReservation;
   id: string;
   cwd: string;
   createdAt: number;
@@ -123,20 +144,22 @@ export interface HostedSession {
    * client that reconnects is handed the open dialogs again, and the timeout it
    * is told about has to be the time *left*, not a fresh full one.
    */
-  pendingDialogs: Map<
-    string,
-    {
-      request: PiExtensionUiRequest;
-      createdAt: number;
-      respond: (response: PiExtensionUiResponse) => void;
-    }
-  >;
+  pendingDialogs: Map<string, PendingExtensionDialog>;
   /**
    * The builtin selection this session is running with, as the user chose it
    * (before shell resolution and the extension-tool merge). `null` until a
    * selection is known.
    */
   toolSelection: string[] | null;
+  /**
+   * The mutable array handed to `createAgentSession` as `customTools`.
+   *
+   * Held per session and mutated **in place**: the SDK keeps this exact array
+   * reference, so `refreshSubagentTool` can replace its contents and call
+   * `extensionsResult.runtime.refreshTools()` to rebuild the registry without
+   * recreating the session.
+   */
+  customTools: ToolDefinition[];
   /** Ordered in-memory log every subscriber's stream is cut from. */
   journal: SessionJournal;
   /** requestId ledger: duplicate-submit guard + echo-retire annotation. */
@@ -165,6 +188,13 @@ export interface CreateHostedSessionOptions {
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** Whether two tool-name lists hold the same names, ignoring order. */
+function sameNames(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false;
+  const set = new Set(right);
+  return left.every((name) => set.has(name));
 }
 
 /**
@@ -202,6 +232,37 @@ async function fileStamp(path: string): Promise<string> {
   }
 }
 
+export interface PiHostOptions {
+  /**
+   * Definitions source. Defaults to the process-wide file-backed store.
+   *
+   * Only `read` is used, so the option is narrowed to that: a test can hand in a
+   * list without a definitions file, and the real store still fits.
+   */
+  definitions?: Pick<AgentDefinitionStore, 'read'>;
+  /**
+   * Builds the one shared model runtime. Defaults to pi's own
+   * `ModelRuntime.create()`, which reads the real `auth.json`/`models.json`.
+   *
+   * A test that needs real credentials without touching the user's files injects
+   * a factory here (for example one built on a read-only auth storage and a
+   * temporary models store); the credentials stay inside the SDK and are never
+   * read, copied or printed by this host.
+   */
+  modelRuntimeFactory?: () => Promise<ModelRuntime>;
+  /**
+   * Directory every session of this host is stored in. Omitted means pi's own
+   * default (`~/.pi/agent/sessions/<cwd>`), which is what the product uses.
+   */
+  sessionDir?: string;
+  /**
+   * Settings manager for the sessions this host creates. Omitted means pi's
+   * file-backed manager; a test passes `(cwd) => SettingsManager.inMemory()` so a
+   * session can never write the user's defaults.
+   */
+  settingsManagerFactory?: (cwd: string) => SettingsManager;
+}
+
 export class PiHost {
   private modelRuntime: ModelRuntime | null = null;
   private modelRuntimePromise: Promise<ModelRuntime> | null = null;
@@ -221,8 +282,33 @@ export class PiHost {
   private configStamp: string | null = null;
   private readonly sessions = new Map<string, HostedSession>();
   private readonly sweeper: NodeJS.Timeout;
+  /**
+   * Live worker slots. Every dispatch reserves here before it can start a
+   * session, and workers count against the same session budget as hosted
+   * conversations — a worker is a real agent session, not a free one.
+   */
+  private readonly capacity: SubagentCapacity;
+  private readonly sessionCapacity = new SessionCapacity(MAX_SESSIONS);
+  private closing = false;
+  private readonly workerRunner: SubagentWorkerRunner;
+  private readonly definitions: Pick<AgentDefinitionStore, 'read'>;
+  private readonly modelRuntimeFactory: () => Promise<ModelRuntime>;
+  private readonly sessionDir: string | undefined;
+  private readonly settingsManagerFactory: ((cwd: string) => SettingsManager) | undefined;
 
-  constructor() {
+  constructor(options: PiHostOptions = {}) {
+    this.definitions = options.definitions ?? agentDefinitionsStore;
+    this.modelRuntimeFactory = options.modelRuntimeFactory ?? (() => ModelRuntime.create());
+    this.sessionDir = options.sessionDir;
+    this.settingsManagerFactory = options.settingsManagerFactory;
+    this.capacity = new SubagentCapacity({
+      maxWorkers: MAX_WORKERS,
+      budget: this.sessionCapacity,
+    });
+    this.workerRunner = createSubagentWorkerDispatch({
+      modelRuntime: () => this.runtime(),
+      capacity: this.capacity,
+    });
     this.sweeper = setInterval(() => this.sweep(), 60_000);
     this.sweeper.unref();
   }
@@ -230,7 +316,7 @@ export class PiHost {
   private runtime(): Promise<ModelRuntime> {
     if (this.modelRuntime) return Promise.resolve(this.modelRuntime);
     this.modelRuntimePromise ??= (async () => {
-      const runtime = await ModelRuntime.create();
+      const runtime = await this.modelRuntimeFactory();
       this.modelRuntime = runtime;
       // Stamped at load, so the first freshness check is a stat rather than a
       // second reload of a file that was just read.
@@ -238,6 +324,19 @@ export class PiHost {
       return runtime;
     })();
     return this.modelRuntimePromise;
+  }
+
+  /**
+   * Extra `createAgentSession` options for this host.
+   *
+   * Empty by default, which is exactly the product behaviour: pi builds its own
+   * file-backed settings manager. A test injects an in-memory one so nothing a
+   * session does can rewrite the user's defaults.
+   */
+  private settingsOption(cwd: string): { settingsManager?: SettingsManager } {
+    return this.settingsManagerFactory === undefined
+      ? {}
+      : { settingsManager: this.settingsManagerFactory(cwd) };
   }
 
   /**
@@ -309,76 +408,103 @@ export class PiHost {
   /* ----------------------------------------------------------------- create */
 
   async create(options: CreateHostedSessionOptions = {}): Promise<HostedSession> {
-    if (this.sessions.size >= MAX_SESSIONS) {
-      throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
-    }
-    const cwd = options.cwd ?? process.cwd();
-    // Before the model is resolved, so a config edited since the last session is
-    // what this one is built from.
-    await this.syncModelConfig();
-    const runtime = await this.runtime();
+    if (this.closing) throw new HostError(503, 'host is closing');
+    const reservation = this.sessionCapacity.reserve();
+    if (reservation === undefined) throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
+    let createdSession: AgentSession | undefined;
+    let createdHost: HostedSession | undefined;
+    try {
+      const cwd = options.cwd ?? process.cwd();
+      // Before the model is resolved, so a config edited since the last session is
+      // what this one is built from.
+      await this.syncModelConfig();
+      const runtime = await this.runtime();
 
-    let model: Model<any> | undefined;
-    if (options.provider && options.model) {
-      const resolved = resolveCliModel({
-        cliModel: `${options.provider}/${options.model}`,
+      let model: Model<any> | undefined;
+      if (options.provider && options.model) {
+        const resolved = resolveCliModel({
+          cliModel: `${options.provider}/${options.model}`,
+          modelRuntime: runtime,
+        });
+        if (resolved.error) throw new HostError(400, resolved.error);
+        model = resolved.model;
+      }
+
+      const sessionManager = options.sessionPath
+        ? SessionManager.open(options.sessionPath, this.sessionDir, cwd)
+        : options.noSession
+          ? SessionManager.inMemory(cwd)
+          : SessionManager.create(cwd, this.sessionDir);
+
+      // The SDK keeps this exact array, so the dispatch tool is added and removed
+      // by splicing its contents — never by replacing the array (see
+      // `refreshSubagentTool`).
+      const customTools: ToolDefinition[] = [];
+      const { session, extensionsResult } = await createAgentSession({
+        cwd,
+        agentDir: getAgentDir(),
+        ...(model ? { model } : {}),
+        ...(options.thinking ? { thinkingLevel: options.thinking } : {}),
         modelRuntime: runtime,
+        sessionManager,
+        customTools,
+        ...this.settingsOption(cwd),
       });
-      if (resolved.error) throw new HostError(400, resolved.error);
-      model = resolved.model;
+
+      createdSession = session;
+      if (options.name) session.setSessionName(options.name);
+      const hosted: HostedSession = {
+        reservation,
+        /**
+         * 会话的身份用 **pi 自己写进会话文件的那个 id**，不再另铸一个。
+         *
+         * 以前这里是 `crypto.randomUUID()`：桥接层的 id 与文件里的 id 毫无关系，
+         * 于是服务端一重启，`?session=<桥接 id>` 就再也对不上任何东西——磁盘上的
+         * 对话明明还在，界面却只能说「这堂课已结束」。同一个 id 之后，「按 id
+         * 恢复」才有东西可查（见 routes 里的 `findStoredSessionById`）。
+         */
+        id: sessionManager.getSessionId(),
+        cwd,
+        createdAt: Date.now(),
+        resumed: Boolean(options.sessionPath),
+        alive: true,
+        streaming: false,
+        queue: [],
+        sessionFile: session.sessionFile ?? null,
+        sessionName: options.name ?? null,
+        session,
+        extensionsResult,
+        customTools,
+        pendingDialogs: new Map(),
+        toolSelection: options.toolNames ?? null,
+        journal: new SessionJournal(),
+        promptRequests: new PromptRequests(),
+        subscribers: new Set(),
+        unsubscribe: null,
+        lastSeen: Date.now(),
+      };
+
+      createdHost = hosted;
+      hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
+      this.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
+      await this.bindExtensions(session, hosted);
+      await this.refreshSubagentTool(hosted);
+      if (this.closing) throw new HostError(503, 'host closed during session initialization');
+      if (this.sessions.has(hosted.id)) throw new HostError(409, 'session is already hosted');
+      this.sessions.set(hosted.id, hosted);
+      return hosted;
+    } catch (error) {
+      if (createdHost !== undefined) {
+        createdHost.alive = false;
+        createdHost.unsubscribe?.();
+        for (const dialog of createdHost.pendingDialogs.values()) {
+          dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
+        }
+      }
+      try { createdSession?.dispose(); }
+      finally { reservation.release(); }
+      throw error;
     }
-
-    const sessionManager = options.sessionPath
-      ? SessionManager.open(options.sessionPath, undefined, cwd)
-      : options.noSession
-        ? SessionManager.inMemory(cwd)
-        : SessionManager.create(cwd);
-
-    const { session, extensionsResult } = await createAgentSession({
-      cwd,
-      agentDir: getAgentDir(),
-      ...(model ? { model } : {}),
-      ...(options.thinking ? { thinkingLevel: options.thinking } : {}),
-      modelRuntime: runtime,
-      sessionManager,
-    });
-
-    if (options.name) session.setSessionName(options.name);
-
-    const hosted: HostedSession = {
-      /**
-       * 会话的身份用 **pi 自己写进会话文件的那个 id**，不再另铸一个。
-       *
-       * 以前这里是 `crypto.randomUUID()`：桥接层的 id 与文件里的 id 毫无关系，
-       * 于是服务端一重启，`?session=<桥接 id>` 就再也对不上任何东西——磁盘上的
-       * 对话明明还在，界面却只能说「这堂课已结束」。同一个 id 之后，「按 id
-       * 恢复」才有东西可查（见 routes 里的 `findStoredSessionById`）。
-       */
-      id: sessionManager.getSessionId(),
-      cwd,
-      createdAt: Date.now(),
-      resumed: Boolean(options.sessionPath),
-      alive: true,
-      streaming: false,
-      queue: [],
-      sessionFile: session.sessionFile ?? null,
-      sessionName: options.name ?? null,
-      session,
-      extensionsResult,
-      pendingDialogs: new Map(),
-      toolSelection: options.toolNames ?? null,
-      journal: new SessionJournal(),
-      promptRequests: new PromptRequests(),
-      subscribers: new Set(),
-      unsubscribe: null,
-      lastSeen: Date.now(),
-    };
-
-    hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
-    this.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
-    await this.bindExtensions(session, hosted);
-    this.sessions.set(hosted.id, hosted);
-    return hosted;
   }
 
   /**
@@ -435,6 +561,99 @@ export class PiHost {
     }
   }
 
+  /* ------------------------------------------------------ subagent dispatch */
+
+  /**
+   * The definitions a session dispatches from: the shipped built-ins merged with
+   * whatever the user stored.
+   *
+   * One merge point serves both readers — the tool description a session offers
+   * the model, and the lookup a dispatch performs — so a `builtin:` id resolves
+   * exactly when it is listed. A user definition with a built-in's name shadows
+   * it (`mergeBuiltinAndUserAgents`).
+   */
+  private async mergedDefinitions(): Promise<AgentDefinitionsResponse> {
+    const response = await this.definitions.read();
+    return { ...response, agents: mergeBuiltinAndUserAgents(response.agents) };
+  }
+
+  /** What the dispatch tool needs from one hosted session. */
+  private subagentToolDeps(hosted: HostedSession): SubagentToolDeps {
+    return {
+      definitions: () => this.mergedDefinitions(),
+      /**
+       * Read live, per dispatch: `getActiveToolNames()` is the permission
+       * boundary — the preset the user chose — while `getAllTools()` is only the
+       * catalogue. Handing over the catalogue once gave a `read`/`grep` session a
+       * child with `bash`, `write` and `edit`.
+       */
+      parentActiveTools: () => hosted.session.getActiveToolNames(),
+      dispatch: (request: SubagentDispatchRequest): Promise<SubagentDispatchOutcome> => (
+        hosted.alive ? this.workerRunner.dispatch({
+          sessionId: hosted.id,
+          cwd: hosted.cwd,
+          agentDir: getAgentDir(),
+          session: hosted.session,
+          createUiScope: (origin, signal) => createExtensionUiScope(this.extensionUiOwner(hosted), { origin, signal }),
+        }, request) : Promise.reject(new Error('父会话已关闭，不能派发子智能体。'))
+      ),
+    };
+  }
+
+  /**
+   * Re-read the definitions and put the dispatch tool where the session can see
+   * it — before every prompt that could call it, and once per session assembly.
+   *
+   * Three things have to hold together, and each one is load-bearing:
+   *
+   *   1. The SDK holds the `customTools` **array** by reference, so its contents
+   *      are spliced in place. Assigning a new array would leave the session
+   *      looking at the old one.
+   *   2. `refreshTools()` rebuilds the registry from the current definitions, so
+   *      the model-facing description is the one this refresh rendered.
+   *   3. The refresh makes a newly registered tool active by default. That would
+   *      silently turn dispatch on for a session whose user chose no tools at
+   *      all, so the active set is recomputed here instead: a session keeps
+   *      exactly the tools it had, plus `subagent` only when it already had
+   *      tools and at least one definition is enabled.
+   *
+   * A definitions file that cannot be read is not fatal: the tool disappears for
+   * this turn and the next refresh picks it up again. Refusing the user's prompt
+   * because a settings file is unreadable would be the worse failure.
+   */
+  private async refreshSubagentTool(hosted: HostedSession): Promise<void> {
+    if (!hosted.alive) return;
+    let definitions: AgentDefinition[] = [];
+    try {
+      // Merged: the built-ins are enabled by construction, so a user who has
+      // stored nothing still gets a dispatch tool listing `general-purpose` and
+      // `Explore` (`builtin:` ids).
+      definitions = enabledDefinitions(await this.mergedDefinitions());
+    } catch (error) {
+      this.broadcastError(hosted, `子智能体定义读取失败：${errorText(error)}`);
+    }
+
+    const activeBefore = hosted.session.getActiveToolNames();
+    const carried = activeBefore.filter((name) => name !== SUBAGENT_TOOL_NAME);
+    const frozen = definitions.map(freezeDefinition);
+    const tools = frozen.length === 0 ? [] : [createSubagentTool(this.subagentToolDeps(hosted), frozen)];
+    hosted.customTools.splice(0, hosted.customTools.length, ...tools);
+    hosted.extensionsResult.runtime.refreshTools();
+
+    const next = nextActiveTools(carried, {
+      definitionCount: frozen.length,
+      registered: hosted.session.getToolDefinition(SUBAGENT_TOOL_NAME) !== undefined,
+    });
+    if (!sameNames(next, hosted.session.getActiveToolNames())) {
+      hosted.session.setActiveToolsByName(next);
+    }
+  }
+
+  /** Stop every worker this parent owns and wait until each has cleaned up. */
+  private async cancelWorkersFor(parentId: string): Promise<void> {
+    await this.workerRunner.cancelParent(parentId);
+  }
+
   /**
    * Copy a transcript into a new session and host it — dsh's `分叉会话`.
    *
@@ -449,71 +668,83 @@ export class PiHost {
    * @returns the new hosted session.
    */
   async fork(options: { source: string; cwd?: string }): Promise<HostedSession> {
-    if (this.sessions.size >= MAX_SESSIONS) {
-      throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
-    }
-    const cwd = options.cwd ?? process.cwd();
-    const runtime = await this.runtime();
-
-    let sessionManager: SessionManager;
+    if (this.closing) throw new HostError(503, 'host is closing');
+    const reservation = this.sessionCapacity.reserve();
+    if (reservation === undefined) throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
+    let createdSession: AgentSession | undefined;
+    let createdHost: HostedSession | undefined;
     try {
-      sessionManager = SessionManager.forkFrom(options.source, cwd);
+      const cwd = options.cwd ?? process.cwd();
+      const runtime = await this.runtime();
+
+      let sessionManager: SessionManager;
+      try {
+        sessionManager = SessionManager.forkFrom(options.source, cwd, this.sessionDir);
+      } catch (error) {
+        throw new HostError(400, `无法分叉该会话：${errorText(error)}`);
+      }
+
+      const customTools: ToolDefinition[] = [];
+      const { session, extensionsResult } = await createAgentSession({
+        cwd,
+        agentDir: getAgentDir(),
+        modelRuntime: runtime,
+        sessionManager,
+        customTools,
+        ...this.settingsOption(cwd),
+      });
+
+      createdSession = session;
+      const hosted: HostedSession = {
+        reservation,
+        // Same identity rule as `create`: the bridge's id is pi's session id, so a
+        // URL that carries only the id can be resolved back to a session file.
+        id: sessionManager.getSessionId(),
+        cwd,
+        createdAt: Date.now(),
+        resumed: false,
+        alive: true,
+        streaming: false,
+        queue: [],
+        sessionFile: session.sessionFile ?? null,
+        sessionName: null,
+        session,
+        extensionsResult,
+        customTools,
+        pendingDialogs: new Map(),
+        // A fork keeps pi's default tool set until someone chooses otherwise; the
+        // source session's selection describes that session, not this one.
+        toolSelection: null,
+        journal: new SessionJournal(),
+        promptRequests: new PromptRequests(),
+        subscribers: new Set(),
+        unsubscribe: null,
+        lastSeen: Date.now(),
+      };
+
+      createdHost = hosted;
+      hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
+      await this.bindExtensions(session, hosted);
+      await this.refreshSubagentTool(hosted);
+      if (this.closing) throw new HostError(503, 'host closed during session initialization');
+      if (this.sessions.has(hosted.id)) throw new HostError(409, 'session is already hosted');
+      this.sessions.set(hosted.id, hosted);
+      return hosted;
     } catch (error) {
-      throw new HostError(400, `无法分叉该会话：${errorText(error)}`);
+      if (createdHost !== undefined) {
+        createdHost.alive = false;
+        createdHost.unsubscribe?.();
+        for (const dialog of createdHost.pendingDialogs.values()) {
+          dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
+        }
+      }
+      try { createdSession?.dispose(); }
+      finally { reservation.release(); }
+      throw error;
     }
-
-    const { session, extensionsResult } = await createAgentSession({
-      cwd,
-      agentDir: getAgentDir(),
-      modelRuntime: runtime,
-      sessionManager,
-    });
-
-    const hosted: HostedSession = {
-      // Same identity rule as `create`: the bridge's id is pi's session id, so a
-      // URL that carries only the id can be resolved back to a session file.
-      id: sessionManager.getSessionId(),
-      cwd,
-      createdAt: Date.now(),
-      resumed: false,
-      alive: true,
-      streaming: false,
-      queue: [],
-      sessionFile: session.sessionFile ?? null,
-      sessionName: null,
-      session,
-      extensionsResult,
-      pendingDialogs: new Map(),
-      // A fork keeps pi's default tool set until someone chooses otherwise; the
-      // source session's selection describes that session, not this one.
-      toolSelection: null,
-      journal: new SessionJournal(),
-      promptRequests: new PromptRequests(),
-      subscribers: new Set(),
-      unsubscribe: null,
-      lastSeen: Date.now(),
-    };
-
-    hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
-    await this.bindExtensions(session, hosted);
-    this.sessions.set(hosted.id, hosted);
-    return hosted;
   }
 
-  /**
-   * Give a freshly created session its extension bindings.
-   *
-   * `bindExtensions` is the public hook pi's own modes use; without it an
-   * extension's `ctx.ui` actions are throwing stubs, which is the state this host
-   * was in. Two differences from the TUI mode are deliberate:
-   *
-   *   - `mode: 'rpc'` — a non-terminal host that *does* have dialogs, which is
-   *     precisely what an extension needs to know to use `ctx.ui.confirm`.
-   *   - Session-swapping command actions (`newSession`, `fork`, `navigateTree`,
-   *     `switchSession`) refuse instead of silently doing nothing: this host owns
-   *     session identity (its own route vocabulary), so an extension command that
-   *     would replace the session must say so rather than appear to work.
-   */
+  /** Bind browser interactions; session replacement remains owned by PiHost. */
   private async bindExtensions(session: AgentSession, hosted: HostedSession): Promise<void> {
     const refused = (action: string) => async (): Promise<never> => {
       throw new Error(`此宿主不支持扩展命令的 ${action}（会话身份由 pi-webx 管理）`);
@@ -543,180 +774,17 @@ export class PiHost {
 
   /* ------------------------------------------------------- extension UI bridge */
 
-  /**
-   * The `ctx.ui` an extension sees, wired to this app's own dialog surface.
-   *
-   * pi's TUI and RPC modes each install an implementation here; a bare
-   * `createAgentSession` installs none, which is why an extension's
-   * `ctx.ui.confirm()` never resolved in this host and its status/widget updates
-   * were dropped. The portable half — select / confirm / input / editor / notify
-   * / setStatus / setWidget / setEditorText — now travels as this app's existing
-   * frames, so the browser renders the dialogs it already knew how to render.
-   *
-   * The terminal-only half (footers, custom TUI components, raw key input) is
-   * deliberately absent: there is no terminal here. Extensions that guard on
-   * `ctx.mode === 'tui'` or ask `ctx.dialogCapable` see a non-TUI,
-   * dialog-capable host, which is what this is.
-   */
-  private uiContextFor(hosted: HostedSession): ExtensionUIContext {
-    const ask = (
-      method: 'select' | 'confirm' | 'input' | 'editor',
-      payload: Partial<PiExtensionUiRequest>,
-      options: { signal?: AbortSignal; timeout?: number } | undefined,
-      fallback?: string | boolean,
-    ): Promise<string | boolean | undefined> =>
-      this.requestDialog(hosted, method, payload, options, fallback);
-
-    const terminalOnly = (): void => {
-      // Nothing here can render a terminal component; these are honest no-ops
-      // rather than errors, because extensions call them defensively.
-    };
-
+  /** UI transport receives only this parent's dialog store and event publisher. */
+  private extensionUiOwner(hosted: HostedSession) {
     return {
-      select: (title: string, options: string[], opts?: ExtensionUIDialogOptions) =>
-        ask('select', { title, options: [...options] }, opts) as Promise<string | undefined>,
-      confirm: async (
-        title: string,
-        message: string,
-        opts?: ExtensionUIDialogOptions,
-      ): Promise<boolean> => (await ask('confirm', { title, message }, opts, false)) === true,
-      input: (title: string, placeholder?: string, opts?: ExtensionUIDialogOptions) =>
-        ask(
-          'input',
-          { title, ...(placeholder === undefined ? {} : { placeholder }) },
-          opts,
-        ) as Promise<string | undefined>,
-      editor: (title: string, prefill?: string) =>
-        ask(
-          'editor',
-          { title, ...(prefill === undefined ? {} : { prefill }) },
-          undefined,
-        ) as Promise<string | undefined>,
-      notify: (message: string, type?: 'info' | 'warning' | 'error') => {
-        this.broadcastUi(hosted, {
-          method: 'notify',
-          message,
-          ...(type === undefined ? {} : { notifyType: type }),
-        });
-      },
-      setStatus: (key: string, text: string | undefined) => {
-        this.broadcastUi(hosted, {
-          method: 'setStatus',
-          statusKey: key,
-          ...(text === undefined ? {} : { statusText: text }),
-        });
-      },
-      setWidget: (
-        key: string,
-        content: string[] | ((...args: never[]) => unknown) | undefined,
-        options?: ExtensionWidgetOptions,
-      ) => {
-        // A component-factory widget cannot cross this wire; only the
-        // string-array form is meaningful outside a terminal.
-        if (content !== undefined && !Array.isArray(content)) return;
-        this.broadcastUi(hosted, {
-          method: 'setWidget',
-          widgetKey: key,
-          ...(content === undefined ? {} : { widgetLines: content }),
-          ...(options?.placement === undefined ? {} : { widgetPlacement: options.placement }),
-        });
-      },
-      setEditorText: (text: string) => {
-        this.broadcastUi(hosted, { method: 'set_editor_text', text });
-      },
-      pasteToEditor: (text: string) => {
-        this.broadcastUi(hosted, { method: 'set_editor_text', text });
-      },
-      // No editor exists here to read back from; an empty answer is the truth.
-      getEditorText: () => '',
-      onTerminalInput: () => (): void => terminalOnly(),
-      addAutocompleteProvider: terminalOnly,
-      setWorkingMessage: terminalOnly,
-      setWorkingVisible: terminalOnly,
-      setWorkingIndicator: terminalOnly,
-      setHiddenThinkingLabel: terminalOnly,
-      setFooter: terminalOnly,
-      setHeader: terminalOnly,
-      setTitle: terminalOnly,
-      setEditorComponent: terminalOnly,
-      custom: () => Promise.reject(new Error('this host has no terminal UI')),
-    } as unknown as ExtensionUIContext;
+      pendingDialogs: hosted.pendingDialogs,
+      isAlive: () => hosted.alive,
+      publish: (request: PiExtensionUiRequest) => this.broadcast(hosted, { t: 'pi', event: request }),
+    };
   }
 
-  /**
-   * Broadcast one dialog request and await the browser's answer.
-   *
-   * The timeout is mirrored here rather than trusted to the client: an extension
-   * awaiting a dialog must not hang the agent when no browser is listening.
-   */
-  private requestDialog(
-    hosted: HostedSession,
-    method: 'select' | 'confirm' | 'input' | 'editor',
-    payload: Partial<PiExtensionUiRequest>,
-    options: { signal?: AbortSignal; timeout?: number } | undefined,
-    fallback?: string | boolean,
-  ): Promise<string | boolean | undefined> {
-    const id = crypto.randomUUID();
-    const request = {
-      type: 'extension_ui_request',
-      id,
-      method,
-      ...payload,
-      ...(options?.timeout === undefined ? {} : { timeout: options.timeout }),
-    } as PiExtensionUiRequest;
-    return new Promise((resolve, reject) => {
-      let settled = false;
-      let timer: NodeJS.Timeout | null = null;
-      const settle = (value: string | boolean | undefined, cancelled = false): void => {
-        if (settled) return;
-        settled = true;
-        hosted.pendingDialogs.delete(id);
-        if (timer !== null) clearTimeout(timer);
-        options?.signal?.removeEventListener('abort', onAbort);
-        // Tell the browser the dialog is over. Without this it keeps showing a
-        // prompt the extension has already stopped waiting on.
-        this.broadcast(hosted, { t: 'pi', event: { type: 'extension_ui_request', id, method: 'close_dialog' } });
-        // Some select extensions fall back to option 1 when handed undefined, so
-        // a cancellation must not be delivered as a value: that would record a
-        // choice the user never made.
-        if (cancelled && method === 'select') reject(new Error('用户取消了选择'));
-        else resolve(value);
-      };
-      const onAbort = (): void => settle(fallback, true);
-
-      if (options?.timeout !== undefined && options.timeout > 0) {
-        timer = setTimeout(() => settle(fallback, true), options.timeout);
-      }
-      options?.signal?.addEventListener('abort', onAbort, { once: true });
-      if (options?.signal?.aborted === true) {
-        settle(fallback, true);
-        return;
-      }
-
-      hosted.pendingDialogs.set(id, {
-        request,
-        createdAt: Date.now(),
-        respond: (response) => {
-          if (response.cancelled === true) return settle(fallback, true);
-          if (method === 'confirm') return settle(response.confirmed === true);
-          settle(response.value);
-        },
-      });
-
-      this.broadcast(hosted, { t: 'pi', event: request });
-    });
-  }
-
-  /** Fire-and-forget UI updates: status, widget, notification, editor text. */
-  private broadcastUi(hosted: HostedSession, payload: Partial<PiExtensionUiRequest>): void {
-    this.broadcast(hosted, {
-      t: 'pi',
-      event: {
-        type: 'extension_ui_request',
-        id: crypto.randomUUID(),
-        ...payload,
-      } as unknown as PiEvent,
-    });
+  private uiContextFor(hosted: HostedSession): ExtensionUIContext {
+    return createExtensionUiScope(this.extensionUiOwner(hosted)).context;
   }
 
   /** Answer a pending dialog; an unknown id is ignored rather than an error. */
@@ -891,6 +959,9 @@ export class PiHost {
     if (item === undefined) return;
     hosted.flushing = true;
     try {
+      // A queued row starts a new turn, so it gets the same freshness guarantee
+      // as a directly submitted prompt.
+      await this.refreshSubagentTool(hosted);
       let reason: string | null = null;
       const accepted = await new Promise<boolean>((resolve) => {
         void hosted.session
@@ -957,8 +1028,11 @@ export class PiHost {
   async kill(id: string): Promise<boolean> {
     const session = this.sessions.get(id);
     if (!session) return false;
-    this.sessions.delete(id);
+    // Close admission before waiting: a closing parent cannot create another child.
     session.alive = false;
+    void session.session.abort().catch(() => undefined);
+    await this.cancelWorkersFor(id);
+    this.sessions.delete(id);
     session.streaming = false;
     // An extension awaiting a dialog would otherwise hang forever: answer every
     // pending request as a dismissal, which is what a closed window means.
@@ -972,18 +1046,34 @@ export class PiHost {
     } catch {
       // Disposal is best-effort; the session is gone either way.
     }
+    session.reservation.release();
     this.broadcast(session, { t: 'exit', code: 0, signal: null });
     for (const subscriber of session.subscribers) subscriber.close();
     return true;
   }
 
   async disposeAll(): Promise<void> {
+    this.closing = true;
+    clearInterval(this.sweeper);
+    for (const hosted of this.sessions.values()) {
+      hosted.alive = false;
+      void hosted.session.abort().catch(() => undefined);
+    }
+    // Workers first: their parent sessions are about to be killed, and a run
+    // cancelled mid-answer must not be reported as a finished one.
+    await this.workerRunner.cancelAll();
     for (const id of [...this.sessions.keys()]) await this.kill(id);
   }
 
   private sweep(): void {
     const now = Date.now();
     for (const session of this.sessions.values()) {
+      // A parent with a live worker is not idle, whatever its subscribers say:
+      // killing it would strand the worker's answer and leak the child session.
+      if (this.capacity.hasPending(session.id)) {
+        session.lastSeen = now;
+        continue;
+      }
       if (!session.alive && session.subscribers.size === 0) {
         void this.kill(session.id);
         continue;
@@ -1066,6 +1156,10 @@ export class PiHost {
         // 它会一直躺在队列里等一个永远不会到来的下一轮。
         const behavior = session.isStreaming ? command.streamingBehavior : undefined;
         hosted.preparing = true;
+        // Before the request is built: an enabled/disabled edit made since the
+        // last turn has to be visible to this turn's tool schema, and the tool
+        // must not be offered at all when nothing is enabled.
+        await this.refreshSubagentTool(hosted);
         /** Why the preflight said no — the client needs it to tell a race from a real refusal. */
         let reason: string | null = null;
         const accepted = new Promise<boolean>((resolve) => {
@@ -1116,6 +1210,7 @@ export class PiHost {
         await session.steer(command.message);
         return ok(command.type);
       case 'follow_up':
+        await this.refreshSubagentTool(hosted);
         await session.followUp(command.message);
         return ok(command.type);
       case 'update_queue': {
@@ -1405,10 +1500,20 @@ export class PiHost {
 
   /** Fresh conversation in the same hosted session, mirroring pi's `new_session`. */
   private async resetInPlace(hosted: HostedSession): Promise<void> {
+    hosted.alive = false;
+    void hosted.session.abort().catch(() => undefined);
+    hosted.queue = [];
+    for (const dialog of hosted.pendingDialogs.values()) {
+      dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
+    }
     const cwd = hosted.cwd;
     const model = hosted.session.model;
     const thinking = hosted.session.thinkingLevel;
     const runtime = await this.runtime();
+
+    // A worker outliving the conversation that started it would keep answering
+    // into a transcript nobody reads; stop it before the old session goes away.
+    await this.cancelWorkersFor(hosted.id);
 
     try {
       hosted.unsubscribe?.();
@@ -1417,24 +1522,34 @@ export class PiHost {
       // Recreate regardless.
     }
 
+    const customTools: ToolDefinition[] = [];
     const { session, extensionsResult } = await createAgentSession({
       cwd,
       agentDir: getAgentDir(),
       ...(model ? { model } : {}),
       thinkingLevel: thinking,
       modelRuntime: runtime,
-      sessionManager: SessionManager.create(cwd),
+      sessionManager: SessionManager.create(cwd, this.sessionDir),
+      customTools,
+      ...this.settingsOption(cwd),
     });
+    if (this.closing || this.sessions.get(hosted.id) !== hosted) {
+      session.dispose();
+      throw new HostError(409, 'session closed during reset');
+    }
     if (hosted.sessionName) session.setSessionName(hosted.sessionName);
 
     hosted.session = session;
     hosted.extensionsResult = extensionsResult;
+    hosted.customTools = customTools;
     hosted.sessionFile = session.sessionFile ?? null;
     hosted.streaming = false;
+    hosted.alive = true;
     // A new conversation has no wait list: the rows named messages of the old one.
     hosted.queue = [];
     hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
     await this.bindExtensions(session, hosted);
+    await this.refreshSubagentTool(hosted);
   }
 }
 

@@ -14,6 +14,8 @@ import {
   type PiThinkingLevel,
 } from '../src/shared/protocol';
 import { buildServerConfig } from './config';
+import { agentDefinitionsStore } from './agent-definitions';
+import { createAgentDefinitionsRouter } from './agent-definitions-routes';
 import { DirectoryPickerUnsupportedError, pickNativeDirectory } from './directory-picker';
 import { ModelCatalogError, buildModelCatalog, saveDefaultModelSelection } from './model-catalog';
 import { ModelDiscoveryError, assertPublicHttpUrl, discoverModels } from './model-discovery';
@@ -114,6 +116,17 @@ const KNOWN_COMMANDS = new Set<string>([
 
 export function createApiRouter(manager: PiHost): Router {
   const router = express.Router();
+
+  /**
+   * User-owned sub-agent definitions. Management lives on this HTTP surface
+   * only — there is no command or model-tool path that edits a definition — and
+   * the sub-router owns the write guards and the error shape; see
+   * `server/agent-definitions-routes.ts`.
+   */
+  router.use(
+    '/agent-definitions',
+    createAgentDefinitionsRouter({ store: agentDefinitionsStore, host: manager }),
+  );
 
   router.get('/health', (_req: Request, res: Response) => {
     res.json({ ok: true });

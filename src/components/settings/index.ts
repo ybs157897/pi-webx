@@ -1,5 +1,7 @@
 export { ModelsSection } from './ModelsSection.tsx'
 export { SettingsPage } from './SettingsPage.tsx'
 export type { SettingsPageProps, SettingsSection } from './SettingsPage.tsx'
+export { AgentDefinitionsSection } from './AgentDefinitionsSection.tsx'
+export type { AgentDefinitionsSectionProps } from './AgentDefinitionsSection.tsx'
 export { GeneralSettings } from './GeneralSettings.tsx'
 export type { RenderStylePreference, ThemePreference } from './GeneralSettings.tsx'

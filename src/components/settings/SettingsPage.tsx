@@ -15,6 +15,7 @@ import { useEffect, useRef, useState } from 'react'
 import clsx from 'clsx'
 import type { ReactNode } from 'react'
 import {
+  IconAgentPresetOutline16,
   IconChevronLeftOutline14,
   IconDataOutline16,
   IconSettingsOutline16,
@@ -48,6 +49,7 @@ export interface SettingsPageProps {
 /** Nav glyph by section id; unknown ids fall back to the settings gear. */
 function navIcon(id: string): ReactNode {
   if (id === 'models') return <IconDataOutline16 className={css.navIcon} size={16} />
+  if (id === 'agents') return <IconAgentPresetOutline16 className={css.navIcon} size={16} />
   return <IconSettingsOutline16 className={css.navIcon} size={16} />
 }
 

@@ -315,7 +315,17 @@ export interface PiExtensionUiResponse {
   cancelled?: boolean;
 }
 
+export interface SubagentUiOrigin {
+  kind: 'subagent';
+  agentId: string;
+  agentName: string;
+  runId: string;
+  toolCallId?: string;
+}
+
 export interface PiExtensionUiRequest {
+  /** Which child owns this interaction; absent for a parent extension. */
+  origin?: SubagentUiOrigin;
   type: 'extension_ui_request';
   id: string;
   method: PiExtensionUiMethod;

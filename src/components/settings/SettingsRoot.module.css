@@ -217,3 +217,114 @@ body[data-ds-dark-theme] {
   flex-direction: column;
   gap: 32px;
 }
+
+/* --------------------------------------------------- narrow viewport shell */
+
+/* Below 768px the 256px rail stops being a sidebar and starts being the
+   problem: it is a fixed-width flex item, so the content frame only gets
+   `viewport − 256` (768 → 512px, 390 → 134px, 320 → 64px). After the frame's
+   4px inset, the panel's 2px border and the column's 64px gutters that left the
+   section with 431 / 128 / 58px — a column narrower than the button it has to
+   hold, which is what clipped 「新建子智能体」 and collapsed the search box.
+ *
+ * So under 768px the rail becomes a horizontally scrollable tab strip above the
+   panel, and the content column takes the full width. 768 is the breakpoint
+   because that is where the fixed rail plus the frame's insets leave the
+   column wide enough to work again; above it nothing changes at all, so the
+   1440px desktop layout is untouched.
+ *
+ * The strip is a container with `overflow-x: auto` rather than a
+ * `min-width: max-content` row, so it can never widen the page however many
+ * groups the sections declare. */
+@media (max-width: 768px) {
+  .page {
+    flex-direction: column;
+  }
+
+  /* No longer a fixed-width flex item: a full-width strip, at its natural
+     height, whose own scrolling keeps the rows from wrapping the page. */
+  .rail {
+    width: 100%;
+    flex: none;
+    flex-direction: row;
+    align-items: center;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .railTop {
+    display: none;
+  }
+
+  .railBack {
+    flex: none;
+    padding: 8px;
+  }
+
+  .backRow {
+    width: auto;
+    white-space: nowrap;
+  }
+
+  .railNav {
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 8px 8px 0;
+    overflow-y: hidden;
+  }
+
+  .navGroup,
+  .navGroupList {
+    flex-direction: row;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* Group headings («基础设置» / «更多») no longer sit above a group; in a
+     single row they would read as stray text between tabs, so the tab text
+     alone identifies the sections. */
+  .navGroupLabel {
+    display: none;
+  }
+
+  .railNav .navCell {
+    flex: none;
+    height: 30px;
+    padding: 0 8px;
+    border-radius: 8px;
+  }
+
+  /* Labels stay on one line: the strip scrolls instead of the text shrinking. */
+  .railNav .navLabel {
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  /* The content column takes everything the strip does not. */
+  .contentFrame {
+    width: 100%;
+    min-width: 0;
+    padding: 4px;
+  }
+
+  /* 896px + 64px of gutters does not fit a phone; give the gutters back so the
+     section gets the real width instead of being squeezed by its own padding. */
+  .column {
+    max-width: 100%;
+    padding: 0 16px 24px;
+    gap: 24px;
+  }
+
+  .pageTitle {
+    font-size: 24px;
+    line-height: 30px;
+  }
+
+  .sectionBody {
+    gap: 24px;
+  }
+}

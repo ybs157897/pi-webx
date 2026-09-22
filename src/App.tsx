@@ -35,7 +35,7 @@ import { SidebarRoot } from './components/sidebar/SidebarRoot';
 import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
 import { workspaceLabel } from './components/sidebar/tree';
 import type { WorkspaceItem } from './components/sidebar/tree';
-import { GeneralSettings, ModelsSection, SettingsPage } from './components/settings';
+import { AgentDefinitionsSection, GeneralSettings, ModelsSection, SettingsPage } from './components/settings';
 import type { ModelCatalog } from './shared/model-catalog';
 import { presetFromToolNames, toolNamesForPreset, type ToolPreset } from './shared/tool-presets';
 import type {
@@ -1029,6 +1029,16 @@ function Shell({
             group: '基础设置',
             title: '模型设置',
             render: () => <ModelsSection />,
+          },
+          {
+            id: 'agents',
+            label: '子智能体',
+            group: '基础设置',
+            title: '子智能体',
+            /* The tool catalog is per-session, so the section takes the session
+               the app already has; `undefined` before the first message, which
+               the section answers by listing built-in tools only. */
+            render: () => <AgentDefinitionsSection sessionId={sessionId ?? undefined} />,
           },
           {
             id: 'showcase',
