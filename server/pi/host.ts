@@ -793,20 +793,51 @@ export class PiHost {
     });
   }
 
-  /** The read-only projection `GET /api/teams/:id` serves; `undefined` means 404. */
-  teamSnapshot(teamId: string): TeamProjection | undefined {
-    return this.teams.snapshot(teamId);
+  /**
+   * Resolve what a client sent as `:id` to a Team id — read-only.
+   *
+   * **Two identifiers are accepted**, because P2 carries no team id over the wire:
+   * `POST /api/sessions` answers with a `SessionSummary` (a frozen contract, no
+   * teamId field) and the WS frames are unchanged, so the only identity a client
+   * actually holds is the **parent session id** it just created. Without this
+   * resolution the two Team routes would be unreachable to every real client —
+   * which is exactly the gap the end-to-end smoke run found.
+   *
+   * **A team id wins when an identifier matches both.** The route names a team, so
+   * a session that merely happens to share an id must not shadow it. Team ids are
+   * generated independently of session ids, so a collision is possible in
+   * principle and this is the rule that decides it.
+   *
+   * Nothing here creates, mutates or drops a team: an unknown identifier simply
+   * resolves to `undefined`, and the route keeps its existing 404.
+   */
+  resolveTeamId(idOrSessionId: string): string | undefined {
+    if (this.teams.get(idOrSessionId) !== undefined) return idOrSessionId;
+    return this.sessions.get(idOrSessionId)?.teamId ?? undefined;
+  }
+
+  /**
+   * The read-only projection `GET /api/teams/:id` serves; `undefined` means 404.
+   *
+   * `:id` may be a team id or the parent session's id — see {@link resolveTeamId}.
+   */
+  teamSnapshot(idOrSessionId: string): TeamProjection | undefined {
+    const teamId = this.resolveTeamId(idOrSessionId);
+    return teamId === undefined ? undefined : this.teams.snapshot(teamId);
   }
 
   /**
    * `POST /api/teams/:id/cancel`: ask every running member to stop.
    *
    * Cancellation is cooperative — this reports how many were asked, not that they
-   * have stopped. `undefined` means the team does not exist.
+   * have stopped. `undefined` means neither a team nor a team-mode session matched
+   * the identifier. The resolved `teamId` is returned so a client that only knew
+   * the session id can address the team canonically from then on.
    */
-  cancelTeam(teamId: string, reason?: string): { cancelled: number } | undefined {
-    if (this.teams.get(teamId) === undefined) return undefined;
-    return { cancelled: this.teams.cancelTeam(teamId, reason) };
+  cancelTeam(idOrSessionId: string, reason?: string): { teamId: string; cancelled: number } | undefined {
+    const teamId = this.resolveTeamId(idOrSessionId);
+    if (teamId === undefined) return undefined;
+    return { teamId, cancelled: this.teams.cancelTeam(teamId, reason) };
   }
 
   /**

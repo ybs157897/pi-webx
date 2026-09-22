@@ -612,13 +612,20 @@ export function createApiRouter(manager: PiHost): Router {
    * `untrusted` wrapper. Nothing a worker wrote is ever promoted into a field a
    * consumer would read as host-authored.
    *
-   * Unknown id → 404. The team is in memory only, so a restart empties this.
+   * `:id` is either a **team id** or the **parent session's id**: P2 sends no team
+   * id to the client (`SessionSummary` is frozen, the WS frames are unchanged), so
+   * the session id the client just created is the identity it actually has. The
+   * resolution — team id first, then parent session — lives in one place,
+   * `PiHost.resolveTeamId`, shared with the cancel route below.
+   *
+   * Unknown id → 404, unchanged. The team is in memory only, so a restart empties
+   * this.
    */
   router.get('/teams/:id', (req: Request, res: Response) => {
-    const teamId = paramId(req);
-    const projection = manager.teamSnapshot(teamId);
+    const idOrSessionId = paramId(req);
+    const projection = manager.teamSnapshot(idOrSessionId);
     if (projection === undefined) {
-      return sendError(res, 404, `unknown team: ${teamId}`);
+      return sendError(res, 404, `unknown team: ${idOrSessionId}`);
     }
     res.json(projection);
   });
@@ -630,16 +637,20 @@ export function createApiRouter(manager: PiHost): Router {
    * that they have stopped. The member state machine is visible in the
    * projection — `running → cancelling → cancelled`, and `interrupted` when a stop
    * was never confirmed.
+   *
+   * `:id` accepts the same two identifiers as the projection route; the response
+   * echoes the resolved `teamId`, so a client that only knew the session id can
+   * address the team canonically afterwards. Unknown id → 404, unchanged.
    */
   router.post('/teams/:id/cancel', (req: Request, res: Response) => {
-    const teamId = paramId(req);
+    const idOrSessionId = paramId(req);
     const body = isRecord(req.body) ? req.body : {};
     const reason = optionalString(body['reason']);
-    const result = manager.cancelTeam(teamId, reason);
+    const result = manager.cancelTeam(idOrSessionId, reason);
     if (result === undefined) {
-      return sendError(res, 404, `unknown team: ${teamId}`);
+      return sendError(res, 404, `unknown team: ${idOrSessionId}`);
     }
-    res.json({ teamId, cancelled: result.cancelled, reason: reason ?? null });
+    res.json({ teamId: result.teamId, cancelled: result.cancelled, reason: reason ?? null });
   });
 
   return router;

@@ -973,9 +973,49 @@ await check('requestId: a repeat is a pure refusal with zero side effects', asyn
 
 /* ---------------------------------------------------------------- 8. routes */
 
+/**
+ * A real `PiHost` whose team/session bookkeeping is seeded directly.
+ *
+ * The routes go through `PiHost.teamSnapshot` / `cancelTeam`, so the alias
+ * resolution under test has to be the real one — a hand-written stub would only
+ * test the stub. `create()` is never called, so no session, model runtime or
+ * credentials are involved; the two private maps are the only thing touched, and
+ * `disposeAll()` clears the sweeper in the caller's `finally`.
+ */
+function seededHost(): {
+  host: PiHost;
+  runtime: AgentTeamRuntime;
+  sessions: Map<string, { teamId: string | null }>;
+  dispose: () => Promise<void>;
+} {
+  const host = new PiHost({
+    definitions: {
+      read: async () => ({ schemaVersion: 1, revision: 1, path: join(ROOT, 'definitions.json'), agents: [] }),
+    },
+  });
+  // The sweeper would eventually call `kill()` on the seeded entries, which are
+  // partial doubles (they only carry `teamId`). Stop it now rather than build a
+  // whole fake HostedSession for a bookkeeping seed.
+  clearInterval((host as unknown as { sweeper: NodeJS.Timeout }).sweeper);
+  const internals = host as unknown as {
+    teams: AgentTeamRuntime;
+    sessions: Map<string, { teamId: string | null }>;
+  };
+  return {
+    host,
+    runtime: internals.teams,
+    sessions: internals.sessions,
+    // `disposeAll()` would walk the seeded doubles; the sweeper is already gone.
+    dispose: async () => undefined,
+  };
+}
+
 await check('GET/POST /api/teams/:id: projection, untrusted nesting, 404', async () => {
-  const runtime = new AgentTeamRuntime();
+  const seeded = seededHost();
+  const { host, runtime } = seeded;
   const team = runtime.createTeam('parent-session-1');
+  // The one identity a real client holds: the parent session id it created.
+  seeded.sessions.set('parent-session-1', { teamId: team.id });
   const member = runtime.addMember({ teamId: team.id, definition: freezeDefinition(definition()) });
   runtime.settleMember({ teamId: team.id, memberId: member.id, status: 'idle', text: 'answer', sessionId: 'run-9' });
   const task = runtime.createTask({
@@ -994,12 +1034,7 @@ await check('GET/POST /api/teams/:id: projection, untrusted nesting, 404', async
 
   const app = express();
   app.use(express.json());
-  app.use('/api', createApiRouter({
-    teamSnapshot: (id: string) => runtime.snapshot(id),
-    cancelTeam: (id: string, reason?: string) => (
-      runtime.get(id) === undefined ? undefined : { cancelled: runtime.cancelTeam(id, reason) }
-    ),
-  } as unknown as PiHost));
+  app.use('/api', createApiRouter(host));
   const server = createServer(app);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
@@ -1019,6 +1054,12 @@ await check('GET/POST /api/teams/:id: projection, untrusted nesting, 404', async
     assert.equal(messages[0]?.to, TEAM_LEAD_ID, 'not the forged payload values');
     assert.equal(messages[0]?.untrustedPayload.from, 'lead', 'which stay inside the untrusted payload');
     assert.ok(Array.isArray(body['notes']) && (body['notes'] as string[]).length >= 3, 'the projection explains its own limits');
+
+    // The alias: the same projection through the parent session id, which is the
+    // only identity P2 hands a client.
+    const bySession = await fetch(url('/api/teams/parent-session-1'));
+    assert.equal(bySession.status, 200, 'the parent session id reaches the same route');
+    assert.deepEqual(await bySession.json(), body, 'and yields the identical projection');
 
     const missing = await fetch(url('/api/teams/does-not-exist'));
     assert.equal(missing.status, 404);
@@ -1041,7 +1082,56 @@ await check('GET/POST /api/teams/:id: projection, untrusted nesting, 404', async
     assert.equal(cancelMissing.status, 404);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
+    await seeded.dispose();
   }
+});
+
+await check('the two routes take a session id, and a team id wins an ambiguous id', async () => {
+  const seeded = seededHost();
+  const { host, runtime } = seeded;
+
+  // Two independent teams, each reached by its own session id.
+  const first = runtime.createTeam('session-alpha');
+  const second = runtime.createTeam('session-beta');
+  seeded.sessions.set('session-alpha', { teamId: first.id });
+  seeded.sessions.set('session-beta', { teamId: second.id });
+  const active = (teamId: string): string => {
+    const member = runtime.addMember({ teamId, definition: freezeDefinition(definition()) });
+    return member.id;
+  };
+  active(first.id);
+  active(second.id);
+
+  assert.equal(host.resolveTeamId(first.id), first.id, 'a team id resolves to itself');
+  assert.equal(host.resolveTeamId('session-alpha'), first.id, 'a session id resolves to its team');
+  assert.equal(host.resolveTeamId('nobody'), undefined, 'an unknown identifier resolves to nothing');
+  assert.deepEqual(host.teamSnapshot('session-alpha'), host.teamSnapshot(first.id), 'both forms, one projection');
+
+  // Ambiguity: an identifier that is *also* a session id of another team's parent.
+  // The route names a team, so the team must win and the session must not shadow it.
+  seeded.sessions.set(first.id, { teamId: second.id });
+  assert.equal(host.resolveTeamId(first.id), first.id, 'teamId wins over a colliding session id');
+  assert.equal(host.teamSnapshot(first.id)?.teamId, first.id, 'and the projection follows the team');
+  seeded.sessions.delete(first.id);
+
+  // Same state machine either way: cancel through the session id and through the
+  // team id, and compare the resulting member status.
+  const viaSession = host.cancelTeam('session-alpha');
+  assert.deepEqual(viaSession, { teamId: first.id, cancelled: 1 }, 'cancel by session id reports the resolved team');
+  const viaTeam = host.cancelTeam(second.id);
+  assert.deepEqual(viaTeam, { teamId: second.id, cancelled: 1 }, 'cancel by team id behaves identically');
+  for (const teamId of [first.id, second.id]) {
+    const projected = host.teamSnapshot(teamId);
+    assert.equal(projected?.members[0]?.status, 'cancelling', 'both reaches leave the same state machine state');
+  }
+
+  // Unknown id: 404 semantics unchanged, and nothing moved.
+  const before = JSON.stringify(host.teamSnapshot(first.id));
+  assert.equal(host.teamSnapshot('nobody'), undefined, 'an unknown id has no projection');
+  assert.equal(host.cancelTeam('nobody'), undefined, 'and nothing to cancel');
+  assert.equal(JSON.stringify(host.teamSnapshot(first.id)), before, 'so no state changed');
+
+  await seeded.dispose();
 });
 
 /* ------------------------------------------------- 9. the orchestrator session */
