@@ -24,6 +24,21 @@ npm run build && npm start      # production, single process → http://127.0.0.
 Requires Node 20 or newer (nothing else — no CLI on PATH, no global install). The bridge
 logs the embedded pi SDK version at startup; on older Node it fails there, at boot.
 
+## AI personal workbench storage
+
+The local bridge also serves `/api/workbench/*` for the separate AI personal workbench frontend.
+It stores records in SQLite at `~/.pi-webx/workbench.sqlite` by default. Set
+`AI_WORKBENCH_DB_PATH` to an absolute path before starting the bridge to use another file.
+The API supports state reads, module CRUD, and atomic JSON import/export; the frontend
+can import its earlier `data/workbench.json` without changing that source file.
+For a one-time migration that also embeds old `/uploads/` images, run
+`npm run import:workbench-json -- /absolute/path/data/workbench.json`. It refuses
+to overwrite a populated SQLite database unless `--replace` is passed. Use
+`npm run check:workbench` for a focused temporary-database and HTTP check.
+
+Pi conversations and the workbench database are separate. The Agent does not yet have
+tools to read or edit these records; its existing session API is unchanged.
+
 ## What it covers
 
 **Conversation.** Streaming text and thinking blocks, tool calls as expandable cards with
@@ -132,6 +147,7 @@ agent does.
 | `PI_WEBX_PORT` | `8787` | bridge port (Vite dev proxy follows it) |
 | `PI_WEBX_PROVIDER` | *(pi's default)* | provider for sessions created without an explicit one |
 | `PI_WEBX_MODEL` | *(pi's default)* | model for those sessions |
+| `AI_WORKBENCH_DB_PATH` | `~/.pi-webx/workbench.sqlite` | personal workbench SQLite file |
 
 `PI_WEBX_PROVIDER` / `PI_WEBX_MODEL` matter when pi's configured default provider is not
 usable — without them, a broken credential surfaces as an *empty* assistant reply rather
