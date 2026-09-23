@@ -34,7 +34,7 @@ The agent does not yet have tools to read or edit workbench records.
 
 ## AI personal workbench storage
 
-The local bridge also serves `/api/workbench/*` for the separate AI personal workbench frontend.
+The local bridge serves `/api/workbench/*` for the integrated personal workbench page.
 It stores records in SQLite at `~/.pi-webx/workbench.sqlite` by default. Set
 `AI_WORKBENCH_DB_PATH` to an absolute path before starting the bridge to use another file.
 The API supports state reads, module CRUD, and atomic JSON import/export; the frontend
