@@ -7,6 +7,7 @@ import {
   Ellipsis,
   Eraser,
   GitBranch,
+  LayoutGrid,
   MessageSquarePlus,
   RefreshCw,
   Settings2,
@@ -867,6 +868,9 @@ function Shell({
               </Tooltip>
               <Tooltip title="会话设置">
                 <ActionIcon icon={Settings2} size="small" onClick={() => setSessionSettingsOpen(true)} />
+              </Tooltip>
+              <Tooltip title="个人工作台">
+                <ActionIcon icon={LayoutGrid} size="small" aria-label="返回个人工作台" onClick={() => { window.location.assign('/'); }} />
               </Tooltip>
             </Flexbox>
           }

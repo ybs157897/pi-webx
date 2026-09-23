@@ -6,6 +6,7 @@
     "moduleResolution": "bundler",
     "moduleDetection": "force",
     "jsx": "react-jsx",
+    "allowJs": true,
     "types": ["node", "vite/client"],
 
     "strict": true,
