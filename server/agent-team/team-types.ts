@@ -15,6 +15,16 @@
  * 没有这三个字段（见 `team-tools.ts`）：它们是身份，不是参数。
  */
 
+import type {
+  TeamDeliveryMode, TeamDeliveryState, TeamMemberStatus,
+  TeamMessageKind, TeamMessageOrigin, TeamTaskStatus,
+} from '../../src/shared/agent-team';
+export type {
+  TeamDeliveryMode, TeamDeliveryState, TeamMemberStatus, TeamMemberView,
+  TeamMessageKind, TeamMessageOrigin, TeamMessageView, TeamProjection,
+  TeamTaskStatus, TeamTaskView,
+} from '../../src/shared/agent-team';
+
 /** P2 的 Team 状态是内存态，重启即丢；本常量是给调用方与文档的显式提醒。 */
 export const TEAM_STATE_IS_IN_MEMORY = true;
 
@@ -28,37 +38,6 @@ export const TEAM_LEAD_ID = 'lead';
 
 /** 一次 `wait_team` 返回的结果文本上限，与 `subagent` 工具的结果上限一致。 */
 export const MAX_TEAM_RESULT_CHARACTERS = 32000;
-
-/** 成员的生命周期。`interrupted` 留给「停止没有得到确认」的收尾（P3 的 journal 才让它跨重启可见）。 */
-export type TeamMemberStatus =
-  | 'running'
-  | 'idle'
-  | 'cancelling'
-  | 'cancelled'
-  | 'interrupted'
-  | 'failed';
-
-/** 任务板状态。`blocked` 由 `blockedBy` 派生，不是人工设置的自由值。 */
-export type TeamTaskStatus =
-  | 'pending'
-  | 'in_progress'
-  | 'blocked'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
-
-/** 消息种类。`result` 是成员交回的结果，`instruction` 是派工。 */
-export type TeamMessageKind = 'instruction' | 'question' | 'answer' | 'result';
-
-/**
- * 消息的投递状态。
- *
- * `queued` —— 宿主记录了这条消息（P2 到此为止：**不做任何注入**）。
- * `inflight` / `candidate` / `fresh-reader-visible` / `failed` —— 预留给 P3 的投递与读回，
- * 术语遵循 spike 复核的结论：`fresh-reader-visible` 只声明「新读者能读到」，不声明稳定存储。
- * 属于「稳定存储」级别的那个状态名（要等 fsync 之后才配说）不在这张表里。
- */
-export type TeamDeliveryState = 'queued' | 'inflight' | 'candidate' | 'fresh-reader-visible' | 'failed';
 
 /** 一个成员：由一次 `dispatch_agent` 创建，绑一个 worker 会话。 */
 export interface TeamMember {
@@ -148,17 +127,6 @@ export interface TeamMessage {
   deliveryMode?: TeamDeliveryMode;
 }
 
-/** 一条 inbox 项的来源。 */
-export type TeamMessageOrigin = 'member-settle' | 'member-message' | 'lead-message';
-
-/**
- * 注入实际走的分支。
- *
- * `turn-started` = 编排者当时空闲，`sendCustomMessage` 触发了新一轮（可能带来一次模型轮）；
- * `steered` = 编排者正在跑，消息排队，会在当前轮 tool calls 跑完后、下一次 LLM 调用前被看到。
- */
-export type TeamDeliveryMode = 'turn-started' | 'steered';
-
 /**
  * 可投递项「还没投」的稳定原因码。
  *
@@ -228,76 +196,6 @@ export interface Team {
   readonly messages: TeamMessage[];
   /** 单调递增的消息序号。 */
   seq: number;
-}
-
-/* ------------------------------------------------------------------ 投影 ---- */
-
-/**
- * 给只读 API 的投影。
- *
- * 投影把两件事分开：**宿主可信字段**（id/状态/`from`/`to`/序号）平铺，**模型给的文本**
- * 一律装进显式的 `untrusted` 包装里。这样消费方不可能把 worker 的字符串误当成宿主写的
- * 身份字段——`from`/`to` 永远来自运行时，而不是消息内容。
- */
-export interface TeamMemberView {
-  readonly memberId: string;
-  readonly definitionId: string;
-  readonly definitionRevision: number;
-  readonly definitionSnapshotHash: string;
-  /**
-   * P2：内存 run 标识（dispatch 的 `runId`），**不是**可恢复的持久会话 id，不能 `open()` 回来；
-   * 跨重启的会话关联是 P3 的 TeamJournal 才引入的东西。
-   */
-  readonly sessionId: string;
-  readonly status: TeamMemberStatus;
-  readonly createdAt: number;
-  readonly lastSeq: number;
-  readonly hasResult: boolean;
-  /**
-   * 成员为什么落到当前状态（闭集码）。目前只有一种：优雅停机把成员记成 `interrupted` 时写
-   * {@link TEAM_INTERRUPT_REASONS.hostShutdown}。与 `resultText` 分开：那是人读的散文，
-   * 这是可断言的稳定值——而且它**永远不含成员产出的文本**。
-   */
-  readonly statusReason?: string;
-}
-
-export interface TeamTaskView {
-  readonly taskId: string;
-  readonly revision: number;
-  readonly status: TeamTaskStatus;
-  readonly ownerMemberId?: string;
-  readonly blockedBy: readonly string[];
-  readonly writeScopes: readonly string[];
-  /** 模型写的文本，标注为不可信。 */
-  readonly untrusted: { readonly title: string; readonly description: string };
-}
-
-export interface TeamMessageView {
-  readonly messageId: string;
-  readonly seq: number;
-  readonly from: string;
-  readonly to: string;
-  readonly kind: TeamMessageKind;
-  readonly deliveryState: TeamDeliveryState;
-  /** 宿主填写的投递元数据（可信侧，平铺）。 */
-  readonly origin?: TeamMessageOrigin;
-  readonly deliveredAsToolResult?: boolean;
-  readonly pendingReason?: string;
-  readonly failureReason?: string;
-  readonly deliveryMode?: TeamDeliveryMode;
-  /** 模型写的 payload，标注为不可信。 */
-  readonly untrustedPayload: unknown;
-}
-
-export interface TeamProjection {
-  readonly teamId: string;
-  readonly parentSessionId: string;
-  readonly createdAt: number;
-  readonly members: readonly TeamMemberView[];
-  readonly tasks: readonly TeamTaskView[];
-  readonly messages: readonly TeamMessageView[];
-  /** 给读者的显式边界说明（例如「P2 全内存，重启即丢」）。 */
-  readonly notes: readonly string[];
 }
 
 /**

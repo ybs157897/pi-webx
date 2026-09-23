@@ -593,6 +593,8 @@ export interface CreateSessionRequest {
   sessionId?: string;
   /** Start with session persistence disabled (`--no-session`). */
   noSession?: boolean;
+  /** Create an Agent Team; a stored Team is reattached automatically on resume. */
+  teamMode?: boolean;
   /**
    * Builtin tools this session should start with — the browser's preset. A
    * resumed session ignores it in favour of the selection in its own log.

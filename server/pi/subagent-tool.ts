@@ -163,6 +163,8 @@ export interface SubagentDispatchRequest {
    * would be excluded even if it were passed.
    */
   readonly memberTools?: readonly ToolDefinition[];
+  /** Team coding tools must run in an OS sandbox; ordinary subagents keep their existing path. */
+  readonly isolateCodingTools?: boolean;
 }
 
 /** What the tool needs from the host. Everything here is injected, nothing imported. */

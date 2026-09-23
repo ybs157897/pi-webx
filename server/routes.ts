@@ -656,18 +656,8 @@ export function createApiRouter(manager: PiHost): Router {
   return router;
 }
 
-/**
- * A parsed create-session body.
- *
- * `teamMode` is parsed here rather than added to `CreateSessionRequest`: the
- * shared contract is frozen for this task, and P2 has no UI that would send it —
- * the flag exists so the Team runtime can be reached through the one create path
- * (P4 owns the panel that will surface it).
- */
-type CreateSessionBody = CreateSessionRequest & { teamMode?: boolean };
-
 type ParseResult =
-  | { ok: true; value: CreateSessionBody }
+  | { ok: true; value: CreateSessionRequest }
   | { ok: false; error: string };
 
 /**
@@ -696,7 +686,7 @@ function parseCreateSessionRequest(raw: unknown): ParseResult {
     return { ok: false, error: 'request body must be a JSON object' };
   }
 
-  const value: CreateSessionBody = {};
+  const value: CreateSessionRequest = {};
 
   if (raw.cwd !== undefined) {
     const cwd = requireString(raw.cwd, 'cwd');

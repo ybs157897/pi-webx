@@ -23,10 +23,11 @@ import {
   type AgentSessionEvent,
   type ExtensionUIContext,
   type LoadExtensionsResult,
-  type SettingsManager,
   type ToolDefinition,
+  DefaultResourceLoader,
   ModelRuntime,
   SessionManager,
+  SettingsManager,
   createAgentSession,
   getAgentDir,
   resolveCliModel,
@@ -78,6 +79,8 @@ import { createSubagentWorkerDispatch, type SubagentWorkerRunner } from './subag
 import { AgentTeamRuntime } from '../agent-team/team-runtime';
 import { TeamJournal } from '../agent-team/team-journal';
 import { TeamInjector, type TeamLiveSession } from '../agent-team/team-inject';
+import { createIsolatedToolDefinitions, TeamSandboxUnavailableError } from '../agent-team/sandbox-tools';
+import { ensureWindowsAppContainerVerified } from '../agent-team/windows-appcontainer';
 import {
   createOrchestratorTeamTools,
   createWorkerTeamTools,
@@ -209,15 +212,7 @@ export interface CreateHostedSessionOptions {
    * what the session was last run with, which the client cannot know.
    */
   toolNames?: string[];
-  /**
-   * Team mode: swap the single-shot `subagent` tool for the nine orchestration
-   * tools and attach an in-memory Agent Team.
-   *
-   * Not a UI feature yet (P4 owns the panel); it exists so the P2 runtime can be
-   * exercised through the normal create path. The session keeps the tools its
-   * preset already had — the orchestrator reads files and checks facts itself —
-   * and simply gains the nine Team tools.
-   */
+  /** Create a Team, or reattach the stored Team when resuming its conversation. */
   teamMode?: boolean;
 }
 
@@ -488,6 +483,7 @@ export class PiHost {
     if (reservation === undefined) throw new HostError(429, `session limit reached (${MAX_SESSIONS})`);
     let createdSession: AgentSession | undefined;
     let createdHost: HostedSession | undefined;
+    let createdTeamId: string | null = null;
     try {
       const cwd = options.cwd ?? process.cwd();
       // Before the model is resolved, so a config edited since the last session is
@@ -511,19 +507,36 @@ export class PiHost {
           ? SessionManager.inMemory(cwd)
           : SessionManager.create(cwd, this.sessionDir);
 
+      const hostedId = sessionManager.getSessionId();
+      if (options.teamMode === true || options.sessionPath !== undefined) await this.hydrateTeams();
+      const previousTeamId = options.sessionPath === undefined
+        ? undefined
+        : this.teams.findTeamByParentSession(hostedId);
+      const teamMode = options.teamMode === true || previousTeamId !== undefined;
+      const agentDir = getAgentDir();
+      const settings = this.settingsOption(cwd);
+      const teamSettings = teamMode
+        ? settings.settingsManager ?? SettingsManager.create(cwd, agentDir)
+        : undefined;
+      const teamLoader = teamSettings === undefined ? undefined : new DefaultResourceLoader({
+        cwd, agentDir, settingsManager: teamSettings, noExtensions: true,
+      });
+      if (teamLoader !== undefined) await teamLoader.reload();
+      if (teamMode && process.platform === 'win32') await ensureWindowsAppContainerVerified(cwd, agentDir);
+
       // The SDK keeps this exact array, so the dispatch tool is added and removed
       // by splicing its contents — never by replacing the array (see
       // `refreshSubagentTool`).
-      const customTools: ToolDefinition[] = [];
+      const customTools: ToolDefinition[] = teamMode ? createIsolatedToolDefinitions(cwd, agentDir) : [];
       const { session, extensionsResult } = await createAgentSession({
         cwd,
-        agentDir: getAgentDir(),
+        agentDir,
         ...(model ? { model } : {}),
         ...(options.thinking ? { thinkingLevel: options.thinking } : {}),
         modelRuntime: runtime,
         sessionManager,
         customTools,
-        ...this.settingsOption(cwd),
+        ...(teamLoader === undefined ? settings : { settingsManager: teamSettings, resourceLoader: teamLoader }),
       });
 
       createdSession = session;
@@ -538,7 +551,7 @@ export class PiHost {
          * 对话明明还在，界面却只能说「这堂课已结束」。同一个 id 之后，「按 id
          * 恢复」才有东西可查（见 routes 里的 `findStoredSessionById`）。
          */
-        id: sessionManager.getSessionId(),
+        id: hostedId,
         cwd,
         createdAt: Date.now(),
         resumed: Boolean(options.sessionPath),
@@ -551,7 +564,7 @@ export class PiHost {
         extensionsResult,
         customTools,
         teamId: null,
-        teamMode: options.teamMode === true,
+        teamMode,
         pendingDialogs: new Map(),
         toolSelection: options.toolNames ?? null,
         journal: new SessionJournal(),
@@ -562,16 +575,13 @@ export class PiHost {
       };
 
       createdHost = hosted;
-      // A Team-mode session is the point where the process proves what it knows:
-      // replay the journal first, so Teams from before the restart are in memory
-      // again (their members come back as `interrupted` — an in-memory worker
-      // session cannot be revived), and only then add this session's own Team.
-      if (hosted.teamMode) await this.hydrateTeams();
-      // The Team exists before the tool面 is refreshed, because that refresh is
-      // what decides between `subagent` and the nine orchestration tools. Its id
-      // is the parent session's own id, so a team is addressable by the session
-      // the user is talking to.
-      if (hosted.teamMode) hosted.teamId = this.teams.createTeam(hosted.id).id;
+      // A stored Team belongs to this exact conversation. Reattach it on resume
+      // instead of creating a second team and hiding the journal's task board.
+      // The Team must exist before refreshSubagentTool chooses its tool surface.
+      if (hosted.teamMode) {
+        hosted.teamId = previousTeamId ?? this.teams.createTeam(hosted.id).id;
+        if (previousTeamId === undefined) createdTeamId = hosted.teamId;
+      }
       hosted.unsubscribe = session.subscribe((event) => this.onEvent(hosted, event));
       this.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
       await this.bindExtensions(session, hosted);
@@ -579,6 +589,7 @@ export class PiHost {
       if (this.closing) throw new HostError(503, 'host closed during session initialization');
       if (this.sessions.has(hosted.id)) throw new HostError(409, 'session is already hosted');
       this.sessions.set(hosted.id, hosted);
+      if (previousTeamId !== undefined) void this.deliverTeamInbox(previousTeamId);
       return hosted;
     } catch (error) {
       if (createdHost !== undefined) {
@@ -587,13 +598,16 @@ export class PiHost {
         // A team created for a session that never finished coming up would linger
         // in memory as an orphan: nothing else can reach it, so drop it here.
         // (A fork never has one, so this is a no-op on that path.)
-        if (createdHost.teamId !== null) this.teams.dropTeam(createdHost.teamId);
+        if (createdTeamId !== null) this.teams.dropTeam(createdTeamId);
         for (const dialog of createdHost.pendingDialogs.values()) {
           dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
         }
       }
       try { createdSession?.dispose(); }
       finally { reservation.release(); }
+      if (error instanceof TeamSandboxUnavailableError) {
+        throw new HostError(error.status, error.message);
+      }
       throw error;
     }
   }
@@ -640,7 +654,9 @@ export class PiHost {
     toolNames: readonly string[],
     options: { persist: boolean },
   ): void {
-    const defaultTools = hosted.session.settingsManager?.getDefaultTools?.();
+    const defaultTools = hosted.teamMode && process.platform === 'win32'
+      ? ['powershell']
+      : hosted.session.settingsManager?.getDefaultTools?.();
     const resolved = withExtensionTools(hosted.session, toolNames, defaultTools);
     hosted.session.setActiveToolsByName(resolved);
     hosted.toolSelection = [...toolNames];
@@ -937,13 +953,16 @@ export class PiHost {
       parentActiveTools: () => hosted.session.getActiveToolNames(),
       dispatch: (request) => this.dispatchTeamMember(hosted, request),
     }, definitions);
-    hosted.customTools.splice(0, hosted.customTools.length, ...tools);
+    hosted.customTools.splice(
+      0, hosted.customTools.length,
+      ...tools, ...createIsolatedToolDefinitions(hosted.cwd, getAgentDir()),
+    );
     hosted.extensionsResult.runtime.refreshTools();
 
     const activeBefore = hosted.session.getActiveToolNames();
-    const carried = activeBefore.filter((name) => (
-      name !== SUBAGENT_TOOL_NAME && !TEAM_ORCHESTRATOR_TOOL_NAMES.includes(name)
-    ));
+    const carried = [...new Set(activeBefore
+      .map((name) => process.platform === 'win32' && name === 'bash' ? 'powershell' : name)
+      .filter((name) => name !== SUBAGENT_TOOL_NAME && !TEAM_ORCHESTRATOR_TOOL_NAMES.includes(name)))];
     const next = [
       ...carried,
       ...TEAM_ORCHESTRATOR_TOOL_NAMES.filter((name) => hosted.session.getToolDefinition(name) !== undefined),
@@ -980,6 +999,7 @@ export class PiHost {
         memberId: request.memberId,
         runtime: this.teams,
       }),
+      isolateCodingTools: true,
     });
   }
 
@@ -1933,16 +1953,28 @@ export class PiHost {
       // Recreate regardless.
     }
 
-    const customTools: ToolDefinition[] = [];
+    const agentDir = getAgentDir();
+    const settings = this.settingsOption(cwd);
+    const teamSettings = hosted.teamMode
+      ? settings.settingsManager ?? SettingsManager.create(cwd, agentDir)
+      : undefined;
+    const teamLoader = teamSettings === undefined ? undefined : new DefaultResourceLoader({
+      cwd, agentDir, settingsManager: teamSettings, noExtensions: true,
+    });
+    if (teamLoader !== undefined) await teamLoader.reload();
+    if (hosted.teamMode && process.platform === 'win32') await ensureWindowsAppContainerVerified(cwd, agentDir);
+    const customTools: ToolDefinition[] = hosted.teamMode
+      ? createIsolatedToolDefinitions(cwd, agentDir)
+      : [];
     const { session, extensionsResult } = await createAgentSession({
       cwd,
-      agentDir: getAgentDir(),
+      agentDir,
       ...(model ? { model } : {}),
       thinkingLevel: thinking,
       modelRuntime: runtime,
       sessionManager: SessionManager.create(cwd, this.sessionDir),
       customTools,
-      ...this.settingsOption(cwd),
+      ...(teamLoader === undefined ? settings : { settingsManager: teamSettings, resourceLoader: teamLoader }),
     });
     if (this.closing || this.sessions.get(hosted.id) !== hosted) {
       session.dispose();

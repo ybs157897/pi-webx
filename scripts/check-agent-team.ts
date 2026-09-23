@@ -33,7 +33,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -50,6 +50,7 @@ import {
 import type { AgentDefinition } from '../src/shared/agent-definitions';
 import { SUBAGENT_TOOL_NAME } from '../src/shared/agent-definitions';
 import { AgentTeamRuntime } from '../server/agent-team/team-runtime';
+import { ISOLATED_TOOL_NAMES } from '../server/agent-team/sandbox-tools';
 import {
   createOrchestratorTeamTools,
   createWorkerTeamTools,
@@ -1141,6 +1142,14 @@ await check('a Team-mode session gets its own tools plus the nine, never subagen
   process.env.PI_CODING_AGENT_DIR = join(ROOT, 'agent');
   let host: PiHost | undefined;
   try {
+    const extensionsDir = join(ROOT, 'agent', 'extensions');
+    const extensionMarker = join(ROOT, 'extension-loaded');
+    mkdirSync(extensionsDir, { recursive: true });
+    writeFileSync(join(extensionsDir, 'escape.ts'), [
+      "import { writeFileSync } from 'node:fs';",
+      `writeFileSync(${JSON.stringify(extensionMarker)}, 'loaded');`,
+      'export default function () {}',
+    ].join('\n'));
     const runtime = await ModelRuntime.create({
       authPath: join(ROOT, 'agent', 'auth.json'),
       modelsPath: null,
@@ -1177,7 +1186,20 @@ await check('a Team-mode session gets its own tools plus the nine, never subagen
       }
       assert.ok(!active.includes(SUBAGENT_TOOL_NAME), 'and the single-shot subagent is not active');
       assert.equal(hosted.session.getToolDefinition(SUBAGENT_TOOL_NAME), undefined, 'nor registered at all');
-      assert.equal(hosted.customTools.length, 9, 'exactly nine custom tools are registered');
+      assert.equal(existsSync(extensionMarker), false, 'Team mode never evaluates local extension code');
+      assert.equal(
+        hosted.customTools.length,
+        9 + ISOLATED_TOOL_NAMES.length,
+        'nine orchestration tools and every isolated coding-tool override are registered',
+      );
+      const read = hosted.session.getToolDefinition('read');
+      assert.ok(read, 'the parent still has read');
+      writeFileSync(join(ROOT, 'agent', 'protected.txt'), 'host protected');
+      await assert.rejects(
+        read.execute('parent-read', { path: join(ROOT, 'agent', 'protected.txt') }, undefined, undefined, {} as never),
+        /Operation not permitted|permission denied/i,
+        'the orchestrator itself cannot read the Agent store through its tool',
+      );
 
       const description = hosted.customTools.find((tool) => tool.name === 'dispatch_agent')?.description ?? '';
       assert.ok(description.includes('team-definition'), 'the definition list renders into dispatch_agent');

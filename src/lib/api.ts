@@ -16,6 +16,7 @@ import type {
   SessionSummary,
 } from '../shared/protocol';
 import type { GitBranchView, GitCheckoutRequest } from '../shared/git';
+import type { CancelTeamResponse, TeamProjection } from '../shared/agent-team';
 
 export class ApiError extends Error {
   readonly status: number;
@@ -83,6 +84,17 @@ export const api = {
 
   createSession(body: CreateSessionRequest): Promise<CreateSessionResponse> {
     return request<CreateSessionResponse>('/api/sessions', jsonInit(body));
+  },
+
+  team(idOrSessionId: string): Promise<TeamProjection> {
+    return request<TeamProjection>(`/api/teams/${encodeURIComponent(idOrSessionId)}`);
+  },
+
+  cancelTeam(idOrSessionId: string, reason?: string): Promise<CancelTeamResponse> {
+    return request<CancelTeamResponse>(
+      `/api/teams/${encodeURIComponent(idOrSessionId)}/cancel`,
+      jsonInit(reason === undefined ? {} : { reason }),
+    );
   },
 
   /**

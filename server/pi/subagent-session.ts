@@ -8,6 +8,8 @@ import type { FrozenDefinition } from './subagent-tool';
 import { SubagentRunError } from './subagent-error';
 import type { SubagentUiOrigin } from '../../src/shared/protocol';
 import type { ExtensionUiScope } from './extension-ui';
+import { createIsolatedToolDefinitions } from '../agent-team/sandbox-tools';
+import { ensureWindowsAppContainerVerified } from '../agent-team/windows-appcontainer';
 
 /**
  * The parent surface one dispatch reads.
@@ -87,7 +89,7 @@ export interface WorkerSessionOptions {
   readonly signal?: AbortSignal;
   readonly uiContext?: ExtensionUIContext;
   /**
-   * The only tools a worker may have registered on top of its allowlist.
+   * The only host-side Team tools a worker may register on top of its allowlist.
    *
    * This seam exists for exactly one caller: the Agent Team runtime, which hands a
    * member its two team tools (`update_team_task` — its own task only — and
@@ -102,10 +104,12 @@ export interface WorkerSessionOptions {
    * verifier's four-way control are with the activation note in `createWorkerSession`
    * below (`:176-195`); `denied` is the second veto on top of it.
    *
-   * Omitted (the ordinary subagent path and every caller before teams existed)
-   * means `customTools: []`: no worker-registered tool at all.
+   * Omitted in the ordinary subagent path. Team isolation separately registers
+   * sandboxed replacements for the built-in coding tools.
    */
   readonly memberTools?: readonly ToolDefinition[];
+  /** Replace built-in coding tools with sandboxed subprocess calls for Team members. */
+  readonly isolateCodingTools?: boolean;
 }
 
 /**
@@ -117,6 +121,12 @@ export interface WorkerSessionOptions {
 export async function createWorkerSession(options: WorkerSessionOptions): Promise<AgentSession> {
   const { definition, parent, model, runtime, toolNames, denied } = options;
   options.signal?.throwIfAborted();
+  if (options.isolateCodingTools === true && process.platform === 'win32') {
+    await ensureWindowsAppContainerVerified(parent.cwd, parent.agentDir);
+  }
+  const isolatedTools = options.isolateCodingTools === true
+    ? createIsolatedToolDefinitions(parent.cwd, parent.agentDir)
+    : [];
   const settings = createWorkerSettings(parent.session.settingsManager);
   const loader = new DefaultResourceLoader({
     cwd: parent.cwd,
@@ -126,6 +136,7 @@ export async function createWorkerSession(options: WorkerSessionOptions): Promis
     // skills, prompt templates and themes do not, because the worker's prompt is
     // its definition plus cwd metadata.
     noSkills: true,
+    noExtensions: options.isolateCodingTools === true,
     noPromptTemplates: true,
     noThemes: true,
     // `noContextFiles` is the SDK's switch for the project's `AGENTS.md` files
@@ -156,12 +167,10 @@ export async function createWorkerSession(options: WorkerSessionOptions): Promis
     resourceLoader: loader,
     tools: [...toolNames],
     excludeTools: [...denied],
-    // A worker gets no registered tool of its own unless its caller injects the
-    // Team member tools (see `WorkerSessionOptions.memberTools`): the dispatch tool
-    // must not exist inside a worker, and the host must never proxy the parent's
-    // tool closures here. `denied` lists the same names a second time, so the
-    // allowlist is not the only thing standing between a worker and recursion.
-    customTools: [...(options.memberTools ?? [])],
+    // Ordinary subagents register no custom tools. Team members add two
+    // identity-bound Team tools and isolated replacements for coding tools;
+    // no parent tool closure or dispatch tool is proxied into a member.
+    customTools: [...(options.memberTools ?? []), ...isolatedTools],
   });
   const abort = (): void => { void session.abort().catch(() => undefined); };
   options.signal?.addEventListener('abort', abort, { once: true });

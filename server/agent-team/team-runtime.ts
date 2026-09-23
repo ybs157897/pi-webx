@@ -1087,6 +1087,7 @@ function toMemberView(member: TeamMember): TeamMemberView {
     lastSeq: member.lastSeq,
     hasResult: member.resultText !== undefined,
     ...(member.statusReason === undefined ? {} : { statusReason: member.statusReason }),
+    ...(member.resultText === undefined ? {} : { untrustedResult: boundTeamText(member.resultText) }),
   };
 }
 

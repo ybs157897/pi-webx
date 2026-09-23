@@ -114,6 +114,7 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
               // member's own two tools unreachable — the deny list wins over
               // `customTools`, so they were registered and immediately excluded.
               ...(request.memberTools === undefined ? {} : { memberTools: request.memberTools }),
+              ...(request.isolateCodingTools === true ? { isolateCodingTools: true } : {}),
               denied: [...new Set([
                 SUBAGENT_TOOL_NAME,
                 ...TEAM_WORKER_FORBIDDEN_TOOL_NAMES,

@@ -31,7 +31,7 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import type { ExtensionContext, ToolDefinition } from '@earendil-works/pi-coding-agent';
+import { ModelRuntime, SettingsManager, type ExtensionContext, type ToolDefinition } from '@earendil-works/pi-coding-agent';
 
 import { AgentTeamRuntime } from '../server/agent-team/team-runtime';
 import { PiHost } from '../server/pi/host';
@@ -209,7 +209,7 @@ function forRoundTrip(view: TeamProjection | undefined): unknown {
     ...view,
     members: view.members.map((member) => (
       member.status === 'running' || member.status === 'cancelling' || member.status === 'interrupted'
-        ? { ...member, status: '<mid-flight>', hasResult: '<mid-flight>', statusReason: '<mid-flight>' }
+        ? { ...member, status: '<mid-flight>', hasResult: '<mid-flight>', statusReason: '<mid-flight>', untrustedResult: '<mid-flight>' }
         : member
     )),
   };
@@ -612,6 +612,66 @@ await check('F-C: after a replay the parent session id reaches the same Team, an
     assert.equal(host.teamSnapshot('nobody-at-all'), undefined, 'and an unknown id is still 404');
   } finally {
     clearInterval((host as unknown as { sweeper: NodeJS.Timeout }).sweeper);
+  }
+});
+
+await check('resuming a stored Team reattaches its task board without creating another Team', async () => {
+  const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const agentDir = join(ROOT, 'resume-agent');
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  const work = join(ROOT, 'resume-work');
+  mkdirSync(work, { recursive: true });
+  const sessionId = '01a0b900-dead-beef-0000-000000000099';
+  const sessionDir = join(ROOT, 'resume-sessions');
+  const storedFile = join(sessionDir, `2026-09-22T00-00-00-000Z_${sessionId}.jsonl`);
+  mkdirSync(sessionDir, { recursive: true });
+  writeFileSync(storedFile, [
+    JSON.stringify({ type: 'session', version: 3, id: sessionId, timestamp: '2026-09-22T00:00:00.000Z', cwd: work }),
+    JSON.stringify({
+      type: 'message', id: 'e0000001', parentId: null, timestamp: '2026-09-22T00:00:01.000Z',
+      message: { role: 'assistant', content: [{ type: 'text', text: 'previous turn' }], timestamp: 1 },
+    }),
+  ].join('\n') + '\n');
+
+  const journal = freshJournal('resume-team');
+  const seeded = new AgentTeamRuntime({ journal });
+  const team = seeded.createTeam(sessionId);
+  const task = seeded.createTask({ teamId: team.id, title: 'continue this work', description: 'existing task' });
+  const member = seeded.addMember({ teamId: team.id, definition: freezeDefinition(definition()) });
+  seeded.settleMember({ teamId: team.id, memberId: member.id, status: 'idle', text: 'existing result' });
+
+  let first: PiHost | undefined;
+  let second: PiHost | undefined;
+  try {
+    const runtime = await ModelRuntime.create({
+      authPath: join(agentDir, 'auth.json'), modelsPath: null,
+      refreshOnCreate: false, allowModelNetwork: false,
+    });
+    const options = {
+      teamJournalDir: journal.directory,
+      sessionDir,
+      definitions: { read: async () => ({ schemaVersion: 1, revision: 1, path: join(ROOT, 'definitions.json'), agents: [] }) },
+      modelRuntimeFactory: async () => runtime,
+      settingsManagerFactory: () => SettingsManager.inMemory({}, { projectTrusted: false }),
+    };
+    first = new PiHost(options);
+    const resumed = await first.create({ cwd: work, sessionPath: storedFile });
+    assert.equal(resumed.teamMode, true, 'the stored Team enables Team mode without a browser hint');
+    assert.equal(resumed.teamId, team.id, 'the original Team id is reused');
+    assert.equal(first.teamSnapshot(sessionId)?.tasks[0]?.taskId, task.id, 'the original task remains visible');
+    assert.equal(first.teamSnapshot(sessionId)?.members[0]?.untrustedResult?.text, 'existing result');
+    await first.disposeAll();
+    first = undefined;
+
+    second = new PiHost(options);
+    const explicitlyResumed = await second.create({ cwd: work, sessionPath: storedFile, teamMode: true });
+    assert.equal(explicitlyResumed.teamId, team.id, 'an explicit Team hint also reuses the stored Team');
+    assert.deepEqual(journal.listTeamIds(), [team.id], 'no second journal is created');
+  } finally {
+    await first?.disposeAll();
+    await second?.disposeAll();
+    if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
   }
 });
 
