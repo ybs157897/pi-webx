@@ -9,14 +9,19 @@
     "dev:server": "tsx watch server/index.ts",
     "dev:web": "vite",
     "build": "vite build",
+    "postinstall": "node scripts/setup-team-windows-tools.mjs",
+    "team:windows-tools": "node scripts/setup-team-windows-tools.mjs",
+    "check:team-browser": "node --import tsx scripts/check-agent-team-browser.mjs",
+    "check:team-live": "tsx scripts/check-agent-team-live.ts",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
-    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && tsx scripts/check-session-recency.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts && tsx scripts/check-composer-images.ts && tsx scripts/check-tool-presets.ts"
+    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && tsx scripts/check-session-recency.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts && tsx scripts/check-composer-images.ts && tsx scripts/check-tool-presets.ts && tsx scripts/check-agent-definitions.ts && tsx scripts/check-agent-definitions-api.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-agent-definitions-ui.ts && tsx scripts/check-subagent-tool.ts && tsx scripts/check-subagent-sdk.ts && tsx scripts/check-subagent-lifecycle.ts && tsx scripts/check-subagent-boundaries.ts && tsx scripts/check-agent-team.ts && tsx scripts/check-agent-team-journal.ts && tsx scripts/check-agent-team-inject.ts && tsx scripts/check-agent-team-windows-policy.ts && tsx scripts/check-agent-team-sandbox.ts && tsx scripts/check-agent-team-sandbox-windows.ts && tsx scripts/check-subagents-test-server.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.4",
     "@earendil-works/pi-coding-agent": "^0.84.4",
     "@jboltai/tokui": "^0.2.6",
+    "@landstrip/landstrip-api": "0.19.2",
     "@lobehub/fluent-emoji": "^4.1.1",
     "@lobehub/icons": "^5.18.0",
     "@lobehub/ui": "^5.47.1",
@@ -33,6 +38,7 @@
     "react-dom": "^19.3.0",
     "sharp": "^0.35.4",
     "tsx": "^4.20.6",
+    "typebox": "1.3.7",
     "ws": "^8.21.3"
   },
   "devDependencies": {
@@ -43,6 +49,7 @@
     "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^9.2.1",
+    "playwright-core": "^1.63.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.0"
   }

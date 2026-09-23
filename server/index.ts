@@ -52,6 +52,39 @@ async function main(): Promise<void> {
   });
 
   const port = readPort();
+  /**
+   * Replay the Team journal before the first request can arrive.
+   *
+   * Awaited on purpose: after a restart a client only holds a session id, and the
+   * replay is what makes `GET /api/teams/<sessionId>` work for it. What that does
+   * and does not mean, measured rather than assumed:
+   *
+   *   - **The Team is addressable by session id again** — `team-created` records carry
+   *     the parent session, and the replay rebuilds that index. This is true even
+   *     though a run without a single assistant turn never writes a transcript.
+   *   - **The session itself is still not resumable.** A session with no assistant
+   *     turn has no file on disk, so `POST /api/sessions {sessionId}` still answers
+   *     `404 no stored session`. The replay only answers "which Team did this session
+   *     orchestrate"; it does not bring a conversation back.
+   *
+   * The cost is bounded — one directory, one file per Team — and `hydrateTeams()`
+   * never throws: a damaged, missing or even unwritable journal is reported here and
+   * the server starts anyway (in memory, if the journal cannot be written at all).
+   */
+  const replayed = await manager.hydrateTeams();
+  if (replayed.journalDisabled !== undefined) {
+    console.warn(
+      `[pi-webx] team journal unavailable (${replayed.journalDisabled}); `
+      + 'Teams will run in memory only and will not survive a restart',
+    );
+  } else if (replayed.files > 0) {
+    console.log(
+      `[pi-webx] team journal replayed: ${replayed.teams} team(s) from ${replayed.files} file(s), `
+      + `${replayed.bytes} bytes, ${replayed.interrupted} interrupted member(s), `
+      + `${replayed.skipped} bad line(s) skipped, ${replayed.unusable} file(s) held no team `
+      + `in ${replayed.durationMs}ms`,
+    );
+  }
   const server = app.listen(port, HOST, () => {
     console.log(`[pi-webx] listening on http://${HOST}:${port}`);
     console.log(`[pi-webx] pi SDK ${resolvePiVersion()} (agent runs in-process)`);

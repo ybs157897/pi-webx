@@ -17,6 +17,7 @@
  *    低→高，且只在重开弹窗时才看得见。
  */
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 import {
   CAPABILITY_LABELS,
@@ -154,6 +155,71 @@ const copyKeys = Object.keys(copy) as (keyof typeof copy)[];
 assert.ok(
   !copyKeys.includes('addLevel') && !copyKeys.includes('removeLevel'),
   'copy.ts 不该再有 addLevel/removeLevel：等级行已改成勾选框，下拉式交互不得回流',
+);
+
+// ---------------------------------------------------------------- 窄屏（task-61）
+//
+// 390 下 `_modelList_` clientWidth 72 / scrollWidth 227，且 `overflow: clip`
+// 让行内三个按钮（复制模型 ID / 编辑 / 移除）的 right 落到 401/433/465，越过
+// 面板右界 385 —— 被裁掉且滚不到。根因是 `.panes` 的固定 224px 第一列：
+// 348(内容列) − 224 = 124(detailPane) − 48(内边距) ≈ 76 → 实测 72。
+// 下面把修复规则钉住，防止回退。
+const modelsCss = readFileSync(
+  new URL('../src/components/settings/ModelsSection.module.css', import.meta.url),
+  'utf8',
+);
+const narrowStart = modelsCss.indexOf('@media (max-width: 768px)');
+assert.ok(narrowStart > 0, 'ModelsSection 必须有 <=768px 断点（与设置外壳一致，避免两处断点打架）');
+const narrow = modelsCss.slice(narrowStart);
+
+// 根因：桌面端仍是 224px 固定列（1440 不回归的前提）。
+assert.match(
+  modelsCss,
+  /\.panes\s*\{[^}]*grid-template-columns: 224px minmax\(0, 1fr\)/,
+  '桌面端 .panes 必须仍是 224px + 弹性列（1440 不回归）',
+);
+// 窄屏：固定列必须让位，否则 detailPane 又被压到百来 px。
+assert.ok(
+  /\.panes\s*\{[^}]*grid-template-columns: minmax\(0, 1fr\)/.test(narrow),
+  '窄屏 .panes 必须退化为单列，否则 modelList 又被压到 ~76px',
+);
+
+// 可达性：容器可横向滚动 + 行有最小宽度（两者必须同时成立）。
+assert.ok(
+  /\.modelList\s*\{[^}]*overflow-x: auto/.test(narrow),
+  '窄屏 .modelList 必须 overflow-x:auto，否则被裁的按钮滚不到',
+);
+assert.ok(
+  /\.modelRow\s*\{[^}]*min-width: 240px/.test(narrow),
+  '窄屏 .modelRow 必须有 min-width:240px（否则三个按钮仍被 flex 挤出行外）',
+);
+assert.ok(
+  !/\.modelList\s*\{[^}]*overflow-x: clip/.test(narrow),
+  '窄屏 .modelList 不得保留 overflow-x: clip（那正是按钮不可达的原因）',
+);
+
+// 面板与内边距收紧，让输入不再被裁到不可用。
+assert.ok(
+  /\.detailPane\s*\{[^}]*padding: 16px 16px 48px/.test(narrow),
+  '窄屏 .detailPane 内边距必须收紧到 16px（48px 在一列布局里吃掉可读宽度）',
+);
+assert.ok(
+  /\.listPane\s*\{[^}]*border-right: none/.test(narrow),
+  '窄屏 .listPane 必须去掉右侧分隔线（已改为上下堆叠）',
+);
+
+// 行内按钮在窄屏不得再被压成 0：三个按钮 + 行最小宽度必须放得下。
+// 3 个 28px 图标按钮 + 间距(4*2) + 行左右内边距(12*2) = 116px；剩余给 id 与徽标。
+const rowChrome = 3 * 28 + 2 * 4 + 2 * 12;
+assert.ok(
+  240 - rowChrome >= 100,
+  `行最小宽度须给 id/徽标留足空间：240 - ${rowChrome} = ${240 - rowChrome}px`,
+);
+// 320 是最窄目标：设置外壳内容列 278 - panel 2 - detailPane 32 = 246px，
+// 必须 >= 行最小宽度，否则日常就要横向滚动而不是「安全网」。
+assert.ok(
+  246 >= 240,
+  '320 下 modelList 可用宽 246px 必须 >= 行最小宽度 240px（避免日常滚动）',
 );
 
 console.log('PASS 模型编辑器：输入类型只有 视频/PDF（无音频），保存只动表单画出来的键、其余原样继承；推理等级行是一排词表序勾选框，下拉交互已删');

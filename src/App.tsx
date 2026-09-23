@@ -10,6 +10,7 @@ import {
   MessageSquarePlus,
   RefreshCw,
   Settings2,
+  UsersRound,
 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
@@ -18,6 +19,7 @@ import { catalogDefaultSelection, modelCatalogApi } from './lib/modelCatalog';
 import { SessionCwdProvider } from './lib/session-cwd';
 import { loadPrefs, savePrefs } from './lib/storage';
 import { usePiSession, type ConnectionStatus, type PiSessionApi } from './lib/usePiSession';
+import { useTeamSnapshot } from './lib/useTeamSnapshot';
 import { Composer } from './components/Composer';
 import { readToolPresetPreference } from './components/ToolPresetSelect';
 import { EmptyState } from './components/EmptyState';
@@ -30,12 +32,13 @@ import { NotificationStack } from './components/NotificationStack';
 import { SessionSettings } from './components/SessionSettings';
 import { StatusStrip, WidgetStrip } from './components/StatusStrip';
 import { TranscriptView } from './components/TranscriptView';
+import { TeamPanel } from './components/TeamPanel';
 import { UiShowcase } from './components/uikit/UiShowcase';
 import { SidebarRoot } from './components/sidebar/SidebarRoot';
 import { WorkspaceBrowser } from './components/sidebar/WorkspaceBrowser';
 import { workspaceLabel } from './components/sidebar/tree';
 import type { WorkspaceItem } from './components/sidebar/tree';
-import { GeneralSettings, ModelsSection, SettingsPage } from './components/settings';
+import { AgentDefinitionsSection, GeneralSettings, ModelsSection, SettingsPage } from './components/settings';
 import type { ModelCatalog } from './shared/model-catalog';
 import { presetFromToolNames, toolNamesForPreset, type ToolPreset } from './shared/tool-presets';
 import type {
@@ -53,6 +56,7 @@ type ThemePreference = 'light' | 'dark' | 'system';
 type ThemeMode = 'light' | 'dark';
 /** Which engine renders agent UI inline — ours, or TokUI. */
 type RenderStyle = 'ours' | 'tokui';
+type NewSessionMode = 'chat' | 'team';
 
 const THEME_KEY = 'pi-webx-theme';
 const RENDER_STYLE_KEY = 'pi-webx-render-style';
@@ -127,12 +131,20 @@ function Shell({
     // restart of the bridge all land back on the same conversation.
     () => new URLSearchParams(window.location.search).get('session'),
   );
+  const [newSessionMode, setNewSessionMode] = useState<NewSessionMode>(
+    () => new URLSearchParams(window.location.search).get('team') === '1' ? 'team' : 'chat',
+  );
   const [sessions, setSessions] = useState<SessionSummary[]>([]);
   /** Whether the bridge's session list has been read at least once. */
   const [sessionsLoaded, setSessionsLoaded] = useState(false);
   const [sessionSettingsOpen, setSessionSettingsOpen] = useState(false);
+  const [teamPanelOpen, setTeamPanelOpen] = useState(false);
   const [appSettingsOpen, setAppSettingsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(readSidebarCollapsed);
+  const [narrowViewport, setNarrowViewport] = useState(
+    () => window.matchMedia('(max-width: 640px)').matches,
+  );
+  const [mobileSidebarExpanded, setMobileSidebarExpanded] = useState(false);
   const [savedWorkspaces, setSavedWorkspaces] = useState<string[]>(() => loadPrefs().workspaces ?? []);
   /**
    * Workspaces the user removed from the sidebar's list. It is a *subtraction*
@@ -160,14 +172,33 @@ function Shell({
   const [pendingModel, setPendingModel] = useState<ModelSelection | null>(null);
 
   const session = usePiSession(sessionId);
+  const teamState = useTeamSnapshot(sessionId, teamPanelOpen);
+  const sidebarIsCollapsed = narrowViewport ? !mobileSidebarExpanded : sidebarCollapsed;
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 640px)');
+    const update = () => {
+      setNarrowViewport(query.matches);
+      if (!query.matches) setMobileSidebarExpanded(false);
+    };
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
 
   /** Keep the URL in step with the open session, without a history entry. */
   useEffect(() => {
     const url = new URL(window.location.href);
     if (sessionId !== null) url.searchParams.set('session', sessionId);
     else url.searchParams.delete('session');
+    if (newSessionMode === 'team') url.searchParams.set('team', '1');
+    else url.searchParams.delete('team');
     window.history.replaceState(null, '', url);
-  }, [sessionId]);
+  }, [newSessionMode, sessionId]);
+
+  useEffect(() => {
+    if (sessionId === null || teamState.sessionId !== sessionId || !teamState.ready) return;
+    setNewSessionMode(teamState.snapshot === null ? 'chat' : 'team');
+  }, [sessionId, teamState.ready, teamState.sessionId, teamState.snapshot]);
 
   /** Set once a resume has been attempted for an id, so the poll cannot loop. */
   const resumeAttempted = useRef<string | null>(null);
@@ -251,14 +282,17 @@ function Shell({
     resumeAttempted.current = sessionId;
     void (async () => {
       try {
-        const result = await bridge.createSession({ sessionId });
+        const result = await bridge.createSession({
+          sessionId,
+          ...(newSessionMode === 'team' ? { teamMode: true } : {}),
+        });
         setCwd(result.session.cwd);
         await refreshSessions();
       } catch {
         // 磁盘上也没有这个 id：保留现场提示，不打扰用户。
       }
     })();
-  }, [refreshSessions, sessions, sessionId, sessionsLoaded]);
+  }, [newSessionMode, refreshSessions, sessions, sessionId, sessionsLoaded]);
 
   const pickWorkspace = useCallback((path: string) => {
     setSavedWorkspaces((prev) => {
@@ -325,6 +359,8 @@ function Shell({
     async (target: string, sessionPath: string) => {
       try {
         const result = await bridge.createSession({ cwd: target, sessionPath });
+        setMobileSidebarExpanded(false);
+        setNewSessionMode('chat');
         setSessionId(result.session.id);
         setCwd(result.session.cwd);
         setBootError(null);
@@ -360,6 +396,7 @@ function Shell({
           // pi-web's split: the browser preference decides what a new session
           // starts from, and the session records it from there on.
           toolNames: toolNamesForPreset(readToolPresetPreference()),
+          ...(newSessionMode === 'team' ? { teamMode: true } : {}),
         });
         setSessionId(result.session.id);
         setCwd(result.session.cwd);
@@ -373,7 +410,7 @@ function Shell({
     })();
     pendingCreate.current = pending;
     return pending;
-  }, [cwd, defaultModel, refreshSessions]);
+  }, [cwd, defaultModel, newSessionMode, refreshSessions]);
 
   /** Failed response for a local guard, shaped like a pi response. */
   const refused = useCallback(
@@ -600,11 +637,14 @@ function Shell({
    * session keeps going and stays reachable from the sidebar.
    */
   const onNewSession = useCallback(
-    (path?: string) => {
+    (path?: string, mode: NewSessionMode = 'chat') => {
       if (path !== undefined) {
         pickWorkspace(path);
         setCwd(path);
       }
+      setNewSessionMode(mode);
+      setTeamPanelOpen(false);
+      setMobileSidebarExpanded(false);
       setSessionId(null);
     },
     [pickWorkspace],
@@ -628,6 +668,8 @@ function Shell({
           ...source,
           ...(node.cwd === undefined || node.cwd.length === 0 ? {} : { cwd: node.cwd }),
         });
+        setMobileSidebarExpanded(false);
+        setNewSessionMode('chat');
         setSessionId(result.session.id);
         await refreshSessions();
         await loadStored();
@@ -667,6 +709,7 @@ function Shell({
   const menuItems = useMemo(
     () => [
       { key: 'new', icon: <MessageSquarePlus size={13} />, label: '新建会话' },
+      { key: 'new-team', icon: <UsersRound size={13} />, label: '新建 Agent Team' },
       { type: 'divider' as const },
       { key: 'compact', icon: <Eraser size={13} />, label: '立即压缩上下文', disabled: session.transcript.running },
       { key: 'export', icon: <Download size={13} />, label: '导出会话为 HTML', disabled: !session.sessionFile },
@@ -682,6 +725,9 @@ function Shell({
       switch (key) {
         case 'new':
           onNewSession();
+          break;
+        case 'new-team':
+          onNewSession(undefined, 'team');
           break;
         case 'compact':
           void session.compact();
@@ -775,15 +821,18 @@ function Shell({
           flex: 'none',
           height: '100%',
           overflow: 'hidden',
-          width: sidebarCollapsed ? 56 : SIDEBAR_WIDTH,
+          width: sidebarIsCollapsed ? 56 : SIDEBAR_WIDTH,
           transition: `width ${SIDEBAR_SLIDE_MS}ms var(--ds-ease-in-out, ease-in-out)`,
           borderRight: '1px solid var(--dsw-alias-border-l2)',
         }}
       >
         <SidebarRoot
           width={SIDEBAR_WIDTH}
-          collapsed={sidebarCollapsed}
-          onToggle={() => { setSidebarCollapsed((prev) => !prev); }}
+          collapsed={sidebarIsCollapsed}
+          onToggle={() => {
+            if (narrowViewport) setMobileSidebarExpanded((prev) => !prev);
+            else setSidebarCollapsed((prev) => !prev);
+          }}
           piVersion={config?.piVersion ?? null}
           onNewSession={() => { onNewSession(); }}
           onOpenSettings={() => { setAppSettingsOpen(true); }}
@@ -796,7 +845,7 @@ function Shell({
               live={sessions}
               stored={allStored}
               currentId={sessionId}
-              onSwitch={setSessionId}
+              onSwitch={(id) => { setMobileSidebarExpanded(false); setNewSessionMode('chat'); setSessionId(id); }}
               onNewSession={(path) => { onNewSession(path); }}
               onRename={(id, name) => { void onRenameSession(id, name); }}
               onResume={(entry) => { void openSession(entry.cwd, entry.path); }}
@@ -830,7 +879,7 @@ function Shell({
           <ChatHeader
           left={
             <Flexbox horizontal align="center" gap={6}>
-              <Text fontSize={14} weight={600} ellipsis style={{ maxWidth: 320 }}>
+              <Text fontSize={14} weight={600} ellipsis style={{ maxWidth: narrowViewport ? 112 : 320 }}>
                 {title}
               </Text>
               <Dropdown
@@ -844,7 +893,7 @@ function Shell({
           right={
             <Flexbox horizontal align="center" gap={4}>
               <Tag
-                style={{ fontSize: 11, marginRight: 4 }}
+                style={{ fontSize: 11, marginRight: 4, display: narrowViewport ? 'none' : undefined }}
                 color={
                   session.status === 'live'
                     ? session.transcript.running
@@ -857,6 +906,17 @@ function Shell({
               >
                 {session.transcript.running ? '执行中' : STATUS_LABEL[session.status]}
               </Tag>
+              {(teamState.snapshot !== null || (sessionId === null && newSessionMode === 'team')) && (
+                <Tag color="blue" style={{ fontSize: 11, marginRight: 4, display: narrowViewport ? 'none' : undefined }}>Agent Team</Tag>
+              )}
+              <Tooltip title="团队面板">
+                <ActionIcon
+                  icon={UsersRound}
+                  size="small"
+                  aria-label="团队面板"
+                  onClick={() => setTeamPanelOpen(true)}
+                />
+              </Tooltip>
               <Tooltip title="刷新状态">
                 <ActionIcon
                   icon={RefreshCw}
@@ -900,7 +960,10 @@ function Shell({
             first send from remounting it (and dropping the draft). */}
         {empty ? (
           <Flexbox align="center" justify="flex-end" style={{ flex: 1, minHeight: 0 }}>
-            <EmptyState />
+            <EmptyState
+              mode={sessionId === null ? newSessionMode : teamState.snapshot ? 'team' : 'chat'}
+              onModeChange={sessionId === null ? setNewSessionMode : undefined}
+            />
           </Flexbox>
         ) : (
           <Flexbox style={{ flex: 1, minHeight: 0, overflow: 'hidden' }}>
@@ -999,6 +1062,17 @@ function Shell({
         disabled={sessionId === null}
       />
 
+      <TeamPanel
+        open={teamPanelOpen}
+        onClose={() => setTeamPanelOpen(false)}
+        sessionId={sessionId}
+        team={teamState.snapshot}
+        loading={teamState.loading}
+        error={teamState.error}
+        onRefresh={teamState.refresh}
+        onNewTeam={() => onNewSession(undefined, 'team')}
+      />
+
       <SettingsPage
         open={appSettingsOpen}
         onClose={() => {
@@ -1029,6 +1103,16 @@ function Shell({
             group: '基础设置',
             title: '模型设置',
             render: () => <ModelsSection />,
+          },
+          {
+            id: 'agents',
+            label: '子智能体',
+            group: '基础设置',
+            title: '子智能体',
+            /* The tool catalog is per-session, so the section takes the session
+               the app already has; `undefined` before the first message, which
+               the section answers by listing built-in tools only. */
+            render: () => <AgentDefinitionsSection sessionId={sessionId ?? undefined} />,
           },
           {
             id: 'showcase',
