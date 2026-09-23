@@ -24,6 +24,14 @@ npm run build && npm start      # production, single process → http://127.0.0.
 Requires Node 20 or newer (nothing else — no CLI on PATH, no global install). The bridge
 logs the embedded pi SDK version at startup; on older Node it fails there, at boot.
 
+## Personal workbench
+
+The default page (`/`) is the ten-module AI personal workbench migrated from the
+`ai-workbench` frontend. The original full Pi interface remains at `/chat`; both pages
+use this repository's session client and one local bridge process. The workbench's
+records use the SQLite API below, while Pi conversations retain their own session logs.
+The agent does not yet have tools to read or edit workbench records.
+
 ## AI personal workbench storage
 
 The local bridge also serves `/api/workbench/*` for the separate AI personal workbench frontend.
@@ -36,8 +44,7 @@ For a one-time migration that also embeds old `/uploads/` images, run
 to overwrite a populated SQLite database unless `--replace` is passed. Use
 `npm run check:workbench` for a focused temporary-database and HTTP check.
 
-Pi conversations and the workbench database are separate. The Agent does not yet have
-tools to read or edit these records; its existing session API is unchanged.
+Pi conversations and the workbench database are separate. The agent session API is unchanged.
 
 ## What it covers
 
