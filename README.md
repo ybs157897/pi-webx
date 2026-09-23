@@ -30,6 +30,17 @@ logs the embedded pi SDK version at startup; on older Node it fails there, at bo
 live output, token/cost usage per turn, context-window usage in the composer bar, retry and
 compaction banners, image attachments (paste or pick).
 
+**A task panel docked above the composer (dsh's todo dock).** The bundled pi extension
+(`extensions/pi-webx-todo.ts`, deployed to `~/.pi/agent/extensions/`) registers a `todo` tool
+whose single call carries the **entire** list — `todos: [{ content, status }]`, statuses
+`pending` / `in_progress` / `completed` — and replaces the previous list (dsh's `todo_write`
+contract; the older per-item `add`/`toggle` tool cost six calls and six transcript rows for
+three tasks). The result's `details.todos` is the session's only plan snapshot: the panel
+replays it last-write-wins (`src/lib/todos.ts`) and renders it where dsh does — a card with a
+checklist header ("任务 · 2 已完成 · 1 进行中 · 2 待处理"), one row per task carrying a
+done / in-progress / pending glyph, collapsible from the header. The `todo` call itself is a
+single transcript row ("任务 · 1/3 已完成 · 写第二个小故事"), never raw args JSON.
+
 **A wait list for messages sent mid-turn (dsh's queue dock).** Enter while the agent is
 running queues the message instead of steering it into the running turn: it appears as a row
 above the composer ("{n} 条排队消息", one row renders bare), every row can be steered into the
@@ -92,6 +103,8 @@ unchanged from the earlier subprocess design, only the engine differs.
 - `src/shared/protocol.ts` — the wire contract.
 - `src/shared/uikit.ts` — the component-spec schema plus `normalizeUiSpec`.
 - `src/lib/usePiSession.ts` — the React bridge: SSE, dialogs, statuses, widgets.
+- `src/lib/todos.ts` — the todo tool's projection: whole-list snapshots, last-write-wins.
+- `src/components/TaskPanel.tsx` — dsh's todo dock (header counts + three-status rows).
 - `src/components/uikit/` — the spec renderer and showcase.
 
 ### How state stays correct
