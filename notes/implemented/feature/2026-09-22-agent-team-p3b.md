@@ -2,6 +2,12 @@
 
 Status: **implemented on `feat/user-subagents`（P3-B 代码本人尚未提交，属在途工作）· 独立验证 PASS + 1 项被证伪（task-108）· 整改（task-109）· 定向复验 PASS（task-110）· 文案收口（task-111，仅注释；本文写入时该两处措辞已在工作区，该任务当时仍在途）**
 
+**后续（2026-09-23，P4/P5 集成）**：上方“未提交”是写作当时状态，P3-B 代码现已提交为 `2900f55`。一次真实 `cmdc/deepseek/deepseek-v4.1-flash` 派工中，成员调用 `send_team_message` 后编排者转录出现**恰好一条** `pi-webx:team-result` custom 消息；等待宿主继续运行后，该项从 `inflight` 到 `fresh-reader-visible`，成员 `idle`。父/成员运行元数据均为 Flash。这一轮只验证了**空闲编排者的 `turn-started` 路径**；streaming 样本见下一段。
+
+**后续 streaming 样本**：另一次真实 Flash 编排中，父模型在 `dispatch_agent` 运行时收到成员消息，Team 投影记录 `deliveryMode=steered`、`deliveryState=candidate`；等待成员结算后，转录出现**恰好一条**带哨兵的 custom 消息，成员状态 `idle`。这验证了真实 streaming 路径的一次到达；下一次 LLM 请求前的精确 drain 顺序和注入措辞对模型行为的影响仍未定量验收。
+
+**2026-09-23 后续真实模型验收**：`npm run check:team-live` 在隔离临时工作区使用实际 `{provider:"cmdc",id:"deepseek/deepseek-v4.1-flash"}` 跑通成员写文件、发消息、编排者单条 custom 注入、下一轮回答精确复述消息哨兵（空闲路径）。同一脚本又让真实编排者在 streaming 中调用 `dispatch_agent`：成员产生随机 8 位码并只通过 `send_team_message` 发出，成员最终工具结果不含该码；Team 记录 `deliveryMode=steered`，编排者转录恰好一条对应 custom 消息，后续模型回答包含该码。这证明一个真实样本中的后续模型请求能看到成员消息。更细的内部 drain 微观顺序仍只由脚本化模型上下文断言覆盖，未在真实 provider 内部插桩。
+
 > **范围一句话**：P3-B 把 P3-A 记下的「投递机会」真正交给编排者会话，语义定为 **at-most-once**——认领记录先 `fsync` 落盘、再发送；代价是 `fsync` 之后、发送之前崩溃会让那一条**丢一次**（这个状态可观测，见 §二.3）。
 > 本文**不承诺** exactly-once，**不承诺**掉电安全，**不支持**多进程并发写同一 journal；这些是边界，不是待办。
 

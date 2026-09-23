@@ -4,7 +4,7 @@
 
 Status: **封版 — 自动委派 3 次样本均已发生：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；该 TC 门槛为 3/3 全条件通过）· 安全 blocker 已修复并经独立 host 验 7/7 + live r3 确认 · **界面已按 ZCode 1:1 重写（color / injectAgentsMd / 名称 3..50 码点）** · **内置两个智能体已落地（虚拟条目、只读、恒启用 ⇒ `subagent` 默认注册）** · **本轮语义已改：真并发（超限排队）、只读豁免、失败走 `isError` + 错误文本** · **提示词两处修正（preamble 逃生口 + Explore breadth 句）与逐字比对守卫已落地** · **验特性必须用 8788（主树 5173/8787 无此功能）** · **工程门禁：task-76 四项 exit 0；提示词轮 task-77 亦四项 exit 0** · 测试任务已完成，不再追加模型轮次**
 
-> **代码状态**：实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`）。子智能体阶段成果已提交为 `1ae3b0a`（未推送、未合并）；Agent Team P2 正在同一分支上进行中。本文的 verdict 只针对该工作区。
+> **代码状态**：实现位于隔离 worktree **`pi-webx-subagents`**（与主树 `pi-webx` 同级的兄弟目录；分支 `feat/user-subagents`）。子智能体与 Agent Team P2/P3 已在此分支提交；2026-09-23 的 P4 面板及 macOS/Windows P5 工具隔离在当前工作区，尚未提交或推送。Windows 原生运行验收仍为 **NOT RUN**。本文早期 verdict 保留当时的验收口径。
 > **怎么读结果**：每个 TC 的 verdict 都指向**证据来源**（独立验收报告路径 / 实跑命令）。**未执行的断言一律 NOT RUN，不得记 PASS**；含未验证项的标 PARTIAL。
 > 结果来源：`/tmp/pi-webx-subagents-implementation/verify-config-api.md`（配置存储/API/三态）、`verify-runtime.md`（运行时无模型探针）、`verify-runtime-races.md`（取消竞态与工具契约）、`verify-browser.md`（浏览器 UI）、`live-test-server-handoff.md`（隔离实例与调用范式）、**`verify-zcode-contract.md`（ZCode 新契约字段/名称规则/运行时注入）**、**`browser/t53*`（ZCode 1:1 界面三轮浏览器验收，截图与 wire）**、**`verify-builtins.md`（内置两个智能体契约/运行时 10/10）**、**`verify-t66-builtins-narrow.md`（内置 UI 分组/只读行 + 模型设置窄屏 A/B/C）**、**`verify-concurrency.md`（task-71；**其 A/B 两段已过期**，见「工程门禁」后的降级说明；仅 C 段 12/12 仍有效）**。
 
@@ -377,7 +377,40 @@ export PI_CODING_AGENT_DIR="$RUN_DIR/agent-dir"                    # ② 再覆�
 
 **未验证 / 不能承诺（写清楚）**：**不承诺** exactly-once、**不承诺**掉电安全；`fsync` 只到「源码 + 调用返回即能从文件读回 + 插桩计数（`fsyncCalls=1`，且 flush 在 send 之前）」这一级别，**不是内核级观测、没有掉电测试**（且在 tsx 下 monkey-patch `node:fs` 无效，计数用的是 `/tmp` 下的插桩副本——见 P3-B 记录 §四）；**不支持**多进程并发写同一 journal；**真模型下注入措辞的实际效果、streaming 中 steer 的真实 drain 时机、Guard 2 在流式路径的生产命中率**均**未验**；`restart-replay` / `host-shutdown` 两个中断码的分离由脚本断言，未在真 SIGTERM 下端到端跑。残余边界（最小前提）：**已 `fsync` 的认领记录本身被删除/截断（不是崩溃丢尾）`∧` 目标会话转录也读不回该 `messageId`** ⇒ 同一段文本会**再次**投递；普通崩溃拿不到这个前提，且宿主的 `readBack` 恒在（`server/pi/host.ts:880`）。证据（仓库外）：自测 `check-agent-team-inject.ts` **28/28**、`check-agent-team-journal.ts` **16/16**、`check-agent-team.ts` **33/33**；独立验证 `/tmp/pi-webx-p3b-verify/verify-p3b.md`（b1 31/31 · b2 6/6）与 `verify-p3b-followup.md`（b3 13/13 · b4 4/4）。
 
-### 工程门禁（**本轮 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
+### P4 Team 面板怎么手工验
+
+- **Given** 在隔离工作区打开构建后的 UI，或按 `notes/implemented/feature/2026-09-23-agent-team-p4.md` 的记录准备一个带成员、任务和消息的 Team journal。
+- **When** 在空会话切到 **Agent Team** 后发送第一条消息。
+- **Then** `POST /api/sessions` 应携带 `teamMode:true`，地址栏保留 `?team=1`；头部的团队按钮能打开面板。
+- **And** 成员页可展开有界结果，任务页显示状态和负责人，消息页显示投递状态与原始内容；模型文本只当文字显示，不解释为 HTML。
+- **When** 刷新页面或重启服务后恢复已有转录。
+- **Then** 原 Team 的 `teamId`、任务和成员结果不变，不能生成第二个 Team。
+- **When** 面板里存在运行中成员时点击“停止成员”。
+- **Then** 先显示确认，再只声明“已请求停止”，随后刷新到成员真实状态；不把请求数写成已经停止数。
+- **And** 390px 视口下团队按钮可触达、面板无整页横向滚动。
+
+### P5 macOS 隔离怎么验
+
+- **Given** macOS 上的 Team 会话，Agent 配置目录与工作区不重叠。
+- **When** 编排者或成员通过 `read/write/edit/bash/grep/find/ls/powershell` 调用编码工具。
+- **Then** 实际工具在 `sandbox-exec` 子进程执行，工作区内的读写成功；直接路径与符号链接均不能读写 Agent 定义目录；工具进程没有网络，也不能向宿主进程发信号。
+- **And** Team 会话不加载扩展代码；普通单会话与一次性 `subagent` 的工具面仍按原规则工作。
+- **When** 平台不支持隔离或工作区包含 Agent 配置目录。
+- **Then** Team 创建失败并说明原因，不降级为未隔离执行。
+**证据边界**：`scripts/check-agent-team-sandbox.ts` 的负例和 `npm run check:team-live` 的真实 DeepSeek Flash 派工证明当前 macOS 路径；后者验证了空闲与 streaming 两种 Team 消息均被后续模型回复使用一次。上文 P3-B 段落的“真模型效果未验”记录的是 2026-09-22 写作时状态。`sandbox-exec` 已弃用。Windows 的原生实现尚未在 Windows 执行；多 provider 验证仍待完成。详见 `notes/implemented/feature/2026-09-23-agent-team-p5-macos.md`。
+
+### P5 Windows 原生隔离怎么验
+
+- **Given** Windows x64 主机，完成 `npm ci`；工作区是本地盘符上的目录，且不包含用户目录、Agent 配置目录或运行中的 pi-webx 源码。
+- **When** 创建 Team 并调用 `read/write/edit/powershell/grep/find/ls`。
+- **Then** Landstrip 报告的实际后端必须是 `appContainer`；LPAC 子进程在工作区内可编码，直接路径与 junction 均不能读写 Agent 定义，不能连宿主回环管理接口或停止宿主进程。
+- **When** 取消正在运行的 PowerShell 工具。
+- **Then** 调用应快速结算；检查 Landstrip 授权的 ACL 在正常完成和取消后均被清理。
+- **And** 在 Windows Edge 上复验首次发送建 Team、面板、窄屏及刷新恢复，再以真实 DeepSeek Flash 验证派工、消息和结算。
+
+**当前 verdict：NOT RUN。** `scripts/check-agent-team-windows-policy.ts` 只证明策略结构；`scripts/check-agent-team-sandbox-windows.ts` 需要 Windows 主机。CI 配置见 `.github/workflows/agent-team-platforms.yml`，本地尚无 Windows 运行证据。
+
+### 工程门禁（**历史 task-77**，出处 `/tmp/final4-*.log`；上一轮 task-76 同样四项 exit 0）
 
 | 命令 | 实测结果 | 出处 |
 |---|---|---|
