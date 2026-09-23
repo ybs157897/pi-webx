@@ -1,4 +1,3 @@
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
@@ -8,6 +7,7 @@ import { PiHost } from './pi/host';
 import { JSON_BODY_LIMIT, createApiRouter } from './routes';
 import { responseErrorMessage, statusFromError } from './http-errors';
 import { attachWebSocketGateway } from './ws';
+import { serveProductionAssets } from './static';
 import { createWorkbenchRouter } from './workbench/router';
 import { WorkbenchStore } from './workbench/store';
 
@@ -37,7 +37,7 @@ async function main(): Promise<void> {
   });
 
   if (isProduction) {
-    serveProductionAssets(app);
+    serveProductionAssets(app, distDir);
   } else {
     console.log('[pi-webx] dev mode: serving /api only (Vite serves the UI)');
   }
@@ -73,32 +73,6 @@ async function main(): Promise<void> {
   });
 
   installSignalHandlers(server, manager, disposeWebSocket, workbench);
-}
-
-/**
- * Production: serve `dist/` and fall back to `index.html` for client routes.
- * Express 5 dropped the `*` wildcard syntax, so the SPA fallback is middleware.
- */
-function serveProductionAssets(app: express.Express): void {
-  const indexHtml = path.join(distDir, 'index.html');
-
-  if (!existsSync(indexHtml)) {
-    console.warn(
-      `[pi-webx] no build output at ${distDir} — run \`npm run build\` first. ` +
-        'Falling back to /api only.',
-    );
-    return;
-  }
-
-  app.use(express.static(distDir, { index: 'index.html' }));
-  console.log(`[pi-webx] serving static assets + SPA fallback from ${distDir}`);
-  app.use((req: Request, res: Response, next: NextFunction) => {
-    if (req.method !== 'GET' && req.method !== 'HEAD') return next();
-    if (req.path.startsWith('/api')) return next();
-    res.sendFile(indexHtml, (error?: Error) => {
-      if (error) next(error);
-    });
-  });
 }
 
 function installSignalHandlers(
