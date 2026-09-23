@@ -8,6 +8,8 @@ import { PiHost } from './pi/host';
 import { JSON_BODY_LIMIT, createApiRouter } from './routes';
 import { responseErrorMessage, statusFromError } from './http-errors';
 import { attachWebSocketGateway } from './ws';
+import { createWorkbenchRouter } from './workbench/router';
+import { WorkbenchStore } from './workbench/store';
 
 /** Default port; override with PI_WEBX_PORT. */
 const DEFAULT_PORT = 8787;
@@ -23,10 +25,12 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 async function main(): Promise<void> {
   const manager = new PiHost();
+  const workbench = new WorkbenchStore();
   const app = express();
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
+  app.use('/api/workbench', createWorkbenchRouter(workbench));
   app.use('/api', createApiRouter(manager));
   app.use('/api', (_req: Request, res: Response) => {
     res.status(404).json({ error: 'unknown API endpoint' });
@@ -68,7 +72,7 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
 
-  installSignalHandlers(server, manager, disposeWebSocket);
+  installSignalHandlers(server, manager, disposeWebSocket, workbench);
 }
 
 /**
@@ -101,6 +105,7 @@ function installSignalHandlers(
   server: ReturnType<express.Express['listen']>,
   manager: PiHost,
   disposeWebSocket: () => void,
+  workbench: WorkbenchStore,
 ): void {
   let shuttingDown = false;
 
@@ -132,7 +137,10 @@ function installSignalHandlers(
       },
     );
 
-    void Promise.all([httpClosed, sessionsStopped]).then(() => process.exit(0));
+    void Promise.all([httpClosed, sessionsStopped]).then(() => {
+      workbench.close();
+      process.exit(0);
+    });
 
     const force = setTimeout(() => {
       console.warn('[pi-webx] shutdown timed out; forcing exit');

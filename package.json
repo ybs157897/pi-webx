@@ -11,6 +11,8 @@
     "build": "vite build",
     "start": "cross-env NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc --noEmit",
+    "check:workbench": "tsx scripts/check-workbench-sqlite.ts",
+    "import:workbench-json": "tsx scripts/import-workbench-json.ts",
     "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && tsx scripts/check-session-recency.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts && tsx scripts/check-composer-images.ts && tsx scripts/check-tool-presets.ts"
   },
   "dependencies": {
@@ -23,6 +25,7 @@
     "anser": "^2.3.5",
     "antd": "^6.6.4",
     "antd-style": "^4.1.0",
+    "better-sqlite3": "^12.6.2",
     "clsx": "^2.1.1",
     "cross-env": "^10.1.0",
     "express": "^5.2.1",
@@ -36,6 +39,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/express": "^5.0.5",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
