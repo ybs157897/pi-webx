@@ -24,6 +24,7 @@ import { Composer } from './components/Composer';
 import { readToolPresetPreference } from './components/ToolPresetSelect';
 import { EmptyState } from './components/EmptyState';
 import { QueueDock } from './components/QueueDock';
+import { TaskPanel, todosForPanel } from './components/TaskPanel';
 import { QuestionComposer } from './components/QuestionComposer';
 import type { ModelSelection } from './components/ModelPicker';
 import { BranchSelect } from './components/BranchSelect';
@@ -706,6 +707,15 @@ function Shell({
     return Math.min(100, Math.round(usage.percent));
   }, [session.stats?.contextUsage]);
 
+  /**
+   * 面板看的任务表。等价于 dsh 的 `todos` 投影：每次渲染重扫整篇转写，所以按
+   * 输入（转写 + widget）记忆化，而不是按 session 对象 —— 后者每次事件都换引用。
+   */
+  const todos = useMemo(
+    () => todosForPanel(session.transcript.entries, session.widgets),
+    [session.transcript.entries, session.widgets],
+  );
+
   const menuItems = useMemo(
     () => [
       { key: 'new', icon: <MessageSquarePlus size={13} />, label: '新建会话' },
@@ -984,6 +994,15 @@ function Shell({
           <WidgetStrip widgets={session.widgets} placement="aboveEditor" />
           <StatusStrip api={session} />
         </Flexbox>
+
+        {/* The task panel is the topmost dock entry — dsh's ordering, where the
+            todo dock registers at order 0, above the queue and the composer
+            card. Same column as the composer layer (940px, 20px gutters); the
+            card returns null on an empty list, so the layer costs no height
+            when there is nothing to show. */}
+        <div style={{ flex: 'none', minWidth: 0, padding: '0 20px', maxWidth: 940, margin: '0 auto', width: '100%' }}>
+          <TaskPanel todos={todos} />
+        </div>
 
         {/* The dock hangs above the composer card, outside the box the question
             replaces: a message queued behind a running turn must stay visible

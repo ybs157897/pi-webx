@@ -4,7 +4,15 @@ import { LoaderCircle } from 'lucide-react';
 
 import type { PiSessionApi, WidgetState } from '../lib/usePiSession';
 import { formatTokens } from '../lib/format';
+import { TODO_WIDGET_KEYS } from '../lib/todos';
 import { RetryNotice } from './RetryNotice';
+
+/**
+ * Widget keys the task panel owns (`src/lib/todos.ts`). Their lines are the panel's
+ * own data channel, so drawing them here too would show one state twice — and the
+ * raw form is the TUI text the panel exists to replace.
+ */
+const PANEL_WIDGET_KEYS: ReadonlySet<string> = new Set(TODO_WIDGET_KEYS);
 
 /** Extension-pushed widgets, rendered as preformatted blocks near the composer. */
 export function WidgetStrip({
@@ -14,7 +22,9 @@ export function WidgetStrip({
   widgets: Record<string, WidgetState>;
   placement: WidgetState['placement'];
 }) {
-  const entries = Object.entries(widgets).filter(([, widget]) => widget.placement === placement);
+  const entries = Object.entries(widgets).filter(
+    ([key, widget]) => widget.placement === placement && !PANEL_WIDGET_KEYS.has(key),
+  );
   if (entries.length === 0) return null;
 
   return (

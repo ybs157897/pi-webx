@@ -5,6 +5,10 @@
  * 「纯对话」退出菜单。这次重排不许碰的东西都在这里钉死：底层四值类型与三档
  * 工具集数组一字不动（旧会话记录、server 持久化、pi-web 对齐都压在它们上面），
  * 菜单只是展示层的重排。
+ *
+ * 菜单行后来又不显示工具清单了（每档标签下面那行 `read / grep / find / ls`）：
+ * `hint` 仍是数据层的字段——它就是这一档启用了哪些工具，这里钉着它和工具集一致；
+ * 「菜单 HTML 里没有命令清单」是渲染层的钉子，在 `check-tool-preset-menu.ts`。
  */
 import assert from 'node:assert/strict';
 import {
@@ -57,6 +61,16 @@ assert.ok(
   'none 的 hint 没说清「不启用任何工具」：空工具集的语义必须照实呈现',
 );
 
+// 三档的 hint 仍在数据层：它就是这一档启用了哪些工具。逐串钉住——菜单行删掉了这行
+// 说明，数据层不许跟着一起消失（渲染层的钉子在 check-tool-preset-menu.ts）。
+// `full` 的 hint 是相对 default 的增量描述（「工作区内修改 + 搜索三件套」），
+// 所以它没有逐字再列一遍 bash/read/edit/write。
+assert.deepEqual(
+  TOOL_PRESET_OPTIONS.map((option) => option.hint),
+  ['read / grep / find / ls', 'read / bash / edit / write', '工作区内修改 + grep / find / ls'],
+  '三档 hint 变了：菜单不再显示它，但它仍是数据层对档位的描述',
+);
+
 // 三档工具集逐项不变——这是与 pi-web 对齐的底座，改一个工具名就是语义变更。
 assert.deepEqual(toolNamesForPreset('read-only'), ['read', 'grep', 'find', 'ls'], 'read-only 工具集变了');
 assert.deepEqual(toolNamesForPreset('default'), ['read', 'bash', 'edit', 'write'], 'default 工具集变了');
@@ -102,4 +116,4 @@ assert.equal(
   '垃圾预设值的兜底档变了：非法值必须落到 default 档，而不是按下标摸到哪档算哪档',
 );
 
-console.log('PASS 工具预设：三档权限菜单（仅可查看/工作区内修改/完全权限），none 兼容与工具集底座不动，垃圾值兜底 default');
+console.log('PASS 工具预设：三档权限菜单（仅可查看/工作区内修改/完全权限），none 兼容与工具集底座不动，三档 hint 留在数据层（菜单不再渲染），垃圾值兜底 default');

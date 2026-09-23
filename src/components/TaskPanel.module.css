@@ -1,0 +1,148 @@
+/*
+ * dsh's TodoPanel card
+ * (`deepseek-harness/packages/client/ui-conversation/src/client/skeleton/TodoPanel.module.css`),
+ * re-themed onto this repo's token sheet. Geometry — 0.5px hairline, 12px
+ * radius, `6px 12px` body padding, the 16×16 glyph cell, the 180px list
+ * scrollport, 13px/20px rows — is copied verbatim from that file; the differences
+ * are deliberate and are called out inline below.
+ *
+ * Colours come from `src/ui/theme/design-platform.css` (the `--dsw-alias-*`
+ * sheet QueueDock / ToolCard / Rows already read). dsh's own
+ * `--dsh-composer-*` layout variables are NOT referenced: the card's width,
+ * inset and stacking are the App container's job here (same 940px / 20px column
+ * the composer and the queue dock sit in).
+ */
+.root {
+  box-sizing: border-box;
+  flex: none;
+  overflow: hidden;
+  /* The App column already supplies maxWidth 940 + 20px gutters, so the card
+     just fills it (dsh instead recomputes the composer's clearance here).
+     The 8px bottom gap is this app's addition: dsh's dock stack spaces its
+     entries for it, while here the card would otherwise sit flush on the
+     composer / queue dock. It lives on the card, not on the container, so an
+     absent panel (empty list) leaves no phantom gap. */
+  width: 100%;
+  margin-bottom: 8px;
+  border: 0.5px solid var(--dsw-alias-border-l1);
+  border-radius: 12px;
+  background: var(--dsw-specific-tip);
+  /* Elevated surface: `--dsw-specific-tip` is the same dark rung as the menu
+     surface, and `.list` scrolls inside this card, so the thumb takes the l2
+     elevation pair. Declared on the surface because the custom properties
+     inherit down to `.list` (see `src/ui/theme/base.css` for the rebinding
+     contract). */
+  --dsh-scrollbar-thumb: var(--dsw-alias-scrollbar-bg-l2);
+  --dsh-scrollbar-thumb-hover: var(--dsw-alias-scrollbar-hover-l2);
+}
+
+.body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lead {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.title {
+  flex: none;
+  font-size: 13px;
+  line-height: 24px;
+  font-weight: 500;
+  color: var(--dsw-alias-label-primary);
+}
+
+.progress {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 20px;
+  font-weight: 400;
+  color: var(--dsw-alias-label-tertiary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chevron {
+  display: grid;
+  flex: none;
+  place-items: center;
+  color: var(--dsw-alias-label-tertiary);
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-secondary);
+}
+
+/* The glyphs are 14×14 on the figma artboard; this 16×16 cell centres them
+   (dsh `.glyph`, same numbers). */
+.glyph {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+}
+
+.glyphCompleted {
+  color: var(--dsw-alias-state-success-primary);
+}
+
+.glyphPending {
+  color: var(--dsw-alias-label-caption);
+}
+
+.glyphProgress {
+  color: var(--dsw-alias-state-business-primary);
+  animation: todo-progress-spin 1s linear infinite;
+}
+
+@keyframes todo-progress-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Figma strip is single-line; long items ellipsize with no inline expand. */
+.content {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
