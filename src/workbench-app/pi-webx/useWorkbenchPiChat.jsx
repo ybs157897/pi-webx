@@ -14,9 +14,10 @@ function toChatMessages(entries) {
     if (entry.kind === 'user') {
       messages.push({ id: entry.id, role: 'user', text: entry.text, at: entry.at })
     } else if (entry.kind === 'assistant') {
+      // 输出不再在这里截断：短预览由展示层现算，完整输出要能原样到达可展开区域。
       const tools = entry.tools.map((run) => ({
         name: run.toolName,
-        summary: run.output.slice(0, 160),
+        output: run.output,
       }))
       if (entry.text || tools.length > 0) {
         messages.push({ id: entry.id, role: 'assistant', text: entry.text, at: entry.at, tools })
@@ -27,7 +28,7 @@ function toChatMessages(entries) {
         role: 'tool',
         text: '',
         at: entry.at,
-        tools: [{ name: entry.run.toolName, summary: entry.run.output.slice(0, 160) }],
+        tools: [{ name: entry.run.toolName, output: entry.run.output }],
       })
     } else if (entry.kind === 'notice' && entry.level === 'error') {
       messages.push({ id: entry.id, role: 'error', text: entry.text, at: entry.at })

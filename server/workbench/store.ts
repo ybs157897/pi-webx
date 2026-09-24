@@ -25,6 +25,9 @@ type AtomProfileRow = { module: string; payload: string };
 
 const DEFAULT_PROFILE = { name: '我', motto: '把日子过成想要的样子' };
 
+/** 需要自动维护 createdAt / updatedAt 时间戳的模块。 */
+const STAMPED_MODULES: ReadonlySet<string> = new Set(['works', 'fixes', 'requirements', 'codes']);
+
 export class WorkbenchInputError extends Error {
   readonly status: number;
   constructor(message: string, status = 400) {
@@ -173,7 +176,7 @@ export class WorkbenchStore {
     const record: RecordRow = {
       id: randomUUID(), ...clean,
       ...(module === 'tasks' ? { createdAt: now, doneAt: clean.done ? now : null } : {}),
-      ...(module === 'works' ? { createdAt: now, updatedAt: now } : {}),
+      ...(STAMPED_MODULES.has(module) ? { createdAt: now, updatedAt: now } : {}),
     };
     this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
       .run(module, record.id, JSON.stringify(record));
@@ -187,7 +190,7 @@ export class WorkbenchStore {
     if (!row) throw new WorkbenchInputError('记录不存在', 404);
     const record = { ...parseRecord(row.payload), ...clean };
     if (module === 'tasks' && clean.done !== undefined) record.doneAt = clean.done ? new Date().toISOString() : null;
-    if (module === 'works') record.updatedAt = new Date().toISOString();
+    if (STAMPED_MODULES.has(module)) record.updatedAt = new Date().toISOString();
     this.db.prepare('UPDATE workbench_records SET payload = ? WHERE module = ? AND id = ?')
       .run(JSON.stringify(record), module, id);
     return record;

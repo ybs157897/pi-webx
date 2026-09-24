@@ -5,7 +5,7 @@
  */
 
 /** 数组型模块 key（记录直接挂在 state 下）。 */
-export const ARRAY_MODULES = ['tasks', 'works', 'hotspots', 'exercises', 'meals', 'finance', 'reviews']
+export const ARRAY_MODULES = ['tasks', 'works', 'hotspots', 'exercises', 'meals', 'finance', 'reviews', 'fixes', 'logs', 'requirements', 'codes']
 
 /** 资料+时间轴型模块 key（{ profile, records }）。 */
 export const ATOM_MODULES = ['pets', 'relationships']
@@ -24,6 +24,10 @@ export const MODULE_LABELS = {
   reviews: '每日复盘',
   pets: '宠物日记',
   relationships: '亲密关系',
+  fixes: '问题修复',
+  logs: '日志查询',
+  requirements: '需求管理',
+  codes: '代码开发',
 }
 
 /** 本机今天，格式 YYYY-MM-DD。 */
@@ -65,6 +69,9 @@ const FIELDS = {
   },
   status: {
     check: v => ['todo', 'doing', 'done'].includes(v), cast: v => (['todo', 'doing', 'done'].includes(v) ? v : 'todo'), message: '状态只能是 todo/doing/done',
+  },
+  level: {
+    check: v => ['info', 'warn', 'error'].includes(v), cast: v => (['info', 'warn', 'error'].includes(v) ? v : 'info'), message: '级别只能是 info/warn/error',
   },
   meal: {
     check: v => ['breakfast', 'lunch', 'dinner', 'snack'].includes(v), cast: v => v, message: '餐次只能是 breakfast/lunch/dinner/snack',
@@ -149,6 +156,30 @@ const MODULE_SCHEMA = {
     lessons: { ...FIELDS.note, default: '' },
     mood: { ...FIELDS.mood, default: 4 },
     tomorrow: { ...FIELDS.note, default: '' },
+  },
+  fixes: {
+    title: { ...FIELDS.title, required: true },
+    priority: { ...FIELDS.priority, default: 'normal' },
+    status: { ...FIELDS.status, default: 'todo' },
+    note: { ...FIELDS.note, default: '' },
+  },
+  logs: {
+    text: { ...FIELDS.text, required: true },
+    level: { ...FIELDS.level, default: 'info' },
+    source: { ...FIELDS.tag, default: '' },
+    date: { ...FIELDS.date, default: () => todayISO() },
+  },
+  requirements: {
+    title: { ...FIELDS.title, required: true },
+    priority: { ...FIELDS.priority, default: 'normal' },
+    status: { ...FIELDS.status, default: 'todo' },
+    note: { ...FIELDS.note, default: '' },
+  },
+  codes: {
+    title: { ...FIELDS.title, required: true },
+    project: { ...FIELDS.tag, default: '' },
+    status: { ...FIELDS.status, default: 'todo' },
+    note: { ...FIELDS.note, default: '' },
   },
 }
 

@@ -23,6 +23,8 @@
   --fill: rgba(0, 0, 0, .04);
   --fill-strong: rgba(0, 0, 0, .07);
   --font: -apple-system, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif;
+  /* 等宽栈：文件树标题、编辑器、工具输出等代码/表格类文字统一用它。 */
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 * { box-sizing: border-box; }
@@ -294,6 +296,11 @@ a:hover { text-decoration: underline; }
 .grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .grid-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .grid-hero { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+/* 需求 / 代码两栏：左栏条目列表，右栏阅读或编辑；窄屏堆叠见断点处。 */
+.split { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.split-list { min-width: 0; }
+.split-list-body { display: flex; flex-direction: column; gap: 10px; }
+.split-main { min-width: 0; }
 .stack { display: flex; flex-direction: column; gap: 16px; }
 .row { display: flex; align-items: center; gap: 10px; }
 .row-wrap { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -302,6 +309,8 @@ a:hover { text-decoration: underline; }
 .muted { color: var(--text-2); }
 .small { font-size: 12.5px; }
 .tiny { font-size: 11.5px; }
+/* 行内 / 状态栏时间戳。注意别把 .work-card-foot .time 的 margin-left:auto 挪进来。 */
+.time { font-size: 11px; color: var(--text-2); }
 .break { word-break: break-word; overflow-wrap: anywhere; }
 
 /* ---------- 主页 hero ---------- */
@@ -488,6 +497,14 @@ a:hover { text-decoration: underline; }
 .form-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .form-hint { font-size: 11.5px; color: var(--text-2); }
 
+/* 小号控件：行内 select、编辑器工具条用；只降高度与字号，其余沿用默认控件。 */
+.control-sm { height: 28px; font-size: 12.5px; }
+/* 高度变了，select 的下拉箭头要跟着回到垂直中心。 */
+.select.control-sm { background-position: calc(100% - 16px) 12px, calc(100% - 11px) 12px; }
+
+/* Fixes 快速添加区：输入框独占一行，与下面的清单拉开距离。 */
+.quick-add { margin-bottom: 12px; }
+
 .check {
   appearance: none;
   -webkit-appearance: none;
@@ -520,6 +537,18 @@ a:hover { text-decoration: underline; }
 
 /* ---------- 列表 ---------- */
 
+/* Logs 当前条件条：条件 chips + 命中数 + 清除按钮，一行放不下就折行。 */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-sm);
+  background: var(--fill);
+}
+
 .list { display: flex; flex-direction: column; }
 .list-item {
   display: flex;
@@ -535,8 +564,34 @@ a:hover { text-decoration: underline; }
 .item-title.is-done { color: var(--text-2); text-decoration: line-through; }
 .item-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: var(--text-2); }
 .item-note { font-size: 12.5px; color: var(--text-2); margin-top: 4px; white-space: pre-wrap; }
+/* 备注首行预览：盖掉 .item-note 的 pre-wrap，只留两行。 */
+.note-preview {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  white-space: normal;
+}
 .item-actions { display: flex; align-items: center; gap: 2px; flex: none; opacity: 0; transition: opacity .16s ease; }
 .item-actions.always { opacity: 1; }
+
+/* 可点击条目（Requirements 左栏 / Codes 文件树）：整行 button，外观对齐 .review-item。 */
+.entry-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 11px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition: background .16s ease, border-color .16s ease;
+}
+
+.entry-btn:hover { background: var(--fill); }
+.entry-btn.is-active { background: rgba(0, 113, 227, .08); border-color: rgba(0, 113, 227, .3); }
 
 .group-head {
   display: flex;
@@ -552,6 +607,130 @@ a:hover { text-decoration: underline; }
 .amount { font-variant-numeric: tabular-nums; font-weight: 600; }
 .amount.income { color: var(--ok); }
 .amount.expense { color: var(--danger); }
+
+/* ---------- 两栏工作区：需求阅读 / 代码编辑 ---------- */
+
+.reader { display: flex; flex-direction: column; gap: 12px; }
+.reader-title { font-size: 18px; font-weight: 620; }
+/* 备注正文保留换行；占位高度让空备注时操作行也有个着落。 */
+.reader-body { font-size: 13.5px; line-height: 1.75; white-space: pre-wrap; word-break: break-word; min-height: 120px; }
+/* 底部操作行：贴住阅读区底部，与正文之间一条分隔线。 */
+.reader-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* Codes 左栏文件树：按 project 分组，组头是小号灰字。 */
+.tree-group { display: flex; flex-direction: column; gap: 2px; }
+.tree-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 4px 2px;
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+/* 文件树行：等宽标题 + 脏圆点 + 状态 chip，横排（entry-btn 默认是纵排条目）。 */
+.tree-item { flex-direction: row; align-items: center; gap: 8px; padding: 8px 10px; }
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 未保存圆点：树行与编辑器 tab 共用。 */
+.dot-dirty { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--warn); }
+
+.editor { display: flex; flex-direction: column; gap: 12px; }
+.editor-tabs { display: flex; align-items: center; gap: 6px; }
+.editor-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, .72);
+  font-size: 12.5px;
+  min-width: 0;
+  max-width: 100%;
+}
+.editor-tab.is-active { border-color: rgba(0, 113, 227, .35); background: rgba(0, 113, 227, .08); color: var(--accent); }
+.editor-tab .tree-name { flex: 0 1 auto; }
+
+/* 工具条三列：标题宽、项目与状态窄；窄屏单列（断点处统一处理）。 */
+.editor-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1fr);
+  gap: 10px;
+  align-items: end;
+}
+
+.editor-area {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, .9);
+  overflow: hidden;
+}
+
+/* 行号槽：行高必须与 .editor-input 一致，否则行号和文字会错位。 */
+.editor-gutter {
+  flex: none;
+  width: 44px;
+  padding: 12px 8px;
+  text-align: right;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text-2);
+  background: var(--fill);
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+.editor-gutter span { display: block; }
+
+.editor-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  resize: none;
+  padding: 12px;
+  min-height: 320px;
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--text);
+}
+
+.editor-input:focus { outline: none; }
+.editor-input::placeholder { color: rgba(110, 110, 115, .72); }
+
+.editor-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+
+/* 保存按钮推到状态栏最右。 */
+.editor-status .btn { margin-left: auto; }
 
 /* ---------- 看板 ---------- */
 
@@ -796,12 +975,8 @@ a:hover { text-decoration: underline; }
   box-shadow: 0 6px 16px rgba(0, 113, 227, .22);
 }
 
-.msg.assistant .bubble {
-  background: rgba(255, 255, 255, .95);
-  border: 1px solid var(--line);
-  border-bottom-left-radius: 5px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .05);
-}
+/* 助手正文不再用气泡：直接铺满面板宽，与 /chat 一致（旧的 .msg.assistant .bubble 已随之作废）。 */
+.msg-body { width: 100%; min-width: 0; font-size: 13.5px; }
 
 .msg.error .bubble { background: rgba(255, 59, 48, .1); border: 1px solid rgba(255, 59, 48, .3); color: #b3261e; }
 .msg-time { font-size: 10.5px; color: var(--text-2); margin: 4px 6px 0; }
@@ -820,6 +995,31 @@ a:hover { text-decoration: underline; }
 
 .tool-line .tool-name { font-weight: 600; }
 .tool-line .tool-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Markdown 正文容器（AssistantMarkdown 根元素）。white-space:normal 必须写：
+   它会盖掉从 .bubble 继承来的 pre-wrap，否则换行全乱。 */
+.chat-md { width: 100%; min-width: 0; font-size: 13.5px; line-height: 1.6; word-break: break-word; white-space: normal; }
+/* 代码块全宽可滚动；表格 display:block 才能真的横向滚（table 上的 overflow 不生效）。 */
+.chat-md pre { max-width: 100%; overflow: auto; }
+.chat-md table { display: block; max-width: 100%; overflow-x: auto; }
+
+/* 一条工具行：摘要行 + 可展开的完整输出。 */
+.tool-entry { display: flex; flex-direction: column; gap: 4px; }
+.tool-details { font-size: 11.5px; color: var(--text-2); }
+.tool-details summary { cursor: pointer; }
+.tool-output {
+  margin: 4px 0 0;
+  padding: 8px 10px;
+  max-height: 220px;
+  overflow: auto;
+  border-radius: 10px;
+  background: var(--fill);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
 
 .composer { padding: 12px 14px calc(14px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); }
 .composer-box {
@@ -1015,6 +1215,8 @@ a:hover { text-decoration: underline; }
   .main { padding: 18px 14px 36px; }
   .card { padding: 15px; }
   .form-row { grid-template-columns: 1fr; }
+  /* 需求 / 代码两栏与编辑器工具条在窄屏堆叠。 */
+  .split, .editor-toolbar { grid-template-columns: 1fr; }
 }
 
 /* ---------- 断点 3：<640px ---------- */
@@ -1052,6 +1254,7 @@ a:hover { text-decoration: underline; }
   .grid-4, .grid-2, .grid-3 { grid-template-columns: 1fr; }
   .hot-grid { grid-template-columns: 1fr; }
   .form-row { grid-template-columns: 1fr; }
+  .split, .editor-toolbar { grid-template-columns: 1fr; }
   .card { padding: 15px; border-radius: 16px; }
   .item-actions { opacity: 1; }
   .donut { justify-content: center; }

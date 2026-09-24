@@ -224,3 +224,40 @@ export const IconAlert = icon(
     <circle cx="12" cy="16" r="0.9" fill="currentColor" stroke="none" />
   </>,
 )
+
+export const IconBug = icon(
+  <>
+    <rect x="8.2" y="7.6" width="7.6" height="11.4" rx="3.8" />
+    <path d="M9.2 7.2a2.8 2.8 0 0 1 5.6 0" />
+    <path d="M12 4.4V3" />
+    <path d="M8.2 10.8H4.8M8.4 15h-3M15.8 10.8h3.4M15.6 15h3" />
+    <path d="M12 10.6v6.4" />
+  </>,
+)
+
+export const IconLogs = icon(
+  <>
+    <path d="M14.4 3.4H7.2A1.8 1.8 0 0 0 5.4 5.2v13.6a1.8 1.8 0 0 0 1.8 1.8h3.4" />
+    <path d="M14.4 3.4 18.6 7.6v3" />
+    <path d="M14.4 3.4v4.2h4.2" />
+    <path d="M8.6 12.4h3.2M8.6 15.6h1.8" />
+    <circle cx="16.2" cy="16.2" r="3.2" />
+    <path d="m18.6 18.6 2.2 2.2" />
+  </>,
+)
+
+export const IconRequirements = icon(
+  <>
+    <rect x="5" y="4.8" width="14" height="15.6" rx="3" />
+    <path d="M9.2 4.8V4a1.6 1.6 0 0 1 1.6-1.6h2.4A1.6 1.6 0 0 1 14.8 4v0.8" />
+    <path d="M8.8 10.6h6.4M8.8 14h6.4M8.8 17.4h3.6" />
+  </>,
+)
+
+export const IconCode = icon(
+  <>
+    <path d="M8.4 7.2 3.8 12l4.6 4.8" />
+    <path d="M15.6 7.2 20.2 12l-4.6 4.8" />
+    <path d="M13.4 5.6l-2.8 12.8" />
+  </>,
+)

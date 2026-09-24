@@ -1,4 +1,4 @@
-export const ARRAY_MODULES: readonly ['tasks', 'works', 'hotspots', 'exercises', 'meals', 'finance', 'reviews'];
+export const ARRAY_MODULES: readonly ['tasks', 'works', 'hotspots', 'exercises', 'meals', 'finance', 'reviews', 'fixes', 'logs', 'requirements', 'codes'];
 export const ATOM_MODULES: readonly ['pets', 'relationships'];
 export const MODULE_LABELS: Record<string, string>;
 

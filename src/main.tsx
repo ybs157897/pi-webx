@@ -27,7 +27,7 @@ createRoot(container).render(
     <Suspense fallback={<div style={{ padding: 32 }}>正在打开工作台…</div>}>
       {showAgent
         ? <ConfigProvider motion={motion}><AgentApp /></ConfigProvider>
-        : <WorkbenchRoot />}
+        : <ConfigProvider motion={motion}><WorkbenchRoot /></ConfigProvider>}
     </Suspense>
   </StrictMode>,
 );

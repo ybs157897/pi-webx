@@ -3,7 +3,8 @@
  *
  * 数据流：pi-webx SQLite 接口一次拉全量 → `data`/`profile` 两个顶层状态；
  * 任何写操作都经 `mutate(action, okText)`：保存 → 重新拉 state → 轻提示。
- * 右侧对话使用独立的 pi-webx 会话客户端，不充当模块数据权威。
+ * 右侧对话使用独立的 pi-webx 会话客户端，不充当模块数据权威；
+ * 面板正文复用 /chat 那套 @lobehub/ui Markdown（pi-webx/AssistantMarkdown.jsx），渲染与正文一致。
  * 模块统一 props：`data`、`profile`、`mutate`、`refresh`、`notify`、`navigate`、`modules`。
  * @module src/App
  */
@@ -11,38 +12,33 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api.mjs'
 import { useWorkbenchPiChat } from './pi-webx/useWorkbenchPiChat.jsx'
+import AssistantMarkdown from './pi-webx/AssistantMarkdown.jsx'
 import { PiDialog } from './pi-webx/PiDialog.jsx'
 import {
   Card, ConfirmDialog, IconButton, Modal, ToastHost, useMediaQuery,
 } from './ui.jsx'
 import {
-  IconClose, IconHeart, IconHome, IconMeal, IconMenu, IconPanel, IconPaw, IconRefresh, IconReview,
-  IconPlus, IconRun, IconSend, IconSparkles, IconTasks, IconTrend, IconWallet, IconWorks,
+  IconClose, IconCode, IconHome, IconLogs, IconMenu, IconPanel,
+  IconPlus, IconRefresh, IconRequirements, IconSend, IconSparkles, IconTasks, IconWorks, IconBug,
 } from './icons.jsx'
 import { formatStamp } from './util.mjs'
 import Dashboard from './modules/Dashboard.jsx'
 import Tasks from './modules/Tasks.jsx'
 import Works from './modules/Works.jsx'
-import Hotspots from './modules/Hotspots.jsx'
-import Exercises from './modules/Exercises.jsx'
-import Meals from './modules/Meals.jsx'
-import Finance from './modules/Finance.jsx'
-import Pets from './modules/Pets.jsx'
-import Relationships from './modules/Relationships.jsx'
-import Reviews from './modules/Reviews.jsx'
+import Fixes from './modules/Fixes.jsx'
+import Logs from './modules/Logs.jsx'
+import Requirements from './modules/Requirements.jsx'
+import Codes from './modules/Codes.jsx'
 
 /** 菜单注册表：左侧菜单、移动端抽屉、底部 tab、主页动态卡片都从这里取。 */
 const MODULES = [
   { id: 'dashboard', label: '我的主页', desc: '今天的全局一屏', icon: IconHome, Component: Dashboard },
   { id: 'tasks', label: '今日规划', desc: '待办、优先级与截止日', icon: IconTasks, Component: Tasks },
   { id: 'works', label: '工作助理', desc: '待办 / 进行中 / 已完成看板', icon: IconWorks, Component: Works },
-  { id: 'hotspots', label: '行业热点', desc: '值得留意的消息卡片', icon: IconTrend, Component: Hotspots },
-  { id: 'exercises', label: '运动打卡', desc: '时长记录与趋势', icon: IconRun, Component: Exercises },
-  { id: 'meals', label: '饮食记录', desc: '热量与餐次明细', icon: IconMeal, Component: Meals },
-  { id: 'finance', label: '本月收支', desc: '流水、分类与结余', icon: IconWallet, Component: Finance },
-  { id: 'pets', label: '宠物日记', desc: '资料卡与时间轴', icon: IconPaw, Component: Pets },
-  { id: 'relationships', label: '亲密关系', desc: '纪念日与心情记录', icon: IconHeart, Component: Relationships },
-  { id: 'reviews', label: '每日复盘', desc: '收获、教训与明日打算', icon: IconReview, Component: Reviews },
+  { id: 'fixes', label: '问题修复', desc: '问题清单、严重程度与状态流转', icon: IconBug, Component: Fixes },
+  { id: 'logs', label: '日志查询', desc: '对话框式检索与记录开发日志', icon: IconLogs, Component: Logs },
+  { id: 'requirements', label: '需求管理', desc: '需求知识库：搜索、列表与阅读视图', icon: IconRequirements, Component: Requirements },
+  { id: 'codes', label: '代码开发', desc: '文件树 + 编辑器工作区', icon: IconCode, Component: Codes },
 ]
 
 /** 底部 tab 的固定四项 + AI 入口。 */
@@ -51,6 +47,7 @@ const TABS = ['dashboard', 'tasks', 'works']
 /** 空数据兜底：`data` 归一化用（服务端字段缺失时不至于让模块崩）。 */
 const EMPTY_DATA = {
   tasks: [], works: [], hotspots: [], exercises: [], meals: [], finance: [], reviews: [],
+  fixes: [], logs: [], requirements: [], codes: [],
   pets: { profile: {}, records: [] },
   relationships: { profile: {}, records: [] },
 }
@@ -82,6 +79,7 @@ const TEXT = {
   refreshed: '数据已是最新',
   clear: '已开始新对话',
   tools: '工具',
+  toolFull: '完整输出',
 }
 
 /**
@@ -105,6 +103,10 @@ function normalizeData(raw) {
     meals: safeArray('meals'),
     finance: safeArray('finance'),
     reviews: safeArray('reviews'),
+    fixes: safeArray('fixes'),
+    logs: safeArray('logs'),
+    requirements: safeArray('requirements'),
+    codes: safeArray('codes'),
     pets: safeAtom('pets'),
     relationships: safeAtom('relationships'),
   }
@@ -300,7 +302,7 @@ export default function App() {
         </div>
       </header>
 
-      <div className="chat-scroll" ref={scrollRef}>
+      <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
         {chat.length === 0 && (
           <div className="chat-empty">
             <span className="empty-icon"><IconSparkles size={22} /></span>
@@ -476,7 +478,7 @@ export default function App() {
       />
 
       <Modal open={dataToolsOpen} title="SQLite 数据" onClose={() => setDataToolsOpen(false)}>
-        <p className="small muted">十个模块的数据保存在本机 SQLite。直接导入旧版 JSON 不包含图片文件；配套 pi-webx 的迁移脚本可连同旧图片一起搬迁，原文件不会被修改。</p>
+        <p className="small muted">全部模块的数据保存在本机 SQLite。直接导入旧版 JSON 不包含图片文件；配套 pi-webx 的迁移脚本可连同旧图片一起搬迁，原文件不会被修改。</p>
         <div className="form-row" style={{ marginTop: '16px' }}>
           <button type="button" className="btn" onClick={exportData}>导出 JSON 备份</button>
           <label className="btn" style={{ cursor: 'pointer' }}>
@@ -493,41 +495,71 @@ export default function App() {
   )
 }
 
+/** 工具行短预览：取第一行、折叠空白、截到 160 字；空输出返回空串（免得渲染出孤零零的「· 」）。 */
+function previewOf(output) {
+  const first = String(output ?? '').split('\n')[0] ?? ''
+  const flat = first.replace(/\s+/g, ' ').trim()
+  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat
+}
+
 /**
- * 一条聊天记录：用户气泡、管家气泡、工具活动行、错误气泡。
+ * 工具活动行：一行摘要 + 可展开的完整输出。
+ * assistant 消息附属的 tools 与独立的 toolResult 消息共用它——
+ * useWorkbenchPiChat 会为每条 toolResult 单独发一条 role:'tool' 消息，
+ * 只渲染其中一条路径会让完整输出在真实会话里几乎看不到。
+ */
+function ToolRows({ tools }) {
+  const items = Array.isArray(tools) ? tools : []
+  if (items.length === 0) return null
+  return (
+    <div className="msg tool" data-testid="chat-tool-row">
+      {items.map((tool, index) => {
+        const summary = previewOf(tool.output)
+        return (
+          <div className="tool-entry" key={`${tool.name}-${index}`} data-testid="chat-tool-entry">
+            <p className="tool-line">
+              <span aria-hidden="true">🔧</span>
+              <span className="tool-name">{tool.name}</span>
+              {summary !== '' && <span className="tool-summary">· {summary}</span>}
+            </p>
+            {tool.output !== '' && (
+              <details className="tool-details" data-testid="chat-tool-details">
+                <summary>{TEXT.toolFull}</summary>
+                <pre className="tool-output">{tool.output}</pre>
+              </details>
+            )}
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * 一条聊天记录：用户气泡（正文走 Markdown）、助手正文（无气泡，与 /chat 一致）、
+ * 工具行、错误气泡。
  * @param props - `message` 为 chatLog 或本地流式拼出来的消息。
  * @returns 消息元素。
  */
 function ChatMessage({ message }) {
   const time = formatStamp(message.at)
-  if (message.role === 'tool') {
-    const items = Array.isArray(message.tools) ? message.tools : []
-    return (
-      <div className="msg tool">
-        {items.map((tool, index) => (
-          <p className="tool-line" key={`${tool.name}-${index}`}>
-            <span aria-hidden="true">🔧</span>
-            <span className="tool-name">{tool.name}</span>
-            {tool.summary !== '' && <span className="tool-summary">· {tool.summary}</span>}
-          </p>
-        ))}
-      </div>
-    )
-  }
+  if (message.role === 'tool') return <ToolRows tools={message.tools} />
   return (
-    <div className={`msg ${message.role}`}>
-      {Array.isArray(message.tools) && message.tools.length > 0 && (
-        <div className="msg tool">
-          {message.tools.map((tool, index) => (
-            <p className="tool-line" key={`${tool.name}-${index}`}>
-              <span aria-hidden="true">🔧</span>
-              <span className="tool-name">{tool.name}</span>
-              {tool.summary !== '' && <span className="tool-summary">· {tool.summary}</span>}
-            </p>
+    <div className={`msg ${message.role}`} data-testid={`chat-msg-${message.role}`}>
+      <ToolRows tools={message.tools} />
+      {message.text !== '' && (message.role === 'error'
+        ? <p className="bubble">{message.text}</p>
+        : message.role === 'user'
+          ? (
+            <div className="bubble" data-testid="chat-msg-bubble">
+              <AssistantMarkdown text={message.text} />
+            </div>
+          )
+          : (
+            <div className="msg-body" data-testid="chat-msg-body">
+              <AssistantMarkdown text={message.text} />
+            </div>
           ))}
-        </div>
-      )}
-      {message.text !== '' && <p className="bubble">{message.text}</p>}
       {time !== '' && <span className="msg-time">{time}</span>}
     </div>
   )
