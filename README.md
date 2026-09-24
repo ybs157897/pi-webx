@@ -26,11 +26,14 @@ logs the embedded pi SDK version at startup; on older Node it fails there, at bo
 
 ## Personal workbench
 
-The default page (`/`) is the ten-module AI personal workbench migrated from the
-`ai-workbench` frontend. The original full Pi interface remains at `/chat`; both pages
+The default page (`/`) is the eight-module AI personal workbench migrated from the
+`ai-workbench` frontend: 我的主页 (dashboard), 今日规划 (tasks), 工作助理 (works),
+问题修复 (fixes), 日志查询 (logs), 需求管理 (requirements), 代码开发 (codes) and
+知识库 (knowledge). The original full Pi interface remains at `/chat`; both pages
 use this repository's session client and one local bridge process. The workbench's
-records use the SQLite API below, while Pi conversations retain their own session logs.
-The agent does not yet have tools to read or edit workbench records.
+records use the SQLite API below, while Pi conversations retain their own session
+logs. The agent can read the knowledge library through the knowledge REST tool —
+see `docs/workbench-knowledge-protocol.md` for the read/write contract.
 
 ## AI personal workbench storage
 
@@ -124,10 +127,20 @@ unchanged from the earlier subprocess design, only the engine differs.
 - `server/models-config.ts` — atomic CRUD over pi's `models.json`.
 - `src/shared/protocol.ts` — the wire contract.
 - `src/shared/uikit.ts` — the component-spec schema plus `normalizeUiSpec`.
+- `src/App.tsx` → `src/app/` — the chat shell is a thin composition root; its hooks
+  and sub-views live in `src/app/` (one responsibility per file).
+- `src/lib/transcript/` — the transcript reducer (guards → blocks → tool runs →
+  turns → events → fold), barrel-exported from `index.ts`.
 - `src/lib/usePiSession.ts` — the React bridge: SSE, dialogs, statuses, widgets.
 - `src/lib/todos.ts` — the todo tool's projection: whole-list snapshots, last-write-wins.
 - `src/components/TaskPanel.tsx` — dsh's todo dock (header counts + three-status rows).
 - `src/components/uikit/` — the spec renderer and showcase.
+- `server/agent-definitions/` — user sub-agent store: `policy` / `validation` /
+  `merge` / `store`, barrel-exported from `index.ts`.
+- `server/agent-team/` — the team runtime: `team-runtime.ts` (orchestrating class)
+  delegating to `team-ops-*` / `team-snapshot` / `team-views` pure modules.
+
+A fuller feature-to-file map lives in `docs/code-map.md`.
 
 ### How state stays correct
 
@@ -158,7 +171,10 @@ agent does.
 | `npm run build` | production bundle into `dist/` |
 | `npm start` | production: SPA + API on `http://127.0.0.1:8787` |
 | `npm run typecheck` | `tsc --noEmit` across `src/` and `server/` |
-| `npx tsx scripts/check-transcript.ts` | 20 assertions over the transcript reducer |
+| `npm run check` | the full gate chain (every `scripts/check-*.ts` below) |
+| `npm run check:workbench` | workbench SQLite + HTTP behavior assertions |
+| `npm run check:workbench-ui` | SSR-rendered DOM assertions, `data-testid` only |
+| `npx tsx scripts/check-transcript.ts` | assertions over the transcript reducer |
 
 ## Configuration
 

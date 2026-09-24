@@ -1,5 +1,7 @@
 # 手测说明：用户子智能体（定义 / 配置 / 同步派发）
 
+> **2026-09-24 状态更新**：子智能体功能**已并入主树**（`server/agent-definitions/`、`server/pi/subagent-*.ts`、`src/components/settings/AgentDefinitionsSection.tsx`），下文"验特性必须用 8788（主树无此功能）"的口径**已失效**——主树 dev 服务即可验证。实现路径在 2026-09-24 拆分轮次后有变化，现行位置见 `docs/code-map.md`。
+
 > **2026-09-22 后续修复**：已修复 6 项运行时问题并拆分代码职责，现行规则见[生命周期与权限边界修复](../../notes/implemented/bug-fix/2026-09-22-subagent-lifecycle-boundaries.md)。新增 `check-subagent-lifecycle.ts` / `check-subagent-boundaries.ts`。`selected` 缺工具现在会失败，`all` 缺工具会在模型可见文本中说明；子扩展初始化与用户交互已接入父 UI；超时覆盖初始化。取消后不响应的同进程工作仍保留容量，待实际退出后释放。下方既有 TC / live 结果保留历史口径，不因本次修复重新宣称 live PASS。
 
 Status: **封版 — 自动委派 3 次样本均已发生：**TC-12 记 PARTIAL**（2 次历史权限 FAIL + 修后 1 次 PASS 13/13；该 TC 门槛为 3/3 全条件通过）· 安全 blocker 已修复并经独立 host 验 7/7 + live r3 确认 · **界面已按 ZCode 1:1 重写（color / injectAgentsMd / 名称 3..50 码点）** · **内置两个智能体已落地（虚拟条目、只读、恒启用 ⇒ `subagent` 默认注册）** · **本轮语义已改：真并发（超限排队）、只读豁免、失败走 `isError` + 错误文本** · **提示词两处修正（preamble 逃生口 + Explore breadth 句）与逐字比对守卫已落地** · **验特性必须用 8788（主树 5173/8787 无此功能）** · **工程门禁：task-76 四项 exit 0；提示词轮 task-77 亦四项 exit 0** · 测试任务已完成，不再追加模型轮次**
