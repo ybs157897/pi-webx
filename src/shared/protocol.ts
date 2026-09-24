@@ -315,7 +315,17 @@ export interface PiExtensionUiResponse {
   cancelled?: boolean;
 }
 
+export interface SubagentUiOrigin {
+  kind: 'subagent';
+  agentId: string;
+  agentName: string;
+  runId: string;
+  toolCallId?: string;
+}
+
 export interface PiExtensionUiRequest {
+  /** Which child owns this interaction; absent for a parent extension. */
+  origin?: SubagentUiOrigin;
   type: 'extension_ui_request';
   id: string;
   method: PiExtensionUiMethod;
@@ -583,6 +593,8 @@ export interface CreateSessionRequest {
   sessionId?: string;
   /** Start with session persistence disabled (`--no-session`). */
   noSession?: boolean;
+  /** Create an Agent Team; a stored Team is reattached automatically on resume. */
+  teamMode?: boolean;
   /**
    * Builtin tools this session should start with — the browser's preset. A
    * resumed session ignores it in favour of the selection in its own log.

@@ -11,8 +11,15 @@ import {
 import { useSessionCwd } from '../lib/session-cwd';
 import { terminalCard, terminalTitle } from '../lib/terminal-card';
 import {
+  parseTodoList,
+  planSummary,
+  todoItemsFromArgs,
+  TODO_TOOL_NAME,
+} from '../lib/todos';
+import {
   IconApiOutline14,
   IconBrowseOutline16,
+  IconChecklistOutline14,
   IconCodeOutline16,
   IconEditOutline16,
   IconFolderClose16,
@@ -32,7 +39,8 @@ import css from './ToolCard.module.css';
  * this app vendors from the same source: browse for reads, the prompt glyph for
  * shells, the pencil for mutations, the magnifier for searches, a sparkle for
  * anything unrecognised. `ls` has no dsh row of its own — it is the read family
- * there — so it borrows the folder glyph.
+ * there — so it borrows the folder glyph. `todo` is dsh's own row
+ * (`toolviews/todo-row.tsx`) and wears its checklist glyph.
  */
 function toolGlyph(toolName: string): ReactNode {
   switch (toolName) {
@@ -51,6 +59,8 @@ function toolGlyph(toolName: string): ReactNode {
       return <IconFolderClose16 size={14} />;
     case 'code':
       return <IconCodeOutline16 size={14} />;
+    case TODO_TOOL_NAME:
+      return <IconChecklistOutline14 />;
     default:
       return <IconSparkle16 size={14} />;
   }
@@ -59,6 +69,38 @@ function toolGlyph(toolName: string): ReactNode {
 function firstLine(text: string): string {
   const newline = text.indexOf('\n');
   return newline === -1 ? text : text.slice(0, newline);
+}
+
+/** dsh's `todo.rowTitle`: the row names the thing, not the tool id. */
+const TODO_ROW_TITLE = '任务';
+
+/**
+ * The `todo` row's summary, derived the way dsh's own todo row derives it
+ * (`ui-tool/.../toolviews/todo-row.tsx` over `plan-summary.ts`): `d/t 已完成`
+ * plus the first in-progress task's name.
+ *
+ * A todo call sends the *whole* list, so one run is one plan snapshot — the
+ * result's `details.todos` once it has landed, the call's own args while the
+ * call is still streaming. Both are read through `lib/todos`, the same
+ * projections the task panel uses, so the row and the panel can never disagree
+ * about what the plan is; the two halves (`text` and `extra`) stay split
+ * because a narrow row may clip the task name but must never clip the count of
+ * the other running tasks (see the suffix span in the row).
+ *
+ * `null` means "no plan to show" — no snapshot yet, an unparseable one, or a
+ * failed call — and the row then keeps the generic summary, exactly as the
+ * reference falls back to its model summary.
+ */
+function todoRowParts(run: ToolRun): { text: string; extra: number } | null {
+  if (run.status === 'error') return null;
+  const todos = parseTodoList(run.details) ?? todoItemsFromArgs(run.args);
+  if (todos === null) return null;
+  const { done, total, activeContent, activeExtra } = planSummary(todos);
+  const head = `${done}/${total} 已完成`;
+  return {
+    text: activeContent === null ? head : `${head} · ${activeContent}`,
+    extra: activeExtra,
+  };
 }
 
 /**
@@ -163,7 +205,21 @@ export function ToolCard({ run }: { run: ToolRun }) {
   // restated in the expanded body anyway. A failure that carries no result text
   // keeps the ordinary summary, so the row never degrades to a bare title.
   const failureLine = failed ? firstLine(run.output) : '';
-  const summaryText = failureLine !== '' ? failureLine : summary;
+  const genericSummary = failureLine !== '' ? failureLine : summary;
+
+  // A todo call is dsh's own row shape, not the generic one: the checklist
+  // glyph and the `任务` title are that row's identity (they hold even when the
+  // summary has to fall back), and the summary is the plan's counts rather than
+  // the raw args JSON the generic path would print — `todo · {"action":"add"…}`
+  // said nothing about what the call did.
+  const isTodoRow = run.toolName === TODO_TOOL_NAME;
+  const todo = isTodoRow ? todoRowParts(run) : null;
+  const summaryText = todo === null ? genericSummary : todo.text;
+  // The other tasks running in parallel ride in their own non-shrinking span
+  // (see the row) instead of being appended to `summaryText`, which is the half
+  // the row ellipsizes. A failure says one thing and drops the count, as dsh's
+  // `suffix = failureLine === null ? summarySuffix : null` does.
+  const activeExtra = todo === null ? 0 : todo.extra;
 
   // A tool whose arguments the row summary already spells out shows only its
   // result when expanded. dsh draws its single-file tools this way — the row is
@@ -180,10 +236,12 @@ export function ToolCard({ run }: { run: ToolRun }) {
   // every other tool, which keeps the section stack below.
   const terminal = useMemo(() => terminalCard(run, cwd), [run, cwd]);
   // The row's leading word: dsh prints a localized title, so a shell row reads
-  // `Bash · …` where pi's tool id is lowercase. Only the terminal card's tools
-  // are titled here; the generic rows keep pi's own names, since re-titling them
-  // is a separate change with its own reference rows.
-  const title = terminal === null ? run.toolName : terminalTitle(run.toolName);
+  // `Bash · …` where pi's tool id is lowercase, and a todo row reads `任务`
+  // (dsh's `todo.rowTitle`) where pi's is `todo`. The generic rows keep pi's own
+  // names, since re-titling them is a separate change with its own reference rows.
+  const title = isTodoRow
+    ? TODO_ROW_TITLE
+    : terminal === null ? run.toolName : terminalTitle(run.toolName);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -195,7 +253,7 @@ export function ToolCard({ run }: { run: ToolRun }) {
         role="button"
         tabIndex={0}
         aria-expanded={open}
-        aria-label={`${title} ${summaryText}`}
+        aria-label={`${title} ${summaryText}${activeExtra > 0 ? ` +${activeExtra}` : ''}`}
         onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setManual(!open); } }}
         onClick={() => setManual(!open)}
         onMouseEnter={() => { setHovered(true); }}
@@ -205,8 +263,10 @@ export function ToolCard({ run }: { run: ToolRun }) {
             the row is hovered or open (see LeadingGlyph). A run's state rides
             that same slot — a failure shows dsh's error dot where the glyph was,
             a live run its ongoing dot — so the row carries no trailing status
-            mark, and nothing trails the summary either: dsh's row is one line of
-            glyph · title · summary, with the numbers left to the expanded body. */}
+            mark. dsh's row is one line of glyph · title · summary, with the
+            numbers left to the expanded body; the one thing this app lets trail
+            the summary is the todo row's parallel-active count, which dsh's own
+            row also puts there (`summarySuffix`). */}
         <LeadingGlyph icon={leadingGlyph(run.status, run.toolName)} swap={hovered || open} />
         {/* dsh's row is one line of [16 leading] gap 6 [title 13/24] gap 8
             [2x2 dot] gap 8 [summary filling and truncated] (figma 122:9479). The
@@ -234,6 +294,24 @@ export function ToolCard({ run }: { run: ToolRun }) {
             >
               {summaryText}
             </Text>
+            {/* A todo row names ONE running task and counts the rest here. This
+                span is the row's only `flex: none` piece of the summary, so a
+                narrow row truncates the task name (above) and keeps `+K` — the
+                count is exactly the part that carries information when the row
+                has no room. Same geometry as dsh's `.summarySuffix`. */}
+            {activeExtra > 0 && (
+              <span
+                style={{
+                  flex: 'none',
+                  marginLeft: 4,
+                  whiteSpace: 'nowrap',
+                  fontSize: 13,
+                  color: 'var(--dsw-alias-label-tertiary)',
+                }}
+              >
+                {`+${activeExtra}`}
+              </span>
+            )}
           </>
         )}
         {summaryText.length === 0 && <div style={{ flex: 1 }} />}

@@ -1,0 +1,44 @@
+name: Agent Team platforms
+
+on:
+  push:
+    branches: [main, feat/user-subagents, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24.15.0'
+          cache: npm
+      - name: Install local search tools on macOS
+        if: runner.os == 'macOS'
+        run: brew install fd ripgrep
+      - name: Install dependencies and bundled Windows tools
+        run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Runtime checks, including the platform sandbox
+        run: npm run check
+      - name: Production build
+        run: npm run build
+      - name: Browser acceptance
+        env:
+          RUN_DIR: ${{ runner.temp }}/agent-team-browser
+        run: npm run check:team-browser
+      - name: Save browser evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-team-browser-${{ matrix.os }}
+          path: ${{ runner.temp }}/agent-team-browser/evidence
+          if-no-files-found: ignore

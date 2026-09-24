@@ -971,3 +971,58 @@ select.input {
   overflow: auto;
 }
 
+/* ------------------------------------------------------- narrow viewport */
+
+/* The two panes are a 224px provider list plus the detail pane. That fixed
+   column is what breaks <=768px: at a 390px viewport the settings column is
+   ~348px, so the detail pane gets ~124px and - after its 48px of padding - the
+   model list is left ~76px wide (measured: clientWidth 72).
+ *
+ * The list cannot survive that. `.modelList` is `overflow: clip`, so the row's
+ * badges and its three icon buttons (copy model id / edit / remove, all
+ * `flex: none`) are not merely squeezed but **unreachable** - measured `right`
+   values 401/433/465 against a panel edge at 385. The row also cannot wrap:
+   `.modelRow` is a single nowrap line by construction, and wrapping it would put
+   the action icons on a second line with no label.
+ *
+ * So below 768px: stack the panes, and give each model row a minimum width with
+ * the list scrolling horizontally. Every control stays reachable by scrolling
+ * (a row needs ~250px: an id, the badges and three 28px buttons) and the cost is
+ * a scrollbar in the list, not a taller row. 768 matches the settings shell's
+ * own breakpoint so the two cannot disagree about what "narrow" means. */
+@media (max-width: 768px) {
+  .panes {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+
+  .listPane {
+    border-right: none;
+    border-bottom: 1px solid var(--pi-settings-border);
+  }
+
+  .detailPane {
+    padding: 16px 16px 48px;
+  }
+
+  .modelListHead {
+    align-items: flex-start;
+  }
+
+  /* `overflow-x: auto` is what makes the clipped controls reachable instead of
+     lost; the desktop `overflow: clip` stays for wide screens. */
+  .modelList {
+    overflow-x: auto;
+    overflow-y: clip;
+  }
+
+  /* The row keeps enough width for its three action buttons (28px each, plus
+     gap and padding = 128px) with ~112px left for the id and badges. 240px fits
+     inside the narrowest case we target: a 320px viewport leaves the model list
+     246px once the shell, panel and detail-pane insets are subtracted — so at
+     320/390/768 nothing needs scrolling at all, and the horizontal scroll is the
+     safety net for longer ids and badge sets rather than the everyday path. */
+  .modelRow {
+    min-width: 240px;
+  }
+}

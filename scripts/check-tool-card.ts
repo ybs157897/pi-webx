@@ -391,7 +391,153 @@ assert.ok(
 );
 assert.ok(!failedEdit.includes('变更'), '失败的 edit 不该把没落地的改动画成变更');
 
+/**
+ * 任务清单行：`todo` 调用不再走通用摘要。
+ *
+ * 图4 那行原来是 `todo · {"action":"add",…}` —— 原始参数 JSON，读不出这次调用在
+ * 干什么。dsh 的 todo 行（`ui-tool/.../toolviews/todo-row.tsx` 走 `plan-summary.ts`）
+ * 是：清单图标 +「任务」+ `d/t 已完成` +「第一个进行中的任务」，并行的其余进行中数量
+ * 渲染成不可收缩的 `+K`。清单本身怎么派生由 `lib/todos` 说了算（会话事件是唯一事实
+ * 来源，面板和这里读同一套投影），这里只钉渲染出来的那一行。
+ */
+const PLAN = [
+  { content: '写第一个小故事', status: 'completed' },
+  { content: '写第二个小故事', status: 'in_progress' },
+  { content: '写第三个小故事', status: 'pending' },
+];
+
+/** React 把文本节点里的 `"` 写成 `&quot;`；拆掉标签后还要还原实体才看得见原文。 */
+const plainText = (markup: string): string =>
+  textOf(markup)
+    .replace(/&quot;/g, '"')
+    .replace(/&#x27;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&');
+
+/** 行是摘要所在的标题；`title` 的颜色就是它的钉。 */
+const ROW_TITLE = /color:var\(--dsw-alias-label-secondary\)[^>]*>任务</;
+
+// details 里的整表就是摘要的事实来源：清单图标、`任务` 标题、计数 + 第一个进行中项。
+const todo = render(
+  run({
+    toolName: 'todo',
+    args: { todos: PLAN },
+    output: 'ok',
+    status: 'success',
+    details: { todos: PLAN },
+  }),
+);
+assert.match(todo, ROW_TITLE, `todo 行要用「任务」做标题：${todo.slice(0, 300)}`);
+assert.ok(
+  todo.includes('M13.3277 9.69629'),
+  'todo 行要用清单字形（IconChecklistOutline14），不是认不出来的 sparkle',
+);
+assert.ok(
+  textOf(todo).includes('1/3 已完成 · 写第二个小故事'),
+  `todo 行要写「1/3 已完成 · 第一个进行中的任务」：${todo}`,
+);
+assert.ok(!plainText(todo).includes('"content"'), 'todo 行上不该再出现参数 JSON');
+assert.ok(!plainText(todo).includes('undefined'), 'todo 行不该出现 undefined');
+// 别的工具仍用各自的字形：清单图标不是通用的兜底字形。
+assert.ok(!other.includes('M13.3277 9.69629'), '清单字形只属于 todo 行');
+
+// 并行跑多个任务时，第一个的名字跟在摘要里，其余的数量是不可收缩的 `+K`：
+// 窄行截断任务名（`flex:1;min-width:0` 的那一半），但绝不能截掉计数。
+const PARALLEL = [
+  { content: '写第一个小故事', status: 'in_progress' },
+  { content: '写第二个小故事', status: 'in_progress' },
+  { content: '写第三个小故事', status: 'completed' },
+];
+const parallel = render(
+  run({
+    toolName: 'todo',
+    args: { todos: PARALLEL },
+    output: 'ok',
+    status: 'success',
+    details: { todos: PARALLEL },
+  }),
+);
+assert.ok(
+  textOf(parallel).includes('1/3 已完成 · 写第一个小故事'),
+  `并行清单只报第一个进行中的任务：${parallel}`,
+);
+assert.match(
+  parallel,
+  /<span style="flex:none;margin-left:4px;white-space:nowrap[^"]*">\+1<\/span>/,
+  '其余进行中数量要渲染成独立、不可收缩的 `+1`',
+);
+assert.ok(
+  parallel.indexOf('1/3 已完成') < parallel.indexOf('>+1</span>'),
+  '`+K` 要跟在可截断的摘要后面，不能挤在它里面',
+);
+assert.ok(
+  !/\+[0-9]+<\/span>/.test(todo),
+  `只有一个进行中时不该有 +K（activeExtra 为 0）：${todo}`,
+);
+
+// 流式阶段还没有 details，快照就在这次调用的参数里 —— 行不该退回 `todo · {…}`。
+const streaming = render(run({ toolName: 'todo', args: { todos: PLAN }, status: 'running' }));
+const streamingRow = streaming.slice(0, streaming.indexOf('<div class="section"'));
+assert.ok(
+  textOf(streamingRow).includes('1/3 已完成 · 写第二个小故事'),
+  `还没有 details 时要用参数里的清单：${streamingRow}`,
+);
+
+// 拿不到清单快照（旧形态的 add/toggle 调用、坏的 details、流到一半的 JSON）就退回
+// 通用摘要——不抛错、不显示 undefined，但 `任务` 这个身份还在（dsh 的 TodoRow 也是
+// 标题认工具名、摘要才兜底）。
+const noPlan = render(
+  run({
+    toolName: 'todo',
+    args: { action: 'add', text: '写第一个小故事' },
+    output: 'ok',
+    status: 'success',
+  }),
+);
+assert.match(noPlan, ROW_TITLE, '没有清单快照时仍是任务行');
+assert.ok(
+  plainText(noPlan).includes('{"action":"add","text":"写第一个小故事"}'),
+  `没有清单快照时要退回通用摘要：${noPlan}`,
+);
+const brokenDetails = render(
+  run({
+    toolName: 'todo',
+    args: { action: 'add', text: '写第一个小故事' },
+    output: 'ok',
+    status: 'success',
+    details: { todos: 'not-an-array' },
+  }),
+);
+assert.match(brokenDetails, ROW_TITLE, 'details 坏掉时仍是任务行');
+assert.ok(
+  plainText(brokenDetails).includes('{"action":"add","text":"写第一个小故事"}'),
+  'details 坏掉时要退回通用摘要',
+);
+assert.ok(!plainText(brokenDetails).includes('undefined'), 'details 坏掉时不该显示 undefined');
+
+// 空表是「清单被清空」，不是「没有快照」：照 dsh 显示 0/0，而不是退回参数 JSON。
+const cleared = render(
+  run({ toolName: 'todo', args: { todos: [] }, output: 'ok', status: 'success', details: { todos: [] } }),
+);
+assert.ok(textOf(cleared).includes('0/0 已完成'), `清空后的空表显示 0/0：${cleared}`);
+
+// 失败的一次调用仍说一件事：换掉摘要、丢掉 `+K`（dsh: failureLine 非空时 suffix 为空）。
+const failedTodo = render(
+  run({
+    toolName: 'todo',
+    args: { todos: PLAN },
+    output: '清单被拒\nmore',
+    status: 'error',
+    details: { todos: PLAN },
+  }),
+);
+assert.match(failedTodo, ROW_TITLE, '失败的 todo 仍是任务行');
+assert.ok(plainText(failedTodo).includes('清单被拒'), '失败的 todo 行摘要换成失败首行');
+assert.ok(!/\+[0-9]+<\/span>/.test(failedTodo), '失败的 todo 行不挂 +K');
+
 console.log(
   'PASS 工具卡：bash 走终端卡（dsh 行几何「标题·圆点·摘要」、cwd 徽标、命令带 $/输出不带、退出码 pill、ANSI 上色、输出区 224px 自滚），'
-  + 'read/write/edit 只渲染结果、结果区不带 caption 且仍是 150px 独立滚动容器，失败行摘要换成失败首行，摘要里没有的仍显示参数',
+  + 'read/write/edit 只渲染结果、结果区不带 caption 且仍是 150px 独立滚动容器，失败行摘要换成失败首行，摘要里没有的仍显示参数，'
+  + 'todo 行走 dsh 的任务行（清单字形 +「任务」+ d/t 已完成 + 第一个进行中项 + 不可收缩的 +K，缺快照时退回通用摘要）',
 );

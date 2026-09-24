@@ -3,13 +3,18 @@
  * location (the left of the composer row, where its access-mode chip sits).
  *
  * The menu lists the three permission tiers, each row a shield glyph + label +
- * the tier's tool list as the hint, with a trailing Check on the active one —
- * the access-mode menu shape ZCode uses. A preset is a tool allowlist, not an
- * approval prompt: pi has no approval layer, and the thing it does have is the
- * per-session tool set. This control is the editor for that set, and its choice
- * is recorded on the session itself — see `server/tool-selection.ts`, which
- * persists it as a versioned custom entry so reopening a transcript restores
- * the tools it was last run with.
+ * a trailing Check on the active one — the access-mode menu shape ZCode uses,
+ * and dsh's `PermissionSelect` exactly: one line per tier, no second line. The
+ * tier's tool list stays in `shared/tool-presets.ts` (it is the data's own
+ * description of a tier, and the server reads the same table), and it reaches
+ * the user through the trigger's `title`, which is where dsh puts its preset
+ * description too.
+ *
+ * A preset is a tool allowlist, not an approval prompt: pi has no approval
+ * layer, and the thing it does have is the per-session tool set. This control is
+ * the editor for that set, and its choice is recorded on the session itself —
+ * see `server/tool-selection.ts`, which persists it as a versioned custom entry
+ * so reopening a transcript restores the tools it was last run with.
  *
  * The browser preference (`pi-webx-tool-preset`) only decides what a *new* session
  * starts from, which is exactly the split pi-web makes between its
@@ -71,30 +76,28 @@ export interface ToolPresetSelectProps {
   onApply?: ((preset: ToolPreset) => void) | undefined;
 }
 
-export function ToolPresetSelect({ disabled = false, current = null, onApply }: ToolPresetSelectProps) {
+export interface ToolPresetMenuProps {
+  /** The tier in force: highlighted, and the one wearing the trailing Check. */
+  shown: ToolPreset;
+  /** Apply a tier — the trigger owns storage, the session write and closing. */
+  onChoose: (preset: ToolPreset) => void;
+  /** Undefined when there is no session yet to apply a tier to (footer note). */
+  onApply?: ((preset: ToolPreset) => void) | undefined;
+}
+
+/**
+ * The popover's content, on its own so it is exactly what the popover shows.
+ *
+ * It is exported for `scripts/check-tool-preset-menu.ts`: the overlay's content
+ * is not in the SSR markup (antd only mounts it on open), and the thing worth
+ * pinning here is the HTML of a menu row — one line, glyph + label + Check.
+ * Open/close stays with the trigger; hover, the rows and the footer live here.
+ */
+export function ToolPresetMenu({ shown, onChoose, onApply }: ToolPresetMenuProps) {
   const { token } = theme.useToken();
-  const [preferred, setPreferred] = useState<ToolPreset>(readToolPresetPreference);
-  const [open, setOpen] = useState(false);
-  const [hovered, setHovered] = useState(false);
   const [hoveredTier, setHoveredTier] = useState<ToolPreset | null>(null);
 
-  // A session that has recorded its own selection wins over the preference.
-  useEffect(() => {
-    if (current !== null) setPreferred(current);
-  }, [current]);
-
-  const shown = current ?? preferred;
-  const option = toolPresetOption(shown);
-  const ShownIcon = TIER_ICONS[option.iconKey];
-
-  const choose = (next: ToolPreset): void => {
-    setOpen(false);
-    setPreferred(next);
-    writeToolPresetPreference(next);
-    onApply?.(next);
-  };
-
-  const content = (
+  return (
     <div style={{ width: 264 }}>
       {TOOL_PRESET_OPTIONS.map((entry) => {
         const TierIcon = TIER_ICONS[entry.iconKey];
@@ -102,7 +105,7 @@ export function ToolPresetSelect({ disabled = false, current = null, onApply }: 
           <button
             key={entry.id}
             type="button"
-            onClick={() => { choose(entry.id); }}
+            onClick={() => { onChoose(entry.id); }}
             onMouseEnter={() => { setHoveredTier(entry.id); }}
             onMouseLeave={() => { setHoveredTier(null); }}
             style={{
@@ -129,11 +132,6 @@ export function ToolPresetSelect({ disabled = false, current = null, onApply }: 
                 <Check size={14} style={{ color: token.colorPrimary, flexShrink: 0 }} />
               )}
             </span>
-            <span
-              style={{ display: 'block', marginTop: 1, fontSize: 11, color: token.colorTextTertiary }}
-            >
-              {entry.hint}
-            </span>
           </button>
         );
       })}
@@ -144,6 +142,33 @@ export function ToolPresetSelect({ disabled = false, current = null, onApply }: 
       )}
     </div>
   );
+}
+
+export function ToolPresetSelect({ disabled = false, current = null, onApply }: ToolPresetSelectProps) {
+  const { token } = theme.useToken();
+  const [preferred, setPreferred] = useState<ToolPreset>(readToolPresetPreference);
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+
+  // A session that has recorded its own selection wins over the preference.
+  useEffect(() => {
+    if (current !== null) setPreferred(current);
+  }, [current]);
+
+  const shown = current ?? preferred;
+  const option = toolPresetOption(shown);
+  const ShownIcon = TIER_ICONS[option.iconKey];
+
+  const choose = (next: ToolPreset): void => {
+    setOpen(false);
+    setPreferred(next);
+    writeToolPresetPreference(next);
+    onApply?.(next);
+  };
+
+  // The tier's tool list as the trigger's tooltip: dsh keeps its presets'
+  // descriptions off the menu rows and on the trigger's `title` the same way.
+  const content = <ToolPresetMenu shown={shown} onChoose={choose} onApply={onApply} />;
 
   return (
     <Popover
@@ -160,6 +185,7 @@ export function ToolPresetSelect({ disabled = false, current = null, onApply }: 
         type="button"
         disabled={disabled}
         aria-label={`工具集，当前：${option.label}`}
+        title={option.hint}
         onMouseEnter={() => { setHovered(true); }}
         onMouseLeave={() => { setHovered(false); }}
         style={{
