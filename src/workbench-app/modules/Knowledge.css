@@ -1,0 +1,441 @@
+/*
+ * 知识库模块样式：三栏——左栏（新建 / 搜索 / 标签 chips / 条目列表），中栏（标题输入 /
+ * 工具条：视图切换 + 标签 + 保存 / 正文编辑区或 markdown 预览 / 脚标），右栏
+ * （出链 + 反链面板 / 「问小台」）。
+ *
+ * 类名一律 `kb-` 前缀，三栏骨架写在本文件而不是 styles.css：多个模块并行重塑期，共用
+ * `.split` 这类通用类名会退化成「谁最后加载谁生效」。颜色、间距、字号、圆角全部取
+ * styles.css 的令牌，亮/暗主题自动跟随。窄屏三栏依次收拢（链接面板先落位、再整体堆叠），
+ * 375px 不横向溢出。
+ */
+
+/* ================================================================ 三栏骨架 */
+
+.kb-split {
+  display: grid;
+  grid-template-columns: minmax(230px, 290px) minmax(0, 1.5fr) minmax(240px, 310px);
+  gap: var(--sp-4);
+  align-items: start;
+}
+
+/* 三栏都要能被压缩：长标题、长标签、长代码块不得把栅格撑破。 */
+.kb-list-col,
+.kb-editor-col,
+.kb-links-col { min-width: 0; }
+
+/* 左栏自己滚：条目多的时候中栏的编辑位置不跟着跳。 */
+.kb-list-body { max-height: min(72dvh, 760px); overflow-y: auto; }
+
+.kb-new-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--sp-7);
+  height: var(--sp-7);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.kb-new-action:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.kb-new-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.kb-new-action:disabled { opacity: .5; cursor: not-allowed; }
+
+/* 断点一：链接面板掉到编辑器下面，两栏留给「列表 + 编辑器」。 */
+@media (max-width: 1179px) {
+  .kb-split { grid-template-columns: minmax(220px, 270px) minmax(0, 1fr); }
+  .kb-links-col { grid-column: 1 / -1; }
+}
+
+/* 断点二：全部上下堆叠（与其它模块的 899px 对齐）。 */
+@media (max-width: 899px) {
+  .kb-split { grid-template-columns: minmax(0, 1fr); }
+  .kb-list-body { max-height: none; overflow-y: visible; }
+}
+
+/* ================================================================ 左栏：搜索与标签过滤 */
+
+.kb-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--sp-7);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-3);
+  transition: border-color .15s ease;
+}
+
+.kb-search:focus-within { border-color: var(--accent); }
+
+.kb-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.kb-search-input::placeholder { color: var(--text-3); }
+
+/* 原生 × 在窄栏里和标签 chips 抢宽度，收起。 */
+.kb-search-input::-webkit-search-cancel-button { display: none; }
+
+/* 标签 chips 跟着换行，不裁切（裁一半的标签比多一行更难看）。 */
+.kb-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  margin-top: var(--sp-3);
+}
+
+.kb-tag-count {
+  margin-inline-start: 4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.kb-source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+  margin-top: var(--sp-2);
+}
+
+.kb-source-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.kb-source-chip:hover,
+.kb-source-chip.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.kb-source-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ================================================================ 左栏：条目列表 */
+
+.kb-list {
+  margin-top: var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* 条目 li 复用共享的 .list-item（分隔线 + flex），这里只补两行条目的排布。 */
+.kb-list .kb-item { padding: 0; align-items: stretch; }
+
+.kb-item-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: var(--sp-3) var(--sp-4);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.kb-item-btn:hover { background: var(--surface-1); }
+
+/* 选中态：accent-soft 底 + 左侧 accent 边界（inset 阴影不占位，行内容不会跳）。 */
+.kb-list .kb-item-btn.is-active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.kb-list .kb-item-btn.is-active .kb-item-title { color: var(--accent); font-weight: 600; }
+
+.kb-item-top { display: flex; align-items: flex-start; gap: 6px; }
+
+.kb-item-star { flex: none; margin-top: 5px; color: var(--warn); }
+
+/* 标题最多两行，长标题不把列表撑散。 */
+.kb-item-title {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+}
+
+.kb-item-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.kb-item-sources { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.kb-item-sources .chip { color: var(--accent); background: var(--accent-soft); }
+
+.kb-item-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+
+.kb-item-time {
+  flex: none;
+  margin-inline-start: auto;
+  padding-inline-start: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ 中栏：编辑器 */
+
+.kb-editor { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.kb-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+/* 标题输入：无边框大字号，焦点时一道下边框提示（不抢卡片本身的边线）。 */
+.kb-title-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-1) 0;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+  outline: none;
+}
+
+.kb-title-input:focus { border-bottom-color: var(--accent); }
+.kb-title-input::placeholder { color: var(--text-3); font-weight: 400; }
+
+.kb-editor-tools { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+
+.kb-sources {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+.kb-sources-label { flex: none; }
+
+.kb-source-link {
+  max-width: 100%;
+  padding: var(--sp-1) var(--sp-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-xs);
+  text-align: start;
+  overflow-wrap: anywhere;
+  cursor: pointer;
+}
+
+.kb-source-link:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.kb-source-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* 星标：点亮的是同一个描边图标，用 currentColor 填心 + 换色。 */
+.kb-star.is-on { color: var(--warn); }
+.kb-star.is-on svg { fill: currentColor; }
+
+.kb-btn-danger { color: var(--danger); }
+.kb-btn-danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+
+/* ---------- 工具条：视图切换 + 标签 + 保存 ---------- */
+
+.kb-editor-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-bottom: var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+}
+
+/* 编辑 / 预览：小分段控件（Segmented 的等宽双按钮版本，窄栏里允许收缩）。 */
+.kb-view {
+  display: inline-flex;
+  flex: none;
+  padding: 2px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.kb-view-btn {
+  padding: 5px var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.kb-view-btn:hover { color: var(--text-1); }
+
+.kb-view-btn.is-active {
+  background: var(--surface-0);
+  color: var(--accent);
+  box-shadow: 0 1px 2px var(--line-1);
+}
+
+/* 标签输入吃掉剩余宽度，保存按钮固定在最右。 */
+.kb-tag-field {
+  flex: 1 1 140px;
+  min-width: 0;
+  height: var(--sp-7);
+  font-size: var(--fs-sm);
+}
+
+.kb-save { flex: none; margin-inline-start: auto; }
+
+/* ---------- 正文编辑区 / 预览 ---------- */
+
+/* 等宽字体写 markdown：代码块与缩进对得齐；长行横向滚动，不撑破中栏。 */
+.kb-body-input {
+  min-height: min(52dvh, 520px);
+  padding: var(--sp-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: 1.7;
+  resize: vertical;
+}
+
+.kb-preview-body {
+  min-height: min(52dvh, 520px);
+  padding: var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  font-size: var(--fs-md);
+  color: var(--text-1);
+}
+
+/* markdown 正文：长 token 与代码块都不许把中栏撑破。 */
+.kb-preview-body { min-width: 0; overflow-wrap: anywhere; }
+.kb-preview-body pre { max-width: 100%; overflow-x: auto; }
+
+.kb-muted { color: var(--text-2); font-size: var(--fs-sm); }
+
+/* ---------- 脚标：脏标记 / 字数 / 时间 / 双链解析情况 ---------- */
+
+.kb-editor-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.kb-foot-text { font-variant-numeric: tabular-nums; }
+
+/* 未解析的 [[标题]]：存在但不指向任何笔记，用 title 属性列出全部标题。 */
+.kb-foot-miss { color: var(--text-3); text-decoration: underline dotted; text-underline-offset: 3px; cursor: help; }
+
+/* ================================================================ 右栏：出链 / 反链 */
+
+.kb-links { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.kb-link-group { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+.kb-link-title {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.kb-link-hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+.kb-link-list { display: flex; flex-direction: column; gap: var(--sp-1); }
+
+.kb-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 6px var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.kb-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.kb-link-icon { flex: none; color: var(--text-3); }
+
+/* 跨模块链接的标题行：标题可压缩，模块徽章固定不缩。 */
+.kb-link-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 问小台 ---------- */
+
+.kb-ask {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-1);
+  margin-top: auto;
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-1);
+}
+
+.kb-ask-btn {
+  align-self: flex-start;
+  color: var(--accent);
+  border-color: var(--line-2);
+}
+
+.kb-ask-btn:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+
+.kb-ask-btn:disabled { color: var(--text-3); cursor: not-allowed; }
+
+.kb-ask-hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; }
+
+/* ================================================================ 断点 */
+
+/* 手机：编辑器头部与工具条改成上下排，工具栏不互相挤压。 */
+@media (max-width: 639px) {
+  .kb-editor-head { flex-direction: column; }
+  .kb-editor-tools { width: 100%; }
+  .kb-save { margin-inline-start: 0; }
+  .kb-tag-field { flex-basis: 100%; }
+}

@@ -1,35 +1,26 @@
 /**
- * 工作台界面验收：把「AI 个人工作台」这次改造的四个模块 + 对话面板渲染钉在 SSR 产物上。
+ * 工作台界面验收（v2，2026-09 重塑版）：把七个模块 + AI 面板正文渲染钉在 SSR 产物上。
  *
  * 写法照 `scripts/check-task-panel.ts`：真实组件进 `renderToStaticMarkup`，喂构造好的假数据，
- * 断言只认 DOM 证据。覆盖契约（docs 里的 CSS 契约与模块改造规格）第 8 节列的五条落点：
+ * 断言只认 DOM 证据。与 v1 的差别：模块们各自 `import './X.css'`（模块样式私有化），
+ * 所以本脚本必须走 `scripts/check-bootstrap.mjs`（CSS 被短路成回显 Proxy）。
+ * 跑法：`npm run check:workbench-ui`（已带引导）。
  *
- *   1. 问题修复是**列表**：单张 Card + `fixes-list > fixes-row`，卡头 Segmented 带数量，
- *      `fixes-quick-add` 同卡片；整段标记里不许出现看板列痕迹（`kanban*` / `work-card`）；
- *   2. 日志查询是**对话框查询**：页面只有一张 Card（`logs-list` 按日期倒序分组），
- *      卡头 `logs-query-open` / `logs-record-open` 是查询与记录弹窗的触发按钮；
- *   3. 需求管理是**知识列表**：`split` 两栏，左 `requirements-search` + `requirements-list >
- *      requirements-item`（`li.list-item` 有分隔线），右 `requirements-reader` 阅读区；
- *   4. 代码开发是**编辑器工作区**：`split` 两栏，左 `codes-tree-group > codes-tree-item`，
- *      右 `codes-editor`（tab / 工具条 / `codes-gutter` + `codes-editor-input` / 状态栏）；
- *   5. 对话面板正文与 /chat 一致：`AssistantMarkdown` 复用 `@lobehub/ui` 的 `Markdown`
- *      （`variant="chat"`、`fontSize=14`、`fullFeaturedCodeBlock`），渲染出 `<strong>` /
- *      `<code>` / `<li>` / `<pre>` 等真实元素，纯文本里不残留 `**` 与 ```。
+ * 覆盖（对应 docs/workbench-redesign.md 第 4 节逐模块规格）：
+ *   1. 我的主页是指挥台 widget 板：`data-widget` 六件套 + 空库引导只走 `welcome`；
+ *   2. 今日规划：快速捕获条 + 今天/全部两档 + 逾期优先分组；
+ *   3. 工作助理：看板（三列 + 可拖卡）与列表双视图，视图偏好来自 prefs；
+ *   4. 问题修复是列表（用户定调）：密集表格 + 行内状态 + 关联回链；
+ *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
+ *   6. 需求管理是知识列表（用户定调）：左右两栏 + 右栏 markdown 阅读区；
+ *   7. 代码开发是编辑器工作区（用户定调）：文件树 + tab + 行号编辑区 + 状态栏；
+ *   8. AI 面板正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
+ *   9. 知识库三栏 + [[双链]]：选中态 / 预览态 / 旧数据 / 空库都要有 DOM 证据；
+ *   10. 「问小台」失败路径：pi 不可用时 pending 用户气泡保留笔记内容、错误条是人话；
+ *       pending 气泡的留存/撤销走 nextAskState 状态机（发送在途 ≠ 面板被清空）。
  *
- * 跑法：`node --import tsx scripts/check-workbench-ui.ts`
- * （不需要 `check-bootstrap.mjs`：这几个组件的模块图不引 CSS；但 `AssistantMarkdown` 里的
- * `@lobehub/ui` Markdown 必须被 `ConfigProvider motion={motion}` 包着，否则抛
- * 「Please wrap your app with <ConfigProvider>…」——见 `node_modules/@lobehub/ui/src/MotionProvider/index.tsx`。）
- *
- * 交互分支怎么覆盖的（重要，评审要能看见边界）：
- * - **SSR 初始态**：模块挂载后还没任何 state 变化时的结构，全部真渲染。
- * - **喂进去的选中态**：需求阅读区由 `selectedId`（初值 ''）驱动，而 `selected` 是从
- *   `data.requirements` 现算的（不经 effect），所以塞一条 `id: ''` 的假记录就能让 SSR
- *   渲染出**真实**的阅读区分支（含选中态样式、`（没有备注）` 兜底、推进/退回的禁用边界）。
- * - **源码级钉子**：Codes 的编辑器打开态（`draft` 只能由 `useEffect` 播种，SSR 不跑
- *   effect）与 Logs 的查询/记录弹窗（`queryOpen`/`recordOpen` 初值 false，`Modal` 直接
- *   返回 null）渲染不到，按 `check-task-panel.ts` 的做法读源码钉结构。这不是行为证据，
- *   真实浏览器里的输入/点击仍需人工过一眼。
+ * 交互分支（拖拽、弹窗内提交、⌘S、勾选）SSR 不可达，按 `check-task-panel.ts` 的做法
+ * 读源码钉结构；真实浏览器验收由 ego 截图阶段完成。
  */
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -38,449 +29,488 @@ import { motion } from 'motion/react';
 import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
+import Dashboard from '../src/workbench-app/modules/Dashboard.jsx';
+import Tasks from '../src/workbench-app/modules/Tasks.jsx';
+import Works from '../src/workbench-app/modules/Works.jsx';
 import Fixes from '../src/workbench-app/modules/Fixes.jsx';
 import Logs from '../src/workbench-app/modules/Logs.jsx';
 import Requirements from '../src/workbench-app/modules/Requirements.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
+import Knowledge from '../src/workbench-app/modules/Knowledge.jsx';
+import AIPanel, { nextAskState } from '../src/workbench-app/shell/AIPanel.jsx';
 import AssistantMarkdown from '../src/workbench-app/pi-webx/AssistantMarkdown.jsx';
-import { addDays, formatDay, todayISO } from '../src/workbench-app/util.mjs';
+import { todayISO } from '../src/workbench-app/util.mjs';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
 /** 假 mutate：SSR 不会触发写操作，给个恒真实现即可。 */
 const mutate = async (): Promise<boolean> => true;
 const notify = (): void => {};
+const navigate = (): void => {};
+const setPref = async (): Promise<void> => {};
 
-/** 纯文本形态：把标签剥掉，Markdown 残留标记在文本里藏不住。 */
+const TODAY = todayISO();
+const YESTERDAY = String(new Date(Date.now() - 86400000).toISOString().slice(0, 10));
+const TOMORROW = String(new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+
+/** 纯文本形态：把标签剥掉。 */
 const textOf = (markup: string): string => markup.replace(/<[^>]*>/g, '');
 
 /** 字面量出现次数。 */
 const occurrences = (markup: string, fragment: string): number => markup.split(fragment).length - 1;
 
-/** 取位置（比顺序用）；找不到直接失败，免得后面的比较静默拿到 -1。 */
-const at = (markup: string, fragment: string): number => {
-  const index = markup.indexOf(fragment);
-  assert.ok(index >= 0, `标记里找不到 ${JSON.stringify(fragment)}：${markup.slice(0, 200)}`);
-  return index;
-};
+/** 渲染一个模块。 */
+function render(Component: (props: Record<string, unknown>) => JSX.Element, data: Record<string, unknown>, extra: Record<string, unknown> = {}): string {
+  return renderToStaticMarkup(h(Component, {
+    data,
+    profile: { name: 'Yin', motto: '把日子过成想要的样子' },
+    mutate,
+    refresh: async () => {},
+    notify,
+    navigate,
+    modules: [],
+    prefs: {},
+    setPref,
+    empty: false,
+    onLoadDemo: async () => {},
+    ...extra,
+  }));
+}
 
 /** 读一个源码文件。 */
-const sourceOf = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8');
+function sourceOf(path: string): string {
+  return readFileSync(new URL(path, import.meta.url), 'utf8');
+}
+
+/** 任何渲染物都不许泄漏 undefined / NaN（脏数据兜底的底线）。 */
+function assertNoLeaks(markup: string, label: string): void {
+  assert.ok(!markup.includes('undefined'), `${label} 泄漏了 undefined`);
+  assert.ok(!markup.includes('NaN'), `${label} 泄漏了 NaN`);
+}
 
 /* ---------------------------------------------------------------------- 假数据 */
 
-type Row = {
-  id: string;
-  title?: string;
-  text?: string;
-  priority?: string;
-  status?: string;
-  level?: string;
-  source?: string;
-  project?: string;
-  note?: string;
-  date?: string;
-  createdAt?: string;
-  updatedAt?: string;
-};
+const REQ_A = '11111111-1111-4111-8111-111111111111';
+const REQ_B = '22222222-2222-4222-8222-222222222222';
+const TASK_A = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+const FIX_A = 'aaaaaaaa-aaaa-4aaa-8aaa-ffffffffffff';
 
-/** 日期用本仓库的本地时区口径（util.mjs）：`toISOString` 是 UTC，东八区会差一天。 */
-const TODAY = todayISO();
-const YESTERDAY = addDays(TODAY, -1);
-
-const DATA = {
-  fixes: [
-    // updatedAt 倒序：最新复现的问题排最前。
-    { id: 'f1', title: '登录页点击报错', priority: 'high', status: 'doing', note: '第二步复现', createdAt: '2026-09-20T01:00:00.000Z', updatedAt: '2026-09-24T01:00:00.000Z' },
-    { id: 'f2', title: '导出按钮无响应', priority: 'normal', status: 'todo', note: '', createdAt: '2026-09-21T01:00:00.000Z', updatedAt: '2026-09-22T01:00:00.000Z' },
-    // 缺 updatedAt：回落 createdAt（store 的 STAMPED_MODULES 一定给这两个字段）。
-    { id: 'f3', title: '侧边栏样式错位', priority: 'low', status: 'done', note: '改成宽度自适应', createdAt: '2026-09-19T01:00:00.000Z' },
-  ] as Row[],
-  logs: [
-    { id: 'l1', text: '把工作台搬进 pi-webx', level: 'info', source: 'pi-webx', date: TODAY },
-    { id: 'l3', text: '样式契约待补', level: 'warn', source: '', date: TODAY },
-    { id: 'l2', text: 'SQLite 写入超时', level: 'error', source: 'server', date: YESTERDAY },
-  ] as Row[],
-  requirements: [
-    { id: 'r1', title: '工作台迁移进 pi-webx', priority: 'high', status: 'doing', note: '十个模块搬进来\n先钉结构', createdAt: '2026-09-18T01:00:00.000Z', updatedAt: '2026-09-24T01:00:00.000Z' },
-    { id: 'r2', title: '界面契约定稿', priority: 'normal', status: 'todo', note: '', createdAt: '2026-09-19T01:00:00.000Z' },
-    { id: 'r3', title: '补实施记录', priority: 'low', status: 'done', note: '写进 notes/implemented', createdAt: '2026-09-17T01:00:00.000Z' },
-  ] as Row[],
-  codes: [
-    { id: 'c1', title: 'check-workbench-ui.ts', project: 'pi-webx', status: 'doing', note: '第一行\n第二行\n第三行', createdAt: '2026-09-20T01:00:00.000Z', updatedAt: '2026-09-24T01:00:00.000Z' },
-    { id: 'c2', title: '样式契约落库', project: 'pi-webx', status: 'todo', note: '', createdAt: '2026-09-19T01:00:00.000Z' },
-    // 空 project 归「未分组」组。
-    { id: 'c3', title: 'README 补截图', project: '', status: 'done', note: '', createdAt: '2026-09-16T01:00:00.000Z' },
-  ] as Row[],
-};
-
-const EMPTY_DATA = { fixes: [] as Row[], logs: [] as Row[], requirements: [] as Row[], codes: [] as Row[] };
-
-/* ================================================== 要求 1：问题修复渲染成列表 */
-
-const fixes = renderToStaticMarkup(h(Fixes, { data: DATA, mutate, notify }));
-
-// 单张卡片：看板版是「添加表单卡 + 每列一张卡」，列表版只剩一张。
-assert.equal(occurrences(fixes, '<section class="card ">'), 1, '问题修复应该只有一张卡片（不是每列一张）');
-assert.ok(fixes.includes('<h3 class="card-title">问题修复</h3>'), '卡片标题是「问题修复」');
-
-// 看板痕迹清零：Works 的看板列用这些类名（modules/Works.jsx:121-139），这里一个都不许有。
-for (const marker of ['kanban', 'kanban-col', 'kanban-head', 'kanban-count', 'kanban-list', 'work-card']) {
-  assert.ok(!fixes.includes(marker), `问题修复里不该再看板痕迹：${marker}`);
-}
-assert.equal(occurrences(fixes, '<ul class="list" data-testid="fixes-list">'), 1, '所有行都在同一个列表里（不是每列一个列表）');
-
-// 快速添加与列表同卡片（契约 §3 目标 DOM）。
-assert.ok(fixes.includes('data-testid="fixes-quick-add"'), '快速添加表单要在卡片里');
-assert.ok(fixes.includes('placeholder="描述问题，回车确认"'), '快速添加输入框的占位文案');
-assert.ok(fixes.includes('aria-label="描述问题，回车确认"'), '快速添加输入框的无障碍名（同一个文案）');
-
-// 卡头 Segmented 带数量：全部 3 / 待处理 1 / 修复中 1 / 已修复 1。
-assert.ok(fixes.includes('class="segmented" role="group" aria-label="状态筛选"'), '卡头状态筛选是 Segmented');
-assert.ok(
-  fixes.includes('<button type="button" class="segmented-item is-active" aria-pressed="true">全部 3</button>'),
-  '筛选默认落在「全部 3」上（数量从 data.fixes 现算）',
-);
-for (const label of ['待处理 1', '修复中 1', '已修复 1']) {
-  assert.ok(fixes.includes(`class="segmented-item " aria-pressed="false">${label}</button>`), `筛选项要有「${label}」`);
+function fakeData(): Record<string, unknown> {
+  return {
+    tasks: [
+      { id: TASK_A, title: '把暗色模式的令牌补全', done: false, due: TODAY, priority: 'high', tag: '设计', tags: ['设计'], refs: [{ type: 'requirements', id: REQ_A }], createdAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', title: '写周报', done: false, due: YESTERDAY, priority: 'high', tag: '汇报', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', title: '评审交互稿', done: false, due: TOMORROW, priority: 'normal', tag: 'AI', tags: ['AI'], refs: [{ type: 'requirements', id: REQ_B }], createdAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: '清理 dist', done: true, due: TODAY, priority: 'low', tag: '杂务', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+    works: [
+      { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', title: '指挥台外壳重构', note: '顶栏 + 左导航 + AI 副驾 + 命令面板', status: 'doing', tags: ['前端'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T10:00:00.000Z` },
+      { id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', title: 'SQLite 关联字段落地', note: 'tags / refs / starred 与搜索端点', status: 'done', tags: ['后端'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:30:00.000Z` },
+      { id: '12121212-1212-4212-8212-121212121212', title: '模块逐个重塑验收', note: '7 个模块过一遍 ego 截图', status: 'todo', tags: ['验收'], refs: [{ type: 'fixes', id: FIX_A }], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+    fixes: [
+      { id: FIX_A, title: 'AI 面板断线后不会自愈', priority: 'high', status: 'doing', note: '旧 session 失效后自动开新会话', tags: ['bug', 'AI'], refs: [{ type: 'tasks', id: TASK_A }], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z` },
+      { id: '13131313-1313-4313-8313-131313131313', title: '侧栏品牌名连写', priority: 'normal', status: 'done', note: '', tags: ['界面'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: '14141414-1414-4414-8414-141414141414', title: '导入旧 JSON 时间戳丢失', priority: 'low', status: 'todo', note: '补 createdAt/updatedAt', tags: ['数据'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+    logs: [
+      { id: '15151515-1515-4515-8515-151515151515', text: '指挥台外壳写完，⌘K 可用', level: 'info', source: 'workbench', date: TODAY, tags: [], refs: [], createdAt: `${TODAY}T09:00:00.000Z` },
+      { id: '16161616-1616-4616-8616-161616161616', text: '暗色令牌对比度不达标，已加深文本三档', level: 'warn', source: 'design', date: TODAY, tags: [], refs: [], createdAt: `${TODAY}T09:30:00.000Z` },
+      { id: '17171717-1717-4717-8717-171717171717', text: '旧版 JSON 导入回滚正常', level: 'error', source: 'server', date: YESTERDAY, tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+    requirements: [
+      { id: REQ_A, title: '工作台支持暗色模式', priority: 'high', status: 'doing', note: '## 动机\n深夜刺眼。\n\n- 跟随系统\n- 记住选择', tags: ['体验', '设计'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z` },
+      { id: REQ_B, title: 'AI 副驾可以帮记一条任务', priority: 'normal', status: 'todo', note: '说「存为今日任务」就落库。', tags: ['AI'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: '18181818-1818-4818-8818-181818181818', title: '日志支持按来源过滤', priority: 'low', status: 'done', note: '', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+    codes: [
+      { id: '19191919-1919-4919-8919-191919191919', title: '命令面板组件', project: 'pi-webx', status: 'doing', note: 'shell/CommandPalette.jsx\n\n- 全局搜索\n- 快捷操作', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: '20202020-2020-4020-8020-202020202020', title: '搜索端点', project: 'pi-webx', status: 'done', note: 'GET /search?q=', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+      { id: '21212121-2121-4121-8121-212121212121', title: '主页 widget 板', project: '', status: 'todo', note: '三列网格', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
+    ],
+  };
 }
 
-// 行：三行、按 updatedAt 倒序、都在 fixes-list 里。
-assert.equal(occurrences(fixes, 'data-testid="fixes-row"'), 3, '三条问题记录三行');
-assert.ok(at(fixes, '登录页点击报错') < at(fixes, '导出按钮无响应'), 'updatedAt 新的排前面');
-assert.ok(at(fixes, '导出按钮无响应') < at(fixes, '侧边栏样式错位'), '缺 updatedAt 时回落 createdAt');
-const listStart = at(fixes, 'data-testid="fixes-list"');
-const listEnd = at(fixes, '</ul>', listStart);
-for (const title of ['登录页点击报错', '导出按钮无响应', '侧边栏样式错位']) {
-  const rowAt = at(fixes, title);
-  assert.ok(rowAt > listStart && rowAt < listEnd, `「${title}」必须在 fixes-list 里（列表形态）`);
+/* ---------------------------------------------------------------------- 假数据 */
+
+const data = fakeData();
+
+/* ================================================== 1. 我的主页：指挥台 widget 板 */
+
+{
+  const markup = render(Dashboard, data);
+  assert.ok(markup.includes('data-module="dashboard"'), '主页缺 data-module');
+  for (const widget of ['greeting', 'progress', 'todos', 'fixes', 'logs', 'codes']) {
+    assert.ok(markup.includes(`data-widget="${widget}"`), `主页缺 widget：${widget}`);
+  }
+  assert.ok(!markup.includes('data-widget="welcome"'), '有数据时不该出现空库引导');
+  assert.ok(markup.includes('完成：把暗色模式的令牌补全'), '待办 widget 缺行内完成按钮');
+  assert.ok(markup.includes('%'), '进度 widget 缺百分比');
+  assert.ok(textOf(markup).includes('把日子过成想要的样子'), '主页缺座右铭');
+  assertNoLeaks(markup, '主页');
+
+  // 空库判定是双条件（empty 标志 + 确无记录），传真空数据才该出引导。
+  const blank: Record<string, unknown> = {
+    tasks: [], works: [], fixes: [], logs: [], requirements: [], codes: [],
+  };
+  const emptyMarkup = render(Dashboard, blank, { empty: true, onLoadDemo: async () => {} });
+  assert.ok(emptyMarkup.includes('data-widget="welcome"'), '空库应只出引导 widget');
+  assert.ok(!emptyMarkup.includes('data-widget="progress"'), '空库时不该渲染 widget 板');
+  // empty 标志误报为 true 但库里有记录时，不许把用户数据藏起来。
+  assert.ok(render(Dashboard, data, { empty: true }).includes('data-widget="progress"'), '有记录时即使 empty=true 也该渲染 widget 板');
+
+  assert.ok(sourceOf('../src/workbench-app/modules/Dashboard.jsx').includes('onLoadDemo()'), '主页演示数据按钮未接线');
 }
 
-// 行内：状态/严重程度 chip 的 tone、行内状态下拉、编辑与删除入口。
-assert.ok(fixes.includes('<span class="chip accent">修复中</span>'), 'doing 的 chip tone 是 accent');
-assert.ok(fixes.includes('<span class="chip warn">待处理</span>'), 'todo 的 chip tone 是 warn');
-assert.ok(fixes.includes('<span class="chip ok">已修复</span>'), 'done 的 chip tone 是 ok');
-assert.ok(fixes.includes('<span class="chip danger">严重程度 高</span>'), 'high 优先级的 chip tone 是 danger');
-assert.ok(fixes.includes('<span class="chip warn">严重程度 中</span>'), 'normal 优先级的 chip tone 是 warn');
-assert.ok(fixes.includes('<span class="chip ok">严重程度 低</span>'), 'low 优先级的 chip tone 是 ok');
-assert.ok(fixes.includes('data-testid="fixes-status-select" aria-label="状态：登录页点击报错"'), '行内状态下拉带无障碍名');
-assert.ok(fixes.includes('<option value="doing" selected="">修复中</option>'), '状态下拉的当前值来自记录 status');
-assert.ok(fixes.includes('<option value="todo">待处理</option><option value="doing"'), '状态下拉的三个选项顺序即流转顺序');
-assert.equal(occurrences(fixes, 'class="time"'), 3, '每行一个时间戳');
-// 备注预览只给有备注的行（第三条 note 为空的没有 note-preview）。
-assert.equal(occurrences(fixes, 'note-preview'), 2, 'note-preview 只出现在有备注的行上');
-assert.ok(fixes.includes('class="item-note note-preview">第二步复现<'), '有备注的行显示首行预览');
-// 每行两个图标按钮（编辑/删除）；两者的无障碍名都必须在，编辑按钮的 label 来自 TEXT.edit。
-assert.equal(occurrences(fixes, '<button type="button" class="icon-btn'), 6, '三行各两个图标按钮（编辑 + 删除）');
-assert.equal(occurrences(fixes, 'aria-label="编辑问题" title="编辑问题"'), 3, '编辑按钮有无障碍名（TEXT.edit 存在）');
-assert.equal(occurrences(fixes, 'class="icon-btn danger " aria-label="删除" title="删除"'), 3, '每行一个删除按钮');
-assert.equal(occurrences(fixes, 'class="item-actions always"'), 3, '行内控件常显（always）');
+/* ================================================== 2. 今日规划：快速捕获 + 分组 */
 
-// 空态：走规则 B 外包容器。
-const fixesEmpty = renderToStaticMarkup(h(Fixes, { data: EMPTY_DATA, mutate, notify }));
-assert.ok(fixesEmpty.includes('data-testid="fixes-empty"'), '零记录时是 fixes-empty');
-assert.ok(fixesEmpty.includes('没有问题记录'), '空态标题');
-assert.ok(fixesEmpty.includes('在上面的输入框里描述一个问题'), '空态提示');
-assert.ok(!fixesEmpty.includes('data-testid="fixes-list"'), '空态不渲染列表');
-assert.ok(fixesEmpty.includes('data-testid="fixes-quick-add"'), '空态也保留快速添加（可以在上面直接记一条）');
+{
+  const markup = render(Tasks, data);
+  assert.ok(markup.includes('data-module="tasks"'), '规划缺 data-module');
+  assert.ok(markup.includes('data-testid="tasks-capture"'), '规划缺快速捕获条');
+  assert.equal(occurrences(markup, 'data-testid="task-row"'), 3, '今天档应有 3 行（逾期+今天+今天已勾）');
+  assert.ok(markup.includes('今天') && markup.includes('已完成'), '规划缺分组');
+  assert.ok(markup.includes('is-done'), '完成行缺划线态');
+  assertNoLeaks(markup, '规划');
 
-/* ============================================ 要求 2：日志查询是对话框式查询 */
+  const allMarkup = render(Tasks, data, { prefs: { tasksScope: 'all' } });
+  assert.equal(occurrences(allMarkup, 'data-testid="task-row"'), 4, '全部档应有 4 行');
 
-const logs = renderToStaticMarkup(h(Logs, { data: DATA, mutate, notify }));
-
-// 页面只有一张卡片，卡头两个触发按钮：查询弹窗 / 记录弹窗。
-assert.equal(occurrences(logs, '<section class="card ">'), 1, '日志只有一张卡片（常驻表单/检索卡已删）');
-assert.ok(logs.includes('<h3 class="card-title">日志记录</h3>'), '卡片标题是「日志记录」');
-assert.ok(logs.includes('data-testid="logs-query-open"'), '卡头要有查询对话框的触发按钮');
-assert.ok(logs.includes('data-testid="logs-record-open"'), '卡头要有记录对话框的触发按钮');
-assert.match(logs, /data-testid="logs-query-open"><svg[\s\S]*?<\/svg> 查询日志<\/button>/, '查询按钮带图标与文案');
-
-// 结果列表：按 date 倒序分组（logs 没有 createdAt/updatedAt，只能用 date）。
-assert.equal(occurrences(logs, 'data-testid="logs-group"'), 2, '两个日期分组');
-assert.equal(occurrences(logs, 'data-testid="logs-list"'), 2, '每组一个列表');
-assert.equal(occurrences(logs, 'data-testid="logs-item"'), 3, '三条日志三行');
-assert.ok(at(logs, '把工作台搬进 pi-webx') < at(logs, 'SQLite 写入超时'), '今天（新）的组排在昨天（旧）的组前面');
-assert.ok(logs.includes('<span class="group-count">2</span>'), '今天那组两条');
-assert.ok(logs.includes('<span class="group-count">1</span>'), '昨天那组一条');
-assert.ok(
-  logs.includes(`<div class="group-head"><span>${formatDay(TODAY)}</span><span class="chip accent">今天</span><span class="group-count">2</span></div>`),
-  '今天的组头：日期 + 「今天」chip + 条数',
-);
-assert.ok(
-  logs.includes(`<div class="group-head"><span>${formatDay(YESTERDAY)}</span><span class="group-count">1</span></div>`),
-  '昨天的组头没有「今天」chip',
-);
-
-// 行内：级别 chip 的 tone、来源 chip 只给有来源的行、相对日期。
-assert.ok(logs.includes('<span class="chip ">信息</span>'), 'info 的 chip 无 tone');
-assert.ok(logs.includes('<span class="chip warn">警告</span>'), 'warn 的 chip tone 是 warn');
-assert.ok(logs.includes('<span class="chip danger">错误</span>'), 'error 的 chip tone 是 danger');
-assert.equal(occurrences(logs, 'class="chip ">#'), 2, '来源 chip 只出现在有 source 的行上');
-assert.ok(logs.includes('class="chip ">#pi-webx<'), '来源 chip 形如 #pi-webx');
-assert.ok(logs.includes('<span>今天</span>'), '今天的日志显示「今天」');
-assert.ok(logs.includes('<span>昨天</span>'), '昨天的日志显示「昨天」');
-assert.equal(occurrences(logs, 'class="icon-btn danger " aria-label="删除" title="删除"'), 3, '每行一个删除按钮');
-
-// 初态没有条件条、没有弹窗（filter/查询/记录都还没触发）。
-assert.ok(!logs.includes('data-testid="logs-filter-bar"'), '无筛选时不画条件条');
-assert.ok(!logs.includes('modal-backdrop'), '查询/记录弹窗默认关闭（Modal open=false 返回 null）');
-assert.ok(!logs.includes('data-testid="logs-query-form"'), '查询表单只在弹窗打开后才出现');
-
-const logsEmpty = renderToStaticMarkup(h(Logs, { data: EMPTY_DATA, mutate, notify }));
-assert.ok(logsEmpty.includes('data-testid="logs-empty"'), '零日志时是 logs-empty');
-assert.ok(logsEmpty.includes('没有匹配的日志'), '空态标题');
-assert.ok(!logsEmpty.includes('data-testid="logs-list"'), '空态不渲染列表');
-
-/* ============================================ 要求 3：需求管理是知识列表 */
-
-/** 左栏搜索 + 条目，右栏阅读区。 */
-const requirements = renderToStaticMarkup(h(Requirements, { data: DATA, mutate, notify }));
-
-assert.ok(requirements.includes('class="split" data-testid="requirements-split"'), '两栏布局的根');
-assert.ok(requirements.includes('<section class="card split-list">'), '左栏卡片挂 split-list');
-assert.ok(requirements.includes('<div class="card-body split-list-body">'), '左栏 body 挂 split-list-body');
-assert.ok(requirements.includes('<section class="card split-main">'), '右栏卡片挂 split-main');
-assert.ok(requirements.includes('<h3 class="card-title">需求清单</h3>'), '左栏标题「需求清单」');
-assert.ok(requirements.includes('data-testid="requirements-search"'), '左栏顶部有搜索框');
-assert.ok(requirements.includes('placeholder="搜索标题或备注"'), '搜索框占位文案（标题或备注）');
-assert.ok(requirements.includes('aria-label="搜索标题或备注"'), '搜索框无障碍名');
-
-// 列表：优先级排序（high → normal → low），同档 updatedAt 新的在前。
-assert.equal(occurrences(requirements, 'data-testid="requirements-item"'), 3, '三条需求三个条目');
-assert.ok(at(requirements, '工作台迁移进 pi-webx') < at(requirements, '界面契约定稿'), 'high 排最前');
-assert.ok(at(requirements, '界面契约定稿') < at(requirements, '补实施记录'), 'low 排最后');
-const listOpen = at(requirements, 'data-testid="requirements-list"');
-const listClose = at(requirements, '</ul>', listOpen);
-for (const title of ['工作台迁移进 pi-webx', '界面契约定稿', '补实施记录']) {
-  const itemAt = at(requirements, title);
-  assert.ok(itemAt > listOpen && itemAt < listClose, `「${title}」必须在 requirements-list 里`);
+  assert.ok(sourceOf('../src/workbench-app/modules/Tasks.jsx').includes('parseQuickAdd'), '快速捕获语法解析未落地');
 }
-assert.equal(occurrences(requirements, '<li class="list-item">'), 3, '条目外包 li.list-item（分隔线 + flex 布局）');
-assert.ok(requirements.includes('class="entry-btn " data-testid="requirements-item" aria-pressed="false"'), '条目是整行 button.entry-btn，未选中');
-assert.ok(requirements.includes('<span class="chip danger">高</span>'), '优先级 chip tone：高 = danger');
-assert.ok(requirements.includes('<span class="chip ">中</span>'), '优先级 chip tone：中 = 无 tone');
-assert.ok(requirements.includes('<span class="chip ok">低</span>'), '优先级 chip tone：低 = ok');
-assert.ok(requirements.includes('<span class="chip warn">待评审</span>'), '状态 chip tone：待评审 = warn');
-assert.ok(requirements.includes('<span class="chip accent">开发中</span>'), '状态 chip tone：开发中 = accent');
-assert.ok(requirements.includes('<span class="chip ok">已交付</span>'), '状态 chip tone：已交付 = ok');
-assert.equal(occurrences(requirements, 'note-preview'), 2, 'note-preview 只出现在有备注的条目上');
-assert.ok(requirements.includes('class="item-note note-preview">十个模块搬进来\n先钉结构<'), '备注预览保留原文');
 
-// 未选中时右栏是阅读区空态（规则 B 外包容器）。
-assert.ok(requirements.includes('data-testid="requirements-reader-empty"'), '未选中时右栏是 reader-empty');
-assert.ok(requirements.includes('选一条需求开始阅读'), '空态标题');
-assert.ok(!requirements.includes('data-testid="requirements-reader"'), '未选中不渲染阅读区本体');
+/* ================================================== 3. 工作助理：看板 / 列表双视图 */
 
-/**
- * 阅读区由 `selectedId`（初值空串）驱动，而 `selected` 是从 `data.requirements` 现算的
- * （不经 effect）——塞一条 `id: ''` 的假记录，SSR 就能渲染出**真实**的阅读区分支。
- */
-const readerRow = (over: Partial<Row> = {}): Row => ({
-  id: '',
-  title: '选中后的阅读区',
-  priority: 'high',
-  status: 'doing',
-  note: '第一行背景\n第二行验收标准',
-  createdAt: '2026-09-18T01:00:00.000Z',
-  updatedAt: '2026-09-24T02:00:00.000Z',
-  ...over,
-});
-const renderRequirements = (rows: Row[]): string =>
-  renderToStaticMarkup(h(Requirements, { data: { ...DATA, requirements: rows }, mutate, notify }));
+{
+  const kanban = render(Works, data);
+  assert.ok(kanban.includes('data-module="works"'), '助理缺 data-module');
+  assert.ok(kanban.includes('data-testid="works-board"'), '默认应是看板');
+  assert.equal(occurrences(kanban, 'data-testid="works-col"'), 3, '看板应三列');
+  assert.equal(occurrences(kanban, 'data-testid="work-card"'), 3, '看板卡数应等于记录数');
+  assert.ok(kanban.includes('draggable="true"'), '卡片应可拖动改状态');
+  assertNoLeaks(kanban, '助理看板');
 
-const reader = renderRequirements([readerRow()]);
+  const list = render(Works, data, { prefs: { worksView: 'list' } });
+  assert.ok(list.includes('data-testid="works-table"'), 'list 偏好应是表格视图');
+  assert.ok(!list.includes('data-testid="works-board"'), 'list 视图不该渲染看板');
+  assert.equal(occurrences(list, 'data-testid="work-row"'), 3, '列表行数应等于记录数');
 
-assert.ok(reader.includes('data-testid="requirements-reader"'), '选中后渲染阅读区');
-assert.ok(reader.includes('data-testid="requirements-reader-title"'), '阅读区大标题');
-assert.ok(reader.includes('<h3 class="reader-title" data-testid="requirements-reader-title">选中后的阅读区</h3>'), '标题挂在 h3.reader-title 上');
-assert.ok(reader.includes('data-testid="requirements-reader-meta"'), '阅读区 meta 行');
-assert.ok(reader.includes('<span class="chip danger">优先级 高</span>'), '阅读区 meta 显示「优先级 高」');
-assert.ok(reader.includes('<span class="chip accent">开发中</span>'), '阅读区 meta 显示状态 chip');
-assert.ok(reader.includes('<span class="time">更新于 '), '阅读区 meta 显示更新时间');
-assert.ok(reader.includes('data-testid="requirements-reader-body"'), '阅读区正文容器');
-assert.ok(reader.includes('<div class="reader-body" data-testid="requirements-reader-body">第一行背景\n第二行验收标准</div>'), '正文保留换行（pre-wrap）');
-for (const testid of ['requirements-back', 'requirements-advance', 'requirements-edit', 'requirements-delete']) {
-  assert.ok(reader.includes(`data-testid="${testid}"`), `阅读区底部要有「${testid}」按钮`);
+  const worksSource = sourceOf('../src/workbench-app/modules/Works.jsx');
+  assert.ok(worksSource.includes('onDragStart') && worksSource.includes('onDrop'), '看板缺拖拽接线');
+  assert.ok(worksSource.includes("api.patchRecord('works'"), '拖拽落库未接线');
+
+  const emptyWorks = render(Works, { ...fakeData(), works: [] }, { empty: true });
+  assert.ok(emptyWorks.includes('data-testid="works-load-demo"'), '空库缺演示数据入口');
 }
-assert.ok(reader.includes('class="btn btn-danger" data-testid="requirements-delete"'), '删除是危险样式按钮');
-// 选中态：左栏对应条目点亮。
-assert.ok(reader.includes('class="entry-btn is-active" data-testid="requirements-item" aria-pressed="true"'), '选中条目有 is-active 与 aria-pressed');
 
-// 阅读区正文兜底与推进/退回的禁用边界（两端禁用，中间两头都可点）。
-const readerNoNote = renderRequirements([readerRow({ note: '' })]);
-assert.ok(
-  readerNoNote.includes('<div class="reader-body" data-testid="requirements-reader-body">（没有备注）</div>'),
-  '没有备注时阅读区显示「（没有备注）」兜底',
-);
-const readerTodo = renderRequirements([readerRow({ status: 'todo' })]);
-assert.ok(/data-testid="requirements-back"[^>]*disabled/.test(readerTodo), 'todo 是第一态，退回要禁用');
-assert.ok(!/data-testid="requirements-advance"[^>]*disabled/.test(readerTodo), 'todo 还能推进');
-const readerDone = renderRequirements([readerRow({ status: 'done' })]);
-assert.ok(!/data-testid="requirements-back"[^>]*disabled/.test(readerDone), 'done 还能退回');
-assert.ok(/data-testid="requirements-advance"[^>]*disabled/.test(readerDone), 'done 是末态，推进要禁用');
+/* ================================================== 4. 问题修复：列表（用户定调） */
 
-// 零数据：左栏空态（规则 B），右栏阅读区空态不变。
-const reqsEmpty = renderToStaticMarkup(h(Requirements, { data: EMPTY_DATA, mutate, notify }));
-assert.ok(reqsEmpty.includes('data-testid="requirements-list-empty"'), '零需求时左栏空态');
-assert.ok(reqsEmpty.includes('还没有需求'), '左栏空态标题');
-assert.ok(reqsEmpty.includes('data-testid="requirements-reader-empty"'), '零需求时右栏仍是阅读区空态');
-assert.ok(!reqsEmpty.includes('data-testid="requirements-list"'), '空态不渲染列表');
+{
+  const markup = render(Fixes, data);
+  assert.ok(markup.includes('data-module="fixes"'), '修复缺 data-module');
+  assert.equal(occurrences(markup, 'data-testid="fix-row"'), 3, '修复应是列表且行数正确');
+  assert.ok(markup.includes('data-testid="fixes-quick-add"'), '修复缺快速捕获');
+  assert.ok(!markup.includes('kanban') && !markup.includes('work-card'), '修复模块不许出现看板痕迹（用户定调：列表）');
+  assertNoLeaks(markup, '修复');
 
-// 导入来的记录可能缺 note（store.import 只校验必填项，server/workbench/store.ts:76-83）：
-// 缺 note 不该让模块崩，条目照常渲染。
-const sparse = renderRequirements([{ id: 's1', title: '导入来的老记录', priority: 'normal', status: 'todo', createdAt: '2026-09-01T01:00:00.000Z' }]);
-assert.equal(occurrences(sparse, 'data-testid="requirements-item"'), 1, '缺 note 的导入记录照常出条目');
-assert.ok(sparse.includes('导入来的老记录'), '缺 note 的导入记录标题要出现');
+  const fixesSource = sourceOf('../src/workbench-app/modules/Fixes.jsx');
+  assert.ok(fixesSource.includes("api.addRecord('logs'"), '修复详情应能回记日志');
+  assert.ok(fixesSource.includes("type: 'fixes'"), '回记日志应带 fix 关联');
 
-/* ============================================ 要求 4：代码开发是编辑器工作区 */
-
-const codes = renderToStaticMarkup(h(Codes, { data: DATA, mutate, notify }));
-
-assert.ok(codes.includes('class="split" data-testid="codes-split"'), '两栏布局的根');
-assert.ok(codes.includes('<section class="card split-list">'), '左栏卡片挂 split-list');
-assert.ok(codes.includes('<div class="card-body split-list-body">'), '左栏 body 挂 split-list-body');
-assert.ok(codes.includes('<section class="card split-main">'), '右栏卡片挂 split-main');
-assert.ok(codes.includes('<h3 class="card-title">文件</h3>'), '左栏标题「文件」');
-assert.ok(codes.includes('data-testid="codes-new"'), '卡头有新建入口（codes-new）');
-assert.ok(codes.includes('aria-label="新建开发事项"'), '新建按钮的无障碍名');
-
-// 文件树：按 project 分组（空 project 归「未分组」），组内 updatedAt 倒序。
-assert.equal(occurrences(codes, 'data-testid="codes-tree-group"'), 2, '两个分组（pi-webx / 未分组）');
-assert.ok(at(codes, 'tree-group-head">pi-webx<') < at(codes, 'tree-group-head">未分组<'), '分组顺序沿用数据里的出现顺序');
-assert.ok(codes.includes('<p class="tree-group-head">未分组</p>'), '空 project 归「未分组」组');
-assert.equal(occurrences(codes, 'data-testid="codes-tree-item"'), 3, '三个文件条目');
-assert.ok(at(codes, 'check-workbench-ui.ts') < at(codes, '样式契约落库'), '组内按 updatedAt 倒序');
-assert.ok(codes.includes('data-testid="codes-tree-item" class="entry-btn tree-item " aria-pressed="false"'), '条目是 entry-btn tree-item');
-assert.ok(codes.includes('<span class="tree-name">check-workbench-ui.ts</span>'), '等宽标题 tree-name');
-assert.ok(codes.includes('<span class="chip accent">进行中</span>'), '进行中的状态 chip');
-assert.ok(codes.includes('<span class="chip warn">待办</span>'), '待办的状态 chip');
-assert.ok(codes.includes('<span class="chip ok">已完成</span>'), '已完成的状态 chip');
-assert.equal(occurrences(codes, 'dot-dirty'), 0, '什么都没打开时不点亮脏圆点');
-
-// 右栏初始是编辑器空态（active/draft 为 null）。
-assert.ok(codes.includes('data-testid="codes-editor-empty"'), '没打开条目时右栏是编辑器空态');
-assert.ok(codes.includes('从左侧打开一个事项'), '空态标题');
-assert.ok(codes.includes('选中文件树里的一条，右侧就会打开编辑器'), '空态提示');
-
-const codesEmpty = renderToStaticMarkup(h(Codes, { data: EMPTY_DATA, mutate, notify }));
-assert.ok(codesEmpty.includes('data-testid="codes-tree-empty"'), '零记录时左栏空态');
-assert.ok(codesEmpty.includes('还没有开发事项'), '空态标题');
-assert.ok(codesEmpty.includes('data-testid="codes-editor-empty"'), '零记录时右栏仍是编辑器空态');
-
-/**
- * Codes 的编辑器打开态**做不到 SSR**：`activeId` 初值是 ''，`draft` 只能由 `useEffect`
- * 播种（modules/Codes.jsx:82-91），而 SSR 不跑 effect。按 `check-task-panel.ts` 的做法
- * 读源码钉结构——这是源码级钉子，不是行为证据。
- */
-const codesSource = sourceOf('../src/workbench-app/modules/Codes.jsx');
-assert.ok(codesSource.includes('data-testid="codes-editor"'), '打开条目后渲染 codes-editor');
-assert.ok(codesSource.includes('className="editor-tabs"'), '编辑器有 tab 栏');
-assert.ok(codesSource.includes('<span className="editor-tab is-active" data-testid="codes-tab">'), '当前 tab 高亮');
-assert.ok(codesSource.includes('data-testid="codes-tab-dirty"'), 'tab 上有脏标记圆点');
-assert.ok(codesSource.includes('className="editor-toolbar"'), 'tab 下面是三列工具条');
-for (const testid of ['codes-title-input', 'codes-project-input', 'codes-status-select']) {
-  assert.ok(codesSource.includes(`data-testid="${testid}"`), `工具条要有「${testid}」控件`);
+  const emptyFixes = render(Fixes, { ...fakeData(), fixes: [] }, { empty: true });
+  assert.ok(emptyFixes.includes('data-testid="fixes-load-demo"'), '空库缺演示数据入口');
+  assert.ok(emptyFixes.includes('data-testid="fixes-empty"'), '空库缺空态');
 }
-assert.ok(codesSource.includes('className="editor-area"'), '编辑区外壳 editor-area');
-assert.ok(codesSource.includes('data-testid="codes-gutter"'), '编辑区有行号槽 codes-gutter');
-assert.ok(codesSource.includes('className="editor-input"'), '编辑区有等宽编辑框');
-assert.ok(codesSource.includes('data-testid="codes-editor-input"'), '编辑框 testid');
-assert.ok(codesSource.includes('wrap="off"'), 'textarea 必须 wrap="off"（否则软换行使行号错位）');
-assert.ok(codesSource.includes('maxLength={5000}'), 'note 上限 5000（服务端 schema 同值）');
-assert.ok(codesSource.includes('className="editor-status"'), '编辑器有状态栏');
-assert.ok(codesSource.includes('data-testid="codes-statusbar"'), '状态栏 testid');
-assert.ok(codesSource.includes('data-testid="codes-line-count"'), '状态栏有行数');
-assert.ok(codesSource.includes('data-testid="codes-save"'), '状态栏有保存按钮');
-assert.ok(codesSource.includes('data-testid="codes-dirty-dot"'), '文件树当前项也有脏圆点');
-assert.ok(
-  codesSource.includes("if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 's')"),
-  '⌘S / Ctrl+S 走同一条保存路径',
-);
-assert.ok(codesSource.includes('<IconButton label={TEXT.delete} tone="danger" onClick={() => setPendingDelete(active)}>'), 'tab 行内有删除入口（removeRecord 的 UI 入口）');
 
-/* ================================ 要求 5：对话面板正文与 /chat 渲染一致 */
+/* ================================================== 5. 日志查询：对话框（用户定调） */
 
-const CHAT_TEXT = '**加粗** 与 `行内代码`\n\n- 列表甲\n- 列表乙\n\n> 引用一句\n\n```js\nconst answer = 42\n```\n';
+{
+  const markup = render(Logs, data);
+  assert.ok(markup.includes('data-module="logs"'), '日志缺 data-module');
+  assert.ok(markup.includes('data-testid="logs-list"'), '日志主界面缺结果表');
+  assert.equal(occurrences(markup, 'data-testid="log-row"'), 3, '日志行数应等于记录数');
+  assert.ok(markup.includes('data-testid="logs-query-open"'), '日志缺「查询日志」入口');
+  assert.ok(markup.includes('data-testid="logs-record-open"'), '日志缺「记录日志」入口');
+  assert.ok(!markup.includes('logs-query-form') && !markup.includes('logs-record-form'), '弹窗默认必须关闭（用户定调：对话框形式）');
+  assert.ok(!markup.includes('logs-filter-bar'), '无筛选时不该画条件条');
+  assertNoLeaks(markup, '日志');
 
-/** Markdown 要 ConfigProvider + motion 包着，否则 MotionProvider 直接抛（见文件头）。 */
-const renderMarkdown = (text: string): string =>
-  renderToStaticMarkup(
-    h(ConfigProvider, { motion, children: h(AssistantMarkdown, { text }) }),
+  const logsSource = sourceOf('../src/workbench-app/modules/Logs.jsx');
+  assert.ok(logsSource.includes("api.addRecord('logs'"), '记录日志未接线');
+  assert.ok(logsSource.includes('queryOpen') && logsSource.includes('recordOpen'), '查询/记录弹窗状态未落地');
+
+  const emptyLogs = render(Logs, { ...fakeData(), logs: [] }, { empty: true });
+  assert.ok(emptyLogs.includes('data-testid="logs-load-demo"'), '空库缺演示数据入口');
+}
+
+/* ================================================== 6. 需求管理：知识列表（用户定调） */
+
+{
+  const markup = render(Requirements, data);
+  assert.ok(markup.includes('data-module="requirements"'), '需求缺 data-module');
+  assert.ok(markup.includes('data-testid="req-split"'), '需求应是左右两栏');
+  assert.equal(occurrences(markup, 'data-testid="req-item"'), 3, '左栏条目数应等于记录数');
+  assert.ok(markup.includes('data-testid="req-search"'), '左栏缺搜索');
+  assert.ok(markup.includes('data-testid="req-reader"'), '右栏阅读区容器应常驻');
+  assert.ok(markup.includes('data-testid="req-reader-empty"'), '未选中时应是阅读区空态');
+  assertNoLeaks(markup, '需求');
+
+  // 选中态：旧契约塞一条 id:'' 的假记录驱动 SSR 选中分支。
+  const withBlank = fakeData();
+  // 让第一条任务引用这条 id 为空的占位需求，选中态阅读区才会渲染关联任务。
+  ((withBlank.tasks as Array<Record<string, unknown>>)[0]).refs = [{ type: 'requirements', id: '' }];
+  (withBlank.requirements as Array<Record<string, unknown>>).unshift({
+    id: '', title: '占位选中', priority: 'normal', status: 'done', note: '**加粗**与`代码`', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z`,
+  });
+  const selected = render(Requirements, withBlank);
+  assert.ok(selected.includes('data-testid="req-reader-title"'), '选中态缺标题');
+  assert.ok(selected.includes('data-testid="req-reader-body"'), '选中态缺正文');
+  assert.ok(selected.includes('<strong>'), '阅读区应渲染 markdown 加粗');
+  assert.ok(!textOf(selected).includes('**'), '阅读区不应残留 markdown 标记');
+  assert.ok(selected.includes('data-testid="req-task"'), '关联任务缺失（任务引用需求的假数据）');
+  // done 是终态：推进按钮必须禁用，防止推出未知状态。
+  const advanceIndex = selected.indexOf('data-testid="req-advance"');
+  assert.ok(advanceIndex >= 0 && selected.slice(advanceIndex, advanceIndex + 200).includes('disabled'), '终态需求的推进按钮应禁用');
+
+  const emptyReq = render(Requirements, { ...fakeData(), requirements: [] }, { empty: true });
+  assert.ok(emptyReq.includes('data-testid="req-load-demo"'), '空库缺演示数据入口');
+}
+
+/* ================================================== 7. 代码开发：编辑器工作区（用户定调） */
+
+{
+  const markup = render(Codes, data);
+  assert.ok(markup.includes('data-module="codes"'), '代码模块缺 data-module');
+  assert.ok(markup.includes('data-testid="codes-tree-panel"'), '代码模块缺文件树面板');
+  assert.equal(occurrences(markup, 'data-testid="code-item"'), 3, '树项数应等于记录数');
+  assert.ok(markup.includes('data-testid="codes-tree-group"'), '文件树应按 project 分组');
+  assert.ok(markup.includes('data-testid="codes-editor-empty"'), '未打开事项时应是空编辑器');
+  assert.ok(markup.includes('data-testid="codes-new"'), '代码模块缺新建入口');
+  assertNoLeaks(markup, '代码');
+
+  const codesSource = sourceOf('../src/workbench-app/modules/Codes.jsx');
+  assert.ok(codesSource.includes("'s'") && codesSource.includes('metaKey'), '编辑器缺 ⌘S 保存');
+  assert.ok(codesSource.includes('codes-gutter'), '编辑器缺行号槽');
+  assert.ok(codesSource.includes('preventDefault'), '⌘S 未阻止浏览器默认保存');
+}
+
+/* ================================================== 8. AI 面板正文：与 /chat 渲染一致 */
+
+{
+  const markup = renderToStaticMarkup(
+    h(ConfigProvider, { motion },
+      h(AssistantMarkdown, { text: '标题\n\n**加粗**与`代码`\n\n- 甲\n- 乙\n\n```js\nconst a = 1\n```' })),
+  );
+  assert.ok(markup.includes('<strong>'), 'AssistantMarkdown 缺加粗渲染');
+  assert.ok(markup.includes('<code'), 'AssistantMarkdown 缺行内代码渲染');
+  assert.ok(markup.includes('<li'), 'AssistantMarkdown 缺列表渲染');
+  assert.ok(markup.includes('<pre'), 'AssistantMarkdown 缺代码块渲染');
+  assert.ok(!textOf(markup).includes('**') && !textOf(markup).includes('```'), 'AssistantMarkdown 残留 markdown 标记');
+}
+
+/* ================================================== 9. 知识库：三栏 + [[双链]] 面板 */
+
+{
+  const KB_A = '9000000a-0000-4000-8000-00000000000a';
+  const KB_B = '9000000b-0000-4000-8000-00000000000b';
+  const KB_C = '9000000c-0000-4000-8000-00000000000c';
+  const TASK_KB = '9000000d-0000-4000-8000-00000000000d';
+
+  // 笔记 A 是选中项：正文 [[知识库字段约定]] 指向 B，refs 里还手写了一条指向任务；
+  // 笔记 C 与那条任务反向引用 A——出链 / 反链两个方向都有数据。
+  const kbData: Record<string, unknown> = {
+    ...fakeData(),
+    knowledge: [
+      {
+        id: KB_A, title: '工作台双链设计', body: '正文引用 [[知识库字段约定]]，还有 **加粗** 与 `代码`。',
+        tags: ['设计', '知识库'], refs: [{ type: 'knowledge', id: KB_B }, { type: 'tasks', id: TASK_KB }],
+        starred: true, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z`,
+      },
+      {
+        id: KB_B, title: '知识库字段约定', body: 'title 必填，body 长文本。',
+        tags: ['约定'], refs: [], starred: false, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:30:00.000Z`,
+      },
+      {
+        id: KB_C, title: '链接面板验收清单', body: '检查 [[工作台双链设计]] 的反链。',
+        tags: ['验收'], refs: [{ type: 'knowledge', id: KB_A }], starred: false, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z`,
+      },
+    ],
+    tasks: [
+      ...(fakeData().tasks as Array<Record<string, unknown>>),
+      {
+        id: TASK_KB, title: '给知识库补反链断言', done: false, due: TODAY, priority: 'normal', tag: '验收',
+        tags: ['验收'], refs: [{ type: 'knowledge', id: KB_A }], createdAt: `${TODAY}T09:00:00.000Z`,
+      },
+    ],
+  };
+
+  // 未选中（默认）：左栏列表、来源徽标、动态来源筛选齐全。
+  const idle = render(Knowledge, kbData);
+  assert.ok(idle.includes('data-module="knowledge"'), '知识库缺 data-module');
+  assert.ok(idle.includes('data-testid="kb-split"'), '知识库应是三栏');
+  assert.equal(occurrences(idle, 'data-testid="kb-item"'), 3, '左栏条目数应等于笔记数');
+  assert.ok(idle.includes('data-testid="kb-search"'), '左栏缺搜索');
+  assert.ok(idle.includes('data-testid="kb-new"'), '左栏缺新建入口');
+  assert.ok(idle.includes('aria-label="新建笔记"'), '新建笔记应是带可访问名称的图标按钮');
+  assert.ok(idle.includes('data-testid="kb-tag-filter"'), '左栏缺标签过滤');
+  assert.ok(idle.includes('data-testid="kb-source-filter"'), '左栏缺来源筛选');
+  assert.ok(idle.includes('data-testid="kb-source-all"') && idle.includes('data-testid="kb-source-none"'), '来源筛选缺全部或无来源');
+  assert.ok(idle.includes('data-testid="kb-source-knowledge"') && idle.includes('data-testid="kb-source-tasks"'), '来源筛选应按知识笔记中实际 refs type 动态生成');
+  assert.ok(!idle.includes('data-testid="kb-source-requirements"'), '无对应来源的模块不应出现筛选 Chip');
+  assert.equal(occurrences(idle, 'data-testid="kb-item-sources"'), 2, '仅有 refs 的笔记应有来源徽标');
+  assert.ok(idle.includes('今日规划') && idle.includes('知识库'), '来源徽标应显示 LINK_LABELS 的中文名');
+  assert.ok(idle.includes('data-testid="kb-editor-empty"'), '未选中时应是编辑器空态');
+  assert.ok(idle.includes('data-testid="kb-backlinks"'), '缺右栏链接面板');
+  assert.ok(idle.includes('data-testid="kb-ask-ai"'), '缺「问小台」入口');
+  assertNoLeaks(idle, '知识库');
+
+  // 选中 A（经 kbSelectedId 驱动 SSR 选中分支）：编辑器各件 + 出链 / 反链都要有 DOM 证据。
+  const selected = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A, kbView: 'edit' } });
+  assert.ok(selected.includes('data-testid="kb-editor"'), '选中态缺编辑器容器');
+  assert.ok(selected.includes('data-testid="kb-title-input"'), '编辑器缺标题输入');
+  assert.ok(selected.includes('data-testid="kb-body-input"'), '编辑器缺正文输入');
+  assert.ok(selected.includes('data-testid="kb-save"'), '编辑器缺保存按钮');
+  assert.ok(selected.includes('data-testid="kb-preview"'), '缺预览切换');
+  assert.ok(selected.includes('data-testid="kb-sources"') && selected.includes('data-testid="kb-source-link"'), '详情标题下缺跨模块来源条');
+  assert.ok(selected.includes('沉淀自：') && selected.includes('今日规划「给知识库补反链断言」'), '来源条应带模块名和目标标题');
+  assert.equal(occurrences(selected, 'data-testid="kb-source-link"'), 1, '知识库互链不应出现在来源条');
+  const outgoingAt = selected.indexOf('data-testid="kb-outgoing"');
+  const incomingAt = selected.indexOf('data-testid="kb-incoming"');
+  assert.ok(outgoingAt >= 0 && incomingAt > outgoingAt, '链接面板缺出链 / 反链分区');
+  assert.ok(selected.slice(outgoingAt, incomingAt).includes('知识库字段约定'), '出链缺 [[标题]] 解析出的笔记');
+  assert.ok(selected.slice(outgoingAt, incomingAt).includes('给知识库补反链断言'), '出链缺手写 refs 指向的任务');
+  const incomingSlice = selected.slice(incomingAt);
+  assert.ok(incomingSlice.includes('链接面板验收清单'), '反链缺引用本篇的笔记');
+  assert.ok(incomingSlice.includes('给知识库补反链断言'), '反链缺引用本篇的任务');
+  assertNoLeaks(selected, '知识库选中态');
+
+  // 缺省预览，已存 edit/preview 偏好仍按原值生效。
+  const preview = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A } });
+  assert.ok(preview.includes('data-testid="kb-preview-body"'), '预览态缺正文容器');
+  assert.ok(preview.includes('<strong>'), '预览应渲染 markdown 加粗');
+  assert.ok(!preview.includes('data-testid="kb-body-input"'), '预览态不该出现正文输入框');
+  assert.ok(selected.includes('data-testid="kb-body-input"') && !selected.includes('data-testid="kb-preview-body"'), '已存 edit 偏好应保留编辑态');
+  const savedPreview = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A, kbView: 'preview' } });
+  assert.ok(savedPreview.includes('data-testid="kb-preview-body"'), '已存 preview 偏好应保留预览态');
+  assertNoLeaks(preview, '知识库预览');
+
+  // askAI 两种形态都要能渲染：缺省（按钮禁用）与已接线。
+  const withAI = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A }, askAI: async () => {} });
+  assert.ok(withAI.includes('data-testid="kb-ask-ai"'), 'askAI 接线后「问小台」缺失');
+  assertNoLeaks(withAI, '知识库问小台');
+
+  // 旧数据缺字段（无 body / tags / refs / starred / 时间戳）：不崩、无 undefined / NaN。
+  const legacy = render(
+    Knowledge,
+    { ...fakeData(), knowledge: [{ id: KB_B, title: '旧笔记' }] },
+    { prefs: { kbSelectedId: KB_B } },
+  );
+  assert.ok(legacy.includes('data-module="knowledge"'), '旧数据缺字段时模块应仍渲染');
+  assert.ok(legacy.includes('data-testid="kb-editor"'), '旧数据应能打开编辑器');
+  assertNoLeaks(legacy, '知识库旧数据');
+
+  // 完全没有 knowledge 键（库还没这个模块）：空态 + 空库引导 + 编辑器空态。
+  const blank = render(Knowledge, { ...fakeData() }, { empty: true, onLoadDemo: async () => {} });
+  assert.ok(blank.includes('data-testid="kb-empty"'), '无笔记时应是空态');
+  assert.ok(blank.includes('data-testid="kb-load-demo"'), '空库缺演示数据入口');
+  assert.ok(blank.includes('data-testid="kb-editor-empty"'), '无笔记时编辑器应是空态');
+  assertNoLeaks(blank, '知识库空库');
+
+  // 交互分支（⌘S、保存落库、[[解析]] 写 refs、问小台）SSR 不可达，照既有段读源码钉结构。
+  const kbSource = sourceOf('../src/workbench-app/modules/Knowledge.jsx');
+  assert.ok(kbSource.includes("api.patchRecord('knowledge'"), '保存未接 patchRecord');
+  assert.ok(kbSource.includes("api.addRecord('knowledge'"), '新建未接 addRecord');
+  assert.ok(kbSource.includes('WIKI_PATTERN') && kbSource.includes('buildRefs'), '[[双链]] 解析未落地');
+  assert.ok(kbSource.includes('metaKey') && kbSource.includes("'s'"), '编辑器缺 ⌘S 保存');
+  assert.ok(kbSource.includes('preventDefault'), '⌘S 未阻止浏览器默认保存');
+  assert.ok(kbSource.includes('AssistantMarkdown'), '预览未用 AssistantMarkdown');
+  assert.ok(kbSource.includes('api.links'), '链接面板未接服务端 links 端点');
+  assert.ok(kbSource.includes('activeSource') && kbSource.includes('sourceTypesOf(row).includes(activeSource)'), '来源 Chip 未接入列表过滤');
+  assert.ok(kbSource.includes('onClick={() => openLink(source)}'), '来源条未复用跨模块跳转');
+  assert.ok(kbSource.includes('askAI'), '「问小台」未接 askAI');
+  assert.ok(kbSource.includes('typeof window'), '渲染期浏览器访问未加 typeof window 守卫');
+}
+
+console.log('workbench UI: knowledge module (three columns, wiki links, ask-ai) passed')
+console.log('workbench UI: 7 modules (widget board, capture, dual views, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
+
+/* ================================================== 10. AI 面板：「问小台」失败路径的本地兜底 */
+
+{
+  // pi 接口不可用时 send() 只往面板丢一条底层 destructure 报错，笔记标题 / 正文整段消失。
+  // App 把文本落成 pending 用户气泡（带「未送达」脚标），错误条换成人话——面板必须看得到内容。
+  const askText = '【知识库笔记】工作台双链设计\n\n正文引用 [[知识库字段约定]]。';
+  const markup = renderToStaticMarkup(h(AIPanel, {
+    chat: [
+      { id: 'ask-pending', role: 'user', text: askText, at: Date.now(), pending: true },
+      { id: 'pi-error', role: 'error', text: '小台暂时连不上，这条内容没有发出去。已保留在面板里，点右上角「重试连接」恢复后再发一次。', at: Date.now() },
+    ],
+    busy: false,
+    status: 'error',
+    modelName: 'pi-webx',
+    onSend: () => {},
+    onNew: () => {},
+    onRetry: () => {},
+    onRefreshData: () => {},
+    isMobile: false,
+    onClose: () => {},
+  }));
+  assert.ok(markup.includes('data-testid="chat-scroll"'), 'AI 面板缺对话容器');
+  assert.ok(markup.includes('data-pending="true"'), '问小台失败后应保留 pending 用户气泡');
+  assert.ok(textOf(markup).includes('【知识库笔记】工作台双链设计'), 'pending 气泡应原样保留笔记标题/正文');
+  assert.ok(textOf(markup).includes('未送达'), 'pending 气泡应标注未送达');
+  assert.ok(textOf(markup).includes('小台暂时连不上'), '失败路径应给友好错误文案');
+  const pendingAt = markup.indexOf('data-pending="true"');
+  const errorAt = markup.indexOf('data-testid="chat-msg-error"');
+  assert.ok(pendingAt >= 0 && errorAt > pendingAt, 'pending 气泡应排在错误条之前');
+
+  // 接线钉在 App 源码上（错误路径依赖 send 内部吞异常，SSR 不可达）。
+  const appSource = sourceOf('../src/workbench-app/App.jsx');
+  assert.ok(appSource.includes("setAsk({ pending:"), 'askAI 失败路径的本地草稿未接线');
+  assert.ok(appSource.includes('nextAskState(current, { chat, busy })'), 'pending 状态机未按 nextAskState 派生');
+  assert.ok(appSource.includes('AI_TEXT.askFailed'), '失败路径的友好错误文案未接线');
+  assert.ok(appSource.includes('chat={panelChat}'), '面板应渲染带兜底的消息列表');
+
+  // pending 气泡状态机：decision 是纯函数，逐场景直测（浏览器验收回归点）——
+  // pi 不可用时 send 先在途空跑一截（chat 空、busy=true）才把错误落进 chat，
+  // 早前版本把在途空态当成「面板被清空」，气泡 ~150ms 被自己撤掉、askFailed 置不上。
+  const pendingNote = { text: '【知识库笔记】工作台双链设计', at: 1_700_000_000_000 };
+  const echo = [{ id: 'u1', role: 'user', text: pendingNote.text, at: 1_700_000_000_100 }];
+  const failure = [{ id: 'pi-error', role: 'error', text: '底层报错', at: 1_700_000_000_200 }];
+
+  // 1. 发送在途 + transcript 还空着：正常空态，草稿必须留着。
+  const inFlight = nextAskState({ pending: pendingNote, failed: false }, { chat: [], busy: true });
+  assert.deepEqual(inFlight, { pending: pendingNote, failed: false }, '发送在途的空 chat 不是面板被清空，不能撤 pending');
+
+  // 2. 完整失败时间线：在途空态 → 错误落进 chat，草稿一直在、失败标记置上。
+  let ask = { pending: pendingNote, failed: false };
+  ask = nextAskState(ask, { chat: [], busy: true });
+  ask = nextAskState(ask, { chat: [], busy: true });
+  assert.deepEqual(ask, { pending: pendingNote, failed: false }, '在途期每次重算都不该动草稿');
+  ask = nextAskState(ask, { chat: failure, busy: false });
+  assert.deepEqual(ask, { pending: pendingNote, failed: true }, 'send 失败落错误后：草稿保留 + 失败标记置上');
+
+  // 3. 回显成功（同文本 user 消息）：撤草稿、清失败标记。
+  assert.deepEqual(
+    nextAskState({ pending: pendingNote, failed: true }, { chat: [...echo, ...failure], busy: false }),
+    { pending: null, failed: false },
+    'transcript 回显后应撤掉本地草稿',
   );
 
-const chatMd = renderMarkdown(CHAT_TEXT);
+  // 4. 显式新对话：空闲 + 面板空才撤销（clearChat 也会直接置 IDLE，这里兜底）。
+  assert.deepEqual(
+    nextAskState({ pending: pendingNote, failed: true }, { chat: [], busy: false }),
+    { pending: null, failed: false },
+    '空闲且面板空（新对话清空 transcript）才撤 pending',
+  );
 
-assert.ok(chatMd.includes('class="chat-md" data-testid="chat-markdown"'), '正文容器是 div.chat-md + testid');
-// 真实元素，不是转义后的字面量。
-assert.ok(chatMd.includes('<strong>加粗</strong>'), '**加粗** 渲染成 <strong>');
-assert.ok(chatMd.includes('<code>行内代码</code>'), '`行内代码` 渲染成 <code>');
-assert.ok(chatMd.includes('<li>列表甲</li>') && chatMd.includes('<li>列表乙</li>'), '列表项渲染成 <li>');
-assert.ok(chatMd.includes('<blockquote>'), '引用渲染成 <blockquote>');
-assert.ok(chatMd.includes('<pre><code>'), '围栏代码块渲染成 <pre><code>');
-// 与 /chat 同款 props：chat 变体、14px、全宽代码块。
-assert.ok(chatMd.includes('--lobe-markdown-font-size:14px'), 'fontSize 与 /chat 一致（14）');
-assert.ok(chatMd.includes('data-code-type="highlighter"'), 'fullFeaturedCodeBlock：代码块走高亮块');
-// 纯文本里不许残留 Markdown 标记。
-const chatText = textOf(chatMd);
-assert.ok(!chatText.includes('**'), `纯文本里不该残留 **：${JSON.stringify(chatText.slice(0, 120))}`);
-assert.ok(!chatText.includes('```'), `纯文本里不该残留 \`\`\`：${JSON.stringify(chatText.slice(0, 120))}`);
-for (const body of ['加粗', '行内代码', '列表甲', '列表乙', '引用一句', 'const answer = 42']) {
-  assert.ok(chatText.includes(body), `正文要出现「${body}」`);
+  // 5. 没有草稿时永远是 IDLE；在途且面板有其他内容（助手回复中）时继续等。
+  assert.deepEqual(nextAskState({ pending: null, failed: true }, { chat: [], busy: true }), { pending: null, failed: false });
+  assert.deepEqual(
+    nextAskState({ pending: pendingNote, failed: false }, { chat: [{ id: 'a1', role: 'assistant', text: '在想' }], busy: true }),
+    { pending: pendingNote, failed: false },
+    '在途且无回显无错误时应继续等',
+  );
 }
-// 空/空白文本不渲染容器（免得出现空壳）。
-assert.equal(renderMarkdown(''), '', '空文本渲染为空');
-assert.equal(renderMarkdown('   \n  '), '', '纯空白文本也渲染为空');
 
-/* ------------------------------------------------ 对话面板外壳：源码级钉子 */
-
-/**
- * `ChatMessage` / `ToolRows` 是 `App.jsx` 的模块作用域私有组件、没有导出，而 App 的模块图
- * 在模块级就摸 `window`（`src/lib/connection.ts` 的 `sharedConnection`），Node 里 import
- * 不起来（同 `check-task-panel.ts:19-20` 的说明），所以外壳结构只能读源码钉。
- */
-const appSource = sourceOf('../src/workbench-app/App.jsx');
-assert.ok(appSource.includes('import AssistantMarkdown from '), '面板正文复用 AssistantMarkdown（同一套 Markdown）');
-assert.ok(appSource.includes('data-testid="chat-scroll"'), '滚动容器落 testid');
-assert.ok(appSource.includes("if (message.role === 'tool') return <ToolRows tools={message.tools} />"), '独立的 role:tool 消息也走 ToolRows（完整输出在真实会话里才看得见）');
-assert.ok(appSource.includes('<ToolRows tools={message.tools} />'), 'assistant 消息附属的 tools 同样渲染工具行');
-assert.ok(appSource.includes('data-testid="chat-tool-row"'), '工具行容器 testid');
-assert.ok(appSource.includes('data-testid="chat-tool-entry"'), '单条工具 testid');
-assert.ok(appSource.includes('data-testid="chat-tool-details"'), '可展开完整输出 testid');
-assert.ok(appSource.includes('<pre className="tool-output">{tool.output}</pre>'), '完整输出原样进 <pre>（截断挪到展示层 previewOf）');
-assert.ok(appSource.includes('flat.length > 160 ? `${flat.slice(0, 160)}…` : flat'), '短预览取第一行、截到 160 字');
-assert.ok(appSource.includes('<div className="bubble" data-testid="chat-msg-bubble">'), '用户气泡是 div.bubble 且正文过 Markdown（<p> 里塞块级元素是非法嵌套）');
-assert.ok(appSource.includes('<div className="msg-body" data-testid="chat-msg-body">'), '助手正文走 msg-body + chat-md，不再用气泡');
-// MODULES 四条描述：不再出现「看板」。
-const modulesBlock = appSource.slice(appSource.indexOf('const MODULES = ['), appSource.indexOf(']', appSource.indexOf('const MODULES = [')));
-for (const [id, label, desc] of [
-  ['fixes', '问题修复', '问题清单、严重程度与状态流转'],
-  ['logs', '日志查询', '对话框式检索与记录开发日志'],
-  ['requirements', '需求管理', '需求知识库：搜索、列表与阅读视图'],
-  ['codes', '代码开发', '文件树 + 编辑器工作区'],
-] as const) {
-  assert.ok(modulesBlock.includes(`id: '${id}'`), `MODULES 要有 ${id}`);
-  assert.ok(modulesBlock.includes(`label: '${label}'`), `${id} 的菜单标签是「${label}」`);
-  assert.ok(modulesBlock.includes(`desc: '${desc}'`), `${id} 的描述是「${desc}」`);
-}
-assert.ok(!modulesBlock.slice(modulesBlock.indexOf("id: 'fixes'")).includes('看板'), '这四个模块的描述里不该再出现「看板」');
-
-// 工作台根组件也要 ConfigProvider（否则 /chat 那套主题与 motion 不生效）。
-const mainSource = sourceOf('../src/main.tsx');
-assert.ok(mainSource.includes(': <ConfigProvider motion={motion}><WorkbenchRoot /></ConfigProvider>'), 'main.tsx 给 WorkbenchRoot 包 ConfigProvider motion');
-
-// 截断从数据源头挪走：hook 不再 slice，完整 output 直达展示层。
-const hookSource = sourceOf('../src/workbench-app/pi-webx/useWorkbenchPiChat.jsx');
-assert.ok(!hookSource.includes('.slice(0, 160)'), 'toChatMessages 不再截断输出');
-assert.match(hookSource, /name: run\.toolName,\s*output: run\.output/, 'assistant 附属工具携带完整输出');
-assert.ok(hookSource.includes('tools: [{ name: entry.run.toolName, output: entry.run.output }]'), '独立 toolResult 消息携带完整输出');
-
-/* ------------------------------------------------------------------ 通过信息 */
-
-console.log(
-  'check-workbench-ui: ok — 问题修复单卡列表（无看板列、卡头 Segmented 带数量、快速添加同卡）、'
-  + '日志查询卡头触发按钮 + 按日期倒序分组的结果列表、'
-  + '需求管理 knowledge 列表（优先级排序、选中态、阅读区标题/meta/正文/底部四操作）与代码开发文件树 + 编辑器结构、'
-  + '对话面板 Markdown 出 <strong>/<code>/<li>/<pre> 真实元素且纯文本无 ** 与 ``` 残留；'
-  + '未验证：点击类交互（输入过滤、开/提交弹窗、切条目、脏标记、⌘S）无 DOM 环境跑不了，'
-  + 'Codes 编辑器打开态与 Logs 查询/记录弹窗走源码级钉子',
-);
+console.log('workbench UI: AI panel ask-ai fallback (pending user bubble + friendly error + nextAskState) passed');
