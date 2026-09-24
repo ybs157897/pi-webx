@@ -431,6 +431,22 @@ await check('no journal line, and no Team module, claims power-loss safety', () 
   assert.ok(!text.includes(banned), 'the journal file does not use the word this design refuses');
   assert.ok(!readFileSync(join(import.meta.dirname, '..', 'server', 'agent-team', 'team-journal.ts'), 'utf8').includes(banned));
   assert.ok(!readFileSync(join(import.meta.dirname, '..', 'server', 'agent-team', 'team-runtime.ts'), 'utf8').includes(banned));
+  // The runtime's other modules (split out of team-runtime.ts) are held to the same wording rule.
+  for (const module of [
+    'team-runtime-contract.ts',
+    'team-ops-members.ts',
+    'team-ops-tasks.ts',
+    'team-ops-delivery.ts',
+    'team-ops-replay.ts',
+    'team-ops-wait.ts',
+    'team-snapshot.ts',
+    'team-views.ts',
+  ]) {
+    assert.ok(
+      !readFileSync(join(import.meta.dirname, '..', 'server', 'agent-team', module), 'utf8').includes(banned),
+      `${module} does not use the word this design refuses`,
+    );
+  }
   assert.ok(text.includes('"v":1'), 'and every record carries the schema version');
 });
 

@@ -10,102 +10,61 @@
  *   - 消息只记 `deliveryState: 'queued'`，**不做**会话注入（`sendCustomMessage` 的投递与读回是 P3）；
  *     因此类型里虽然留了 `fresh-reader-visible` 等状态，这里永远不推进到它们。
  *   - 不声明「稳定存储」级别：那要等 fsync 之后才配说（spike 复核的措辞边界）。
+ *
+ * 拆分重构（行为与导出面不变，见文件尾的再导出）：契约在 `team-runtime-contract.ts`，
+ * 记录编解码在 `team-snapshot.ts`，只读投影在 `team-views.ts`，纯函数操作按职责在
+ * `team-ops-members.ts` / `team-ops-tasks.ts` / `team-ops-delivery.ts` /
+ * `team-ops-replay.ts` / `team-ops-wait.ts`；本文件只留编排与内存状态。
  */
 
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import type { FrozenDefinition } from '../pi/subagent-tool';
-import type {
-  TeamJournalLike,
-  TeamJournalRecord,
-} from './team-journal';
+import type { TeamJournalLike, TeamJournalRecord } from './team-journal';
+import {
+  DEFAULT_DELAY,
+  DEFAULT_TEAM_WAIT_MS,
+  MAX_TEAM_WAIT_MS,
+  type AppendTeamRecord,
+  type TeamRuntimeOptions,
+  type TeamTaskActor,
+  type TeamTaskPatch,
+} from './team-runtime-contract';
+import {
+  buildMessage,
+  claimDelivery,
+  claimDeliverySynced,
+  setMessageDeliveryState,
+  setMessagePendingReason,
+  type DeliveryLedger,
+  type TeamMessageInput,
+} from './team-ops-delivery';
+import {
+  buildMember,
+  markMembersInterrupted,
+  requestMemberCancellation,
+  requireMemberIn,
+  settleMemberIn,
+} from './team-ops-members';
+import { hydrateTeam } from './team-ops-replay';
+import { applyTaskPatch, createTaskIn, refreshBlocked } from './team-ops-tasks';
+import { notifyWaiters, raceChange, waitForSettledView } from './team-ops-wait';
+import { memberSnapshot, messageSnapshot, taskSnapshot } from './team-snapshot';
 import {
   TEAM_ERROR_CODES,
-  TEAM_INTERRUPT_REASONS,
-  TEAM_LEAD_ID,
   TeamError,
-  boundTeamText,
   isSettledMemberStatus,
-  isTaskBlocked,
-  isTerminalTaskStatus,
   type Team,
+  type TeamDeliveryMode,
   type TeamDeliveryState,
   type TeamMember,
   type TeamMemberStatus,
-  type TeamMemberView,
   type TeamMessage,
-  type TeamDeliveryMode,
-  type TeamMessageKind,
-  type TeamMessageOrigin,
-  type TeamMessageView,
   type TeamProjection,
   type TeamTask,
-  type TeamTaskStatus,
-  type TeamTaskView,
   type TeamWaitView,
 } from './team-types';
-
-/** `wait_team` 的默认与最大等待窗口；默认值让「忘记传 timeoutMs」也不会挂住一个 turn。 */
-export const DEFAULT_TEAM_WAIT_MS = 30_000;
-export const MAX_TEAM_WAIT_MS = 600_000;
-
-export interface TeamRuntimeOptions {
-  readonly now?: () => number;
-  readonly newId?: () => string;
-  /** 等待窗口的计时器，测试可替换以便零延迟断言。 */
-  readonly delay?: (ms: number) => Promise<void>;
-  /**
-   * Where state changes are appended so a restart can rebuild them (P3-A).
-   *
-   * Omitted means pure memory, which is exactly P2's behaviour — the many runtime
-   * doubles in tests keep working unchanged, and a host that wants the journal
-   * passes one in.
-   */
-  readonly journal?: TeamJournalLike;
-  /**
-   * Called after an inbox item is recorded (P3-B's injection trigger).
-   *
-   * The inbox has exactly one birth point — {@link AgentTeamRuntime.appendMessage} —
-   * so an observer here covers both a member's out-of-band message and a settle
-   * result without any tool having to cooperate. It must not throw: a broken
-   * observer must not fail the message that was already recorded.
-   */
-  readonly onInboxItem?: (message: TeamMessage) => void;
-}
-
-/** 谁在改任务：编排者（宿主，不受 ownership 限制）或某个成员。 */
-export interface TeamTaskActor {
-  readonly memberId?: string;
-}
-
-export interface TeamTaskPatch {
-  readonly status?: TeamTaskStatus;
-  readonly title?: string;
-  readonly description?: string;
-  readonly ownerMemberId?: string;
-}
-
-/**
- * The `wait_team` timer.
- *
- * **Known boundary**, registered by the independent verifier and deliberately not
- * changed: the timer is `unref()`d, so it does not by itself keep the event loop
- * alive. In a process with no other handle — a one-off script that calls
- * `wait_team` and nothing else — Node can therefore exit 0 mid-wait instead of
- * reporting a timeout. The server is unaffected: express keeps handles open for
- * the whole request, so the wait ends with a result or a timeout as documented.
- * Un-ref'ing is kept because the opposite (a referenced timer) would pin the
- * process awake for up to `MAX_TEAM_WAIT_MS` after the caller is gone.
- */
-const DEFAULT_DELAY = (ms: number): Promise<void> => new Promise((resolve) => {
-  const timer = setTimeout(resolve, ms);
-  timer.unref?.();
-});
-
-/** 冻结定义的内容指纹：同一 revision 下内容变了也能看出来（前 16 位十六进制）。 */
-export function definitionSnapshotHash(definition: FrozenDefinition): string {
-  return createHash('sha256').update(JSON.stringify(definition)).digest('hex').slice(0, 16);
-}
+import { projectTeam } from './team-views';
 
 export class AgentTeamRuntime {
   private readonly teams = new Map<string, Team>();
@@ -143,6 +102,10 @@ export class AgentTeamRuntime {
    */
   private readonly journal: TeamJournalLike | undefined;
   private readonly onInboxItem: ((message: TeamMessage) => void) | undefined;
+  /** 纯函数操作层（`team-ops-*.ts`）用的记录追加入口；包一层以保住 `this` 绑定。 */
+  private readonly append: AppendTeamRecord;
+  /** 投递账本与它需要的接缝：日志、记录追加、唤醒。 */
+  private readonly ledger: DeliveryLedger;
 
   constructor(options: TeamRuntimeOptions = {}) {
     this.now = options.now ?? Date.now;
@@ -150,6 +113,13 @@ export class AgentTeamRuntime {
     this.delay = options.delay ?? DEFAULT_DELAY;
     this.journal = options.journal;
     this.onInboxItem = options.onInboxItem;
+    this.append = (teamId, record): void => this.appendRecord(teamId, record);
+    this.ledger = {
+      claimed: this.claimed,
+      journal: this.journal,
+      appendRecord: this.append,
+      notify: (teamId): void => this.notify(teamId),
+    };
   }
 
   /** Team ids currently in memory, sorted — the replay path uses this to skip. */
@@ -207,27 +177,7 @@ export class AgentTeamRuntime {
   snapshot(teamId: string): TeamProjection | undefined {
     const team = this.teams.get(teamId);
     if (team === undefined) return undefined;
-    return {
-      teamId: team.id,
-      parentSessionId: team.parentSessionId,
-      createdAt: team.createdAt,
-      members: [...team.members.values()].map(toMemberView),
-      tasks: [...team.tasks.values()].map(toTaskView),
-      messages: team.messages.map(toMessageView),
-      notes: [
-        '投递语义是 **at-most-once**：认领记录先 fsync 落盘再发送，因此重启不会重复投递；'
-        + '代价是 fsync 之后、发送之前崩溃会让这一条丢一次，重放后表现为 inflight 且没有 candidate。'
-        + '残余边界（普通崩溃拿不到）：**已经 fsync 的认领记录本身被删除或截断**（不是崩溃丢尾），'
-        + '**且**目标会话的转录也读不回该 messageId（全新转录 / 无读回接缝）时，同一段文本会再次投递。',
-        '消息按 deliveryState 走：queued 待投、inflight 已认领（此刻它不该再被投第二次）、'
-        + 'candidate 已交出但读回未确认、fresh-reader-visible 读回已确认、failed 是闭集原因拒绝或发送失败。',
-        '没有 journal（或 journal 不可用）的运行时**不投递**：认领无法落盘时，项留在 queued 并把'
-        + 'pendingReason 记为 journal-unavailable —— 「没落地就不投」是 at-most-once 的前提。',
-        'from/to/teamId 由宿主填写；消息 payload 与任务标题/描述是模型文本，读作不可信数据。',
-        '成员的 sessionId 在 P2 是内存 run 标识（dispatch 的 runId），不是可恢复的持久会话 id，'
-        + '不能据此 open() 回一个会话；跨重启的会话关联由 P3 的 TeamJournal 引入。',
-      ],
-    };
+    return projectTeam(team);
   }
 
   /* ------------------------------------------------------------------ 成员 */
@@ -235,17 +185,7 @@ export class AgentTeamRuntime {
   /** 登记一个成员。`sessionId` 在派发返回后由 {@link settleMember} 补上（runId）。 */
   addMember(input: { readonly teamId: string; readonly definition: FrozenDefinition }): TeamMember {
     const team = this.requireTeam(input.teamId);
-    const member: TeamMember = {
-      id: this.newId(),
-      teamId: team.id,
-      definitionId: input.definition.id,
-      definitionRevision: input.definition.revision,
-      definitionSnapshotHash: definitionSnapshotHash(input.definition),
-      sessionId: '',
-      status: 'running',
-      createdAt: this.now(),
-      lastSeq: team.seq,
-    };
+    const member = buildMember(team, input.definition, { newId: this.newId, now: this.now });
     team.members.set(member.id, member);
     this.appendRecord(team.id, { type: 'member-added', member: memberSnapshot(member) });
     this.notify(team.id);
@@ -269,11 +209,8 @@ export class AgentTeamRuntime {
     readonly text?: string;
     readonly sessionId?: string;
   }): TeamMember {
-    const member = this.requireMember(input.teamId, input.memberId);
-    member.status = input.status;
-    if (input.sessionId !== undefined) member.sessionId = input.sessionId;
-    if (input.text !== undefined) member.resultText = input.text;
-    this.appendRecord(input.teamId, { type: 'member-updated', member: memberSnapshot(member) });
+    const team = this.requireTeam(input.teamId);
+    const member = settleMemberIn(team, input, this.append);
     this.notify(input.teamId);
     return member;
   }
@@ -282,6 +219,8 @@ export class AgentTeamRuntime {
    * 请求取消一个成员：状态先到 `cancelling`，再把原因交给宿主登记的取消钩子
    * （AbortSignal 经现有 adapter 下传 worker）。真正落到 `cancelled` 由派发方在
    * worker 收尾时调 {@link settleMember} —— 取消是协作式的，不假装立刻停住。
+   *
+   * 实现是 `team-ops-members.ts` 的 `requestMemberCancellation`（同一个操作）。
    */
   interruptMember(input: {
     readonly teamId: string;
@@ -296,11 +235,13 @@ export class AgentTeamRuntime {
         { memberId: member.id, status: member.status },
       );
     }
-    member.status = 'cancelling';
-    this.appendRecord(input.teamId, { type: 'member-updated', member: memberSnapshot(member) });
-    const reason = input.reason ?? '编排者取消了该成员。';
-    const cancel = this.cancels.get(member.id);
-    if (cancel !== undefined) cancel(reason);
+    requestMemberCancellation({
+      team: this.requireTeam(input.teamId),
+      member,
+      reason: input.reason ?? '编排者取消了该成员。',
+      cancels: this.cancels,
+      append: this.append,
+    });
     this.notify(input.teamId);
     return member;
   }
@@ -316,15 +257,7 @@ export class AgentTeamRuntime {
    */
   markInterrupted(teamId: string, reason: string, statusReason?: string): number {
     const team = this.requireTeam(teamId);
-    let marked = 0;
-    for (const member of team.members.values()) {
-      if (isSettledMemberStatus(member.status)) continue;
-      member.status = 'interrupted';
-      member.resultText ??= reason;
-      if (statusReason !== undefined) member.statusReason = statusReason;
-      this.appendRecord(teamId, { type: 'member-updated', member: memberSnapshot(member) });
-      marked += 1;
-    }
+    const marked = markMembersInterrupted(team, reason, statusReason, this.append);
     if (marked > 0) this.notify(teamId);
     return marked;
   }
@@ -335,10 +268,13 @@ export class AgentTeamRuntime {
     let asked = 0;
     for (const member of [...team.members.values()]) {
       if (isSettledMemberStatus(member.status)) continue;
-      member.status = 'cancelling';
-      this.appendRecord(teamId, { type: 'member-updated', member: memberSnapshot(member) });
-      const cancel = this.cancels.get(member.id);
-      if (cancel !== undefined) cancel(reason ?? 'Team 被取消。');
+      requestMemberCancellation({
+        team,
+        member,
+        reason: reason ?? 'Team 被取消。',
+        cancels: this.cancels,
+        append: this.append,
+      });
       asked += 1;
     }
     if (asked > 0) this.notify(teamId);
@@ -355,29 +291,7 @@ export class AgentTeamRuntime {
     readonly writeScopes?: readonly string[];
   }): TeamTask {
     const team = this.requireTeam(input.teamId);
-    const blockedBy = [...new Set(input.blockedBy ?? [])];
-    for (const dependency of blockedBy) {
-      if (!team.tasks.has(dependency)) {
-        throw new TeamError(
-          TEAM_ERROR_CODES.taskNotFound,
-          `blockedBy 里的任务 ${dependency} 不存在。`,
-          { taskId: dependency },
-        );
-      }
-    }
-    const task: TeamTask = {
-      id: this.newId(),
-      teamId: team.id,
-      revision: 1,
-      title: input.title,
-      description: input.description,
-      status: 'pending',
-      blockedBy,
-      writeScopes: [...new Set(input.writeScopes ?? [])],
-    };
-    if (isTaskBlocked(task, team.tasks)) task.status = 'blocked';
-    team.tasks.set(task.id, task);
-    this.appendRecord(team.id, { type: 'task-created', task: { ...task, blockedBy: [...task.blockedBy], writeScopes: [...task.writeScopes] } });
+    const task = createTaskIn(team, input, { newId: this.newId, append: this.append });
     this.notify(team.id);
     return task;
   }
@@ -390,7 +304,8 @@ export class AgentTeamRuntime {
    * 任务板 CAS 更新。
    *
    * 冲突（`expectedRevision` 不是当前 revision）抛 `TEAM_TASK_STALE_REVISION`，并把当前
-   * revision 放进 details —— 调用方据此 refresh 再试，而不是猜。
+   * revision 放进 details —— 调用方据此 refresh 再试，而不是猜。校验与应用在
+   * `team-ops-tasks.ts` 的 `applyTaskPatch`，这里只负责记日志、重算依赖与唤醒。
    */
   updateTask(input: {
     readonly teamId: string;
@@ -400,60 +315,18 @@ export class AgentTeamRuntime {
     readonly actor?: TeamTaskActor;
   }): TeamTask {
     const team = this.requireTeam(input.teamId);
-    const task = team.tasks.get(input.taskId);
-    if (task === undefined) {
-      throw new TeamError(TEAM_ERROR_CODES.taskNotFound, `任务 ${input.taskId} 不存在。`, { taskId: input.taskId });
-    }
-    if (input.expectedRevision !== task.revision) {
-      throw new TeamError(
-        TEAM_ERROR_CODES.taskStaleRevision,
-        `任务 ${task.id} 的 revision 已经变了：期望 ${input.expectedRevision}，当前 ${task.revision}。`
-        + '请先用 get_team_task 读回最新 revision 再改。',
-        { taskId: task.id, currentRevision: task.revision },
-      );
-    }
-    const actor = input.actor;
-    if (actor?.memberId !== undefined) {
-      if (task.ownerMemberId !== actor.memberId) {
-        throw new TeamError(
-          TEAM_ERROR_CODES.taskNotOwned,
-          `任务 ${task.id} 不属于当前成员（owner=${task.ownerMemberId ?? '无'}），成员只能更新自己的任务。`,
-          { taskId: task.id, ownerMemberId: task.ownerMemberId ?? null },
-        );
-      }
-      if (input.patch.ownerMemberId !== undefined) {
-        throw new TeamError(
-          TEAM_ERROR_CODES.overrideRejected,
-          '成员不能改任务的 owner；指派由编排者用 dispatch_agent 的 taskId 完成。',
-          { taskId: task.id },
-        );
-      }
-    }
-    const next = input.patch.status;
-    if (next !== undefined && next !== task.status && isTerminalTaskStatus(task.status)) {
-      throw new TeamError(
-        TEAM_ERROR_CODES.taskTerminal,
-        `任务 ${task.id} 已是终态 ${task.status}，不能再改状态。`,
-        { taskId: task.id, status: task.status },
-      );
-    }
-    if ((next === 'in_progress' || next === 'completed') && isTaskBlocked(task, team.tasks)) {
-      throw new TeamError(
-        TEAM_ERROR_CODES.taskBlocked,
-        `任务 ${task.id} 的依赖还没完成（${task.blockedBy.join('、')}），不能进入 ${next}。`,
-        { taskId: task.id, blockedBy: [...task.blockedBy] },
-      );
-    }
-    if (input.patch.title !== undefined) task.title = input.patch.title;
-    if (input.patch.description !== undefined) task.description = input.patch.description;
-    if (input.patch.ownerMemberId !== undefined) task.ownerMemberId = input.patch.ownerMemberId;
-    if (next !== undefined) task.status = next;
-    task.revision += 1;
+    const task = applyTaskPatch({
+      team,
+      taskId: input.taskId,
+      expectedRevision: input.expectedRevision,
+      patch: input.patch,
+      actor: input.actor,
+    });
     this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
     // A derived blocked↔pending change is a real state change a replay must see, so
     // each promoted/demoted task is appended too — but *without* a revision bump
     // (see `refreshBlocked`), which is why the snapshot carries its own revision.
-    this.refreshBlocked(team);
+    refreshBlocked(team, this.append);
     this.notify(team.id);
     return task;
   }
@@ -477,21 +350,6 @@ export class AgentTeamRuntime {
     });
   }
 
-  /** 依赖变化后重算 `blocked` ↔ `pending`；终态任务不动。 */
-  private refreshBlocked(team: Team): void {
-    for (const task of team.tasks.values()) {
-      if (isTerminalTaskStatus(task.status) || task.status === 'in_progress') continue;
-      const blocked = isTaskBlocked(task, team.tasks);
-      if (blocked && task.status === 'pending') {
-        task.status = 'blocked';
-        this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
-      } else if (!blocked && task.status === 'blocked') {
-        task.status = 'pending';
-        this.appendRecord(team.id, { type: 'task-updated', task: taskSnapshot(task) });
-      }
-    }
-  }
-
   /* ------------------------------------------------------------------ 消息 */
 
   /**
@@ -499,46 +357,13 @@ export class AgentTeamRuntime {
    *
    * P2 只记 `queued`：**不做会话注入**，所以没有投递尝试、也就没有 `inflight`/`candidate`/
    * `fresh-reader-visible`。这不是「已投递」，只是「宿主记下了」。
+   *
+   * 校验与组装在 `team-ops-delivery.ts` 的 `buildMessage`（收件人必须是本 Team 成员或
+   * {@link TEAM_LEAD_ID}）；这里负责入账、推进成员游标、记日志与唤醒。
    */
-  appendMessage(input: {
-    readonly teamId: string;
-    readonly from: string;
-    readonly to: string;
-    readonly kind: TeamMessageKind;
-    readonly payload: unknown;
-    readonly deliveryState?: TeamDeliveryState;
-    /** P3-B host metadata; never accepted from a model-facing tool. */
-    readonly origin?: TeamMessageOrigin;
-    readonly deliveredAsToolResult?: boolean;
-  }): TeamMessage {
-    // A `member-settle` item IS the member's final text, and in the synchronous dispatch
-    // design that text has already reached the orchestrator as `dispatch_agent`'s tool
-    // result — so it must never be injected on top of it. The default closes that hole in
-    // the runtime instead of trusting every producer to remember the flag; a producer that
-    // knows the text did *not* reach the model (a future async settle) passes `false`.
-    const deliveredAsToolResult = input.deliveredAsToolResult
-      ?? (input.origin === 'member-settle' ? true : undefined);
+  appendMessage(input: TeamMessageInput): TeamMessage {
     const team = this.requireTeam(input.teamId);
-    if (input.to !== TEAM_LEAD_ID && !team.members.has(input.to)) {
-      throw new TeamError(
-        TEAM_ERROR_CODES.memberNotFound,
-        `收件人 ${input.to} 不是本 Team 的成员。`,
-        { to: input.to },
-      );
-    }
-    team.seq += 1;
-    const message: TeamMessage = {
-      id: this.newId(),
-      teamId: team.id,
-      from: input.from,
-      to: input.to,
-      kind: input.kind,
-      payload: input.payload,
-      deliveryState: input.deliveryState ?? 'queued',
-      seq: team.seq,
-      ...(input.origin === undefined ? {} : { origin: input.origin }),
-      ...(deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult }),
-    };
+    const message = buildMessage(team, input, this.newId);
     team.messages.push(message);
     for (const memberId of [message.from, message.to]) {
       const member = team.members.get(memberId);
@@ -563,74 +388,19 @@ export class AgentTeamRuntime {
   }
 
   /**
-   * Claim the single delivery attempt for one message, **in memory only**.
-   *
-   * The claim is journaled through the cheap path, so the answer survives a restart
-   * *as long as the journal's tail survives* — which is not the same as flushed. The
-   * injector must use {@link claimDeliverySynced} instead; this variant is the P3-A
-   * ledger view used by readers, tests and the wait/pending queries.
-   *
-   * `true` means "you own the one attempt"; `false` means it was already taken, or the
-   * message does not exist.
+   * 内存态的投递认领（读侧视图）。实现见 `team-ops-delivery.ts` 的 `claimDelivery`：
+   * 只有第一次调用拿到 `true`；消息不存在也回 `false`。
    */
   claimDelivery(teamId: string, messageId: string): boolean {
-    const team = this.requireTeam(teamId);
-    if (this.claimed.has(messageId)) return false;
-    const message = team.messages.find((entry) => entry.id === messageId);
-    if (message === undefined) return false;
-    this.claimed.add(messageId);
-    this.appendRecord(teamId, { type: 'delivery-claimed', messageId });
-    message.deliveryState = 'inflight';
-    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
-    this.notify(teamId);
-    return true;
+    return claimDelivery(this.requireTeam(teamId), messageId, this.ledger);
   }
 
   /**
-   * Claim the one delivery attempt **and get the claim onto disk first**.
-   *
-   * This is the only claim the injector may use. The claim line and the `inflight`
-   * state line are written together and `fsync`ed before this returns `'claimed'`, so
-   * "the attempt is spent" is on stable storage *before* the caller sends anything.
-   * The localised cost (one fsync per delivery attempt) and what it buys are documented
-   * on {@link TeamJournalLike.appendSynced}.
-   *
-   * `'journalUnavailable'` means **nothing landed**: no journal is attached, the journal
-   * is disabled, or the write/flush failed. The message is left exactly as it was
-   * (`queued`, unclaimed, no in-memory claim) so a later sweep — after the journal
-   * recovers — can try again. A caller must never send in that case: delivering on a
-   * claim that is not on disk is what makes the same text reach a model twice.
-   *
-   * The failure mode this deliberately accepts is **at-most-once**: if the process dies
-   * after the flush and before the send, that item is never delivered. A replay shows it
-   * as `inflight` with no `candidate`, which is exactly how a reader can tell this apart
-   * from "delivered but unconfirmed".
+   * 认领投递并**先让认领落到磁盘**——注入器唯一可以用的认领。实现见
+   * `team-ops-delivery.ts` 的 `claimDeliverySynced`（含 `journalUnavailable` 的语义）。
    */
   claimDeliverySynced(teamId: string, messageId: string): 'claimed' | 'alreadyClaimed' | 'journalUnavailable' {
-    const team = this.requireTeam(teamId);
-    if (this.claimed.has(messageId)) return 'alreadyClaimed';
-    const message = team.messages.find((entry) => entry.id === messageId);
-    if (message === undefined) {
-      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
-    }
-    const appendSynced = this.journal?.appendSynced?.bind(this.journal);
-    if (appendSynced === undefined) return 'journalUnavailable';
-
-    const previous = message.deliveryState;
-    message.deliveryState = 'inflight';
-    const written = appendSynced(teamId, [
-      { type: 'delivery-claimed', messageId },
-      { type: 'message-updated', message: messageSnapshot(message) },
-    ]);
-    if (written === undefined) {
-      // Nothing was flushed, so nothing may look claimed: put the item back exactly as it
-      // was and let the next sweep try again.
-      message.deliveryState = previous;
-      return 'journalUnavailable';
-    }
-    this.claimed.add(messageId);
-    this.notify(teamId);
-    return 'claimed';
+    return claimDeliverySynced(this.requireTeam(teamId), messageId, this.ledger);
   }
 
   /** Whether a delivery attempt has already been claimed for this message. */
@@ -657,16 +427,7 @@ export class AgentTeamRuntime {
     extra: { readonly failureReason?: string; readonly deliveryMode?: TeamDeliveryMode } = {},
   ): TeamMessage {
     const team = this.requireTeam(teamId);
-    const message = team.messages.find((entry) => entry.id === messageId);
-    if (message === undefined) {
-      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
-    }
-    message.deliveryState = state;
-    if (extra.failureReason !== undefined) message.failureReason = extra.failureReason;
-    if (extra.deliveryMode !== undefined) message.deliveryMode = extra.deliveryMode;
-    // A state change means the item is no longer merely waiting.
-    if (state !== 'queued') delete message.pendingReason;
-    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
+    const message = setMessageDeliveryState(team, messageId, state, extra, this.append);
     this.notify(teamId);
     return message;
   }
@@ -682,12 +443,7 @@ export class AgentTeamRuntime {
    */
   setMessagePendingReason(teamId: string, messageId: string, reason: string): TeamMessage {
     const team = this.requireTeam(teamId);
-    const message = team.messages.find((entry) => entry.id === messageId);
-    if (message === undefined) {
-      throw new TeamError(TEAM_ERROR_CODES.memberNotFound, `消息 ${messageId} 不存在。`, { messageId });
-    }
-    message.pendingReason = reason;
-    this.appendRecord(teamId, { type: 'message-updated', message: messageSnapshot(message) });
+    const message = setMessagePendingReason(team, messageId, reason, this.append);
     this.notify(teamId);
     return message;
   }
@@ -720,44 +476,14 @@ export class AgentTeamRuntime {
     for (const id of wanted) this.requireMember(teamId, id);
     const timeoutMs = Math.min(Math.max(options.timeoutMs ?? DEFAULT_TEAM_WAIT_MS, 0), MAX_TEAM_WAIT_MS);
     const deadline = this.now() + timeoutMs;
-    // A guard against a caller clock that never advances (a frozen `now` in a
-    // test, say): without it the loop below would wait forever instead of
-    // reporting a timeout. 10k rounds of an event-driven wait is far beyond any
-    // real conversation's lifetime.
-    for (let round = 0; round < 10_000; round += 1) {
-      const settled = wanted
-        .map((id) => team.members.get(id))
-        .filter((member): member is TeamMember => member !== undefined && isSettledMemberStatus(member.status))
-        .map((member) => {
-          const bounded = boundTeamText(member.resultText ?? '');
-          return { memberId: member.id, status: member.status, text: bounded.text, truncated: bounded.truncated };
-        });
-      const pending = wanted.filter((id) => {
-        const member = team.members.get(id);
-        return member !== undefined && !isSettledMemberStatus(member.status);
-      });
-      if (pending.length === 0) return { settled, pending, timedOut: false };
-      const remaining = deadline - this.now();
-      if (remaining <= 0) return { settled, pending, timedOut: true };
-      await this.raceChange(teamId, remaining);
-    }
-    // Only reachable with a non-advancing clock; reporting a timeout is the honest
-    // answer, since the window has been waited out by every measure available.
-    const settled = wanted
-      .map((id) => team.members.get(id))
-      .filter((member): member is TeamMember => member !== undefined && isSettledMemberStatus(member.status))
-      .map((member) => {
-        const bounded = boundTeamText(member.resultText ?? '');
-        return { memberId: member.id, status: member.status, text: bounded.text, truncated: bounded.truncated };
-      });
-    return {
-      settled,
-      pending: wanted.filter((id) => {
-        const member = team.members.get(id);
-        return member !== undefined && !isSettledMemberStatus(member.status);
-      }),
-      timedOut: true,
-    };
+    return waitForSettledView({
+      teamId,
+      team,
+      wanted,
+      deadline,
+      now: this.now,
+      raceChange: (id, ms) => raceChange(this.waiters, id, ms, this.delay),
+    });
   }
 
   /**
@@ -802,6 +528,8 @@ export class AgentTeamRuntime {
    *     member settled.
    *
    * Returns what the rebuild changed, so a caller can report it instead of guessing.
+   * The record loop and the closing normalisation live in `team-ops-replay.ts`
+   * (`replayRecords` / `normalizeRestoredMembers`).
    */
   hydrate(input: { readonly teamId: string; readonly records: readonly TeamJournalRecord[] }): {
     readonly teamId: string;
@@ -813,100 +541,21 @@ export class AgentTeamRuntime {
     readonly interrupted: number;
     readonly claimed: number;
   } {
-    let team = this.teams.get(input.teamId);
-    let interrupted = 0;
-    let maxSeq = 0;
-    for (const record of input.records) {
-      maxSeq = Math.max(maxSeq, record.seq);
-      switch (record.type) {
-        case 'team-created': {
-          const parentSessionId = typeof record['parentSessionId'] === 'string' ? record['parentSessionId'] : '';
-          const createdAt = typeof record['createdAt'] === 'number' ? record['createdAt'] : this.now();
-          team = {
-            id: input.teamId,
-            parentSessionId,
-            createdAt,
-            members: new Map(),
-            tasks: new Map(),
-            messages: [],
-            seq: 0,
-          };
-          this.teams.set(team.id, team);
-          // The alias index: a client only ever holds the session id, and after a
-          // restart the session may have no transcript at all.
-          this.parentIndex.set(parentSessionId, team.id);
-          break;
+    const journal = this.journal;
+    return hydrateTeam({
+      teamId: input.teamId,
+      records: input.records,
+      now: this.now,
+      teams: this.teams,
+      parentIndex: this.parentIndex,
+      claimed: this.claimed,
+      // Continue the record numbering after the highest replayed seq.
+      seed: journal !== undefined && 'seed' in journal
+        ? (teamId, seq): void => {
+          (journal as { seed(teamId: string, seq: number): void }).seed(teamId, seq);
         }
-        case 'member-added':
-        case 'member-updated': {
-          if (team === undefined) break;
-          const member = readMember(record['member'], input.teamId);
-          if (member === undefined) break;
-          team.members.set(member.id, member);
-          break;
-        }
-        case 'task-created':
-        case 'task-updated': {
-          if (team === undefined) break;
-          const task = readTask(record['task'], input.teamId);
-          if (task === undefined) break;
-          team.tasks.set(task.id, task);
-          break;
-        }
-        case 'message-queued':
-        case 'message-updated': {
-          if (team === undefined) break;
-          const message = readMessage(record['message'], input.teamId);
-          if (message === undefined) break;
-          const existing = team.messages.findIndex((entry) => entry.id === message.id);
-          if (existing === -1) team.messages.push(message);
-          else team.messages[existing] = message;
-          team.seq = Math.max(team.seq, message.seq);
-          break;
-        }
-        case 'delivery-claimed': {
-          const messageId = typeof record['messageId'] === 'string' ? record['messageId'] : undefined;
-          if (messageId !== undefined) this.claimed.add(messageId);
-          break;
-        }
-        default:
-          break;
-      }
-    }
-    if (team === undefined) {
-      return { teamId: input.teamId, created: false, members: 0, tasks: 0, messages: 0, interrupted: 0, claimed: 0 };
-    }
-    // The process is gone, so nothing that was mid-flight can still be running.
-    //
-    // These members are written here, not in the journal: the record that put them in
-    // `running` is the last word the process managed, and this replay is the reader that
-    // draws the conclusion. The code says *which* kind of unconfirmed stop this is —
-    // `restart-replay`, never `host-shutdown` (graceful shutdown is a different event,
-    // written by {@link markInterrupted} while the process was still alive).
-    for (const member of team.members.values()) {
-      if (member.status === 'running' || member.status === 'cancelling') {
-        member.status = 'interrupted';
-        member.resultText ??= '宿主重启：成员会话是内存态的，无法恢复，停止未得到确认。';
-        member.statusReason = TEAM_INTERRUPT_REASONS.restartReplay;
-        interrupted += 1;
-      }
-    }
-    // Continue the record numbering after the highest replayed seq.
-    if (this.journal !== undefined && 'seed' in this.journal) {
-      (this.journal as { seed(teamId: string, seq: number): void }).seed(input.teamId, maxSeq);
-    }
-    return {
-      teamId: team.id,
-      // "A team exists in memory after this replay" — the only thing a caller may
-      // report as rebuilt. (`existed` is not part of the answer: replaying over live
-      // state is the caller's own decision to make, and the answer stays truthful.)
-      created: this.teams.has(team.id),
-      members: team.members.size,
-      tasks: team.tasks.size,
-      messages: team.messages.length,
-      interrupted,
-      claimed: this.claimed.size,
-    };
+        : undefined,
+    });
   }
 
   requireTeam(teamId: string): Team {
@@ -918,204 +567,28 @@ export class AgentTeamRuntime {
   }
 
   requireMember(teamId: string, memberId: string): TeamMember {
-    const member = this.requireTeam(teamId).members.get(memberId);
-    if (member === undefined) {
-      throw new TeamError(
-        TEAM_ERROR_CODES.memberNotFound,
-        `成员 ${memberId} 不存在。`,
-        { teamId, memberId },
-      );
-    }
-    return member;
+    return requireMemberIn(this.requireTeam(teamId), memberId);
   }
 
   private notify(teamId: string): void {
-    const waiters = this.waiters.get(teamId);
-    if (waiters === undefined) return;
-    for (const wake of [...waiters]) wake();
-  }
-
-  private raceChange(teamId: string, timeoutMs: number): Promise<void> {
-    return new Promise<void>((resolve) => {
-      let done = false;
-      const wake = (): void => {
-        if (done) return;
-        done = true;
-        this.waiters.get(teamId)?.delete(wake);
-        resolve();
-      };
-      const waiters = this.waiters.get(teamId) ?? new Set<() => void>();
-      waiters.add(wake);
-      this.waiters.set(teamId, waiters);
-      void this.delay(timeoutMs).then(wake);
-    });
+    notifyWaiters(this.waiters, teamId);
   }
 }
 
-/* ------------------------------------------------------------ 快照与读回 ---- */
+/* --------------------------------------------- 原路径再导出（导出面不变） ---- */
 
 /**
- * The recorded shape of an entity.
- *
- * Snapshots rather than diffs: the replay is then "the last record for this id
- * wins", which is what makes the round-trip assertion meaningful. The copies are
- * shallow-but-explicit so a later in-memory mutation cannot rewrite history.
+ * 原本从这个文件导出的名字全部仍然从**这个路径**可用：调用方（`server/pi/host.ts`、
+ * `scripts/check-agent-team*.ts`，以及 `scripts/check-agent-team-browser.mjs` 那个带
+ * `.ts` 扩展名的动态 import）零改动。实现分别在契约与快照/投影模块里。
  */
-function memberSnapshot(member: TeamMember): Record<string, unknown> {
-  return {
-    id: member.id,
-    teamId: member.teamId,
-    definitionId: member.definitionId,
-    definitionRevision: member.definitionRevision,
-    definitionSnapshotHash: member.definitionSnapshotHash,
-    sessionId: member.sessionId,
-    status: member.status,
-    createdAt: member.createdAt,
-    ...(member.resultText === undefined ? {} : { resultText: member.resultText }),
-    ...(member.statusReason === undefined ? {} : { statusReason: member.statusReason }),
-    lastSeq: member.lastSeq,
-  };
-}
-
-function taskSnapshot(task: TeamTask): Record<string, unknown> {
-  return {
-    id: task.id,
-    teamId: task.teamId,
-    revision: task.revision,
-    title: task.title,
-    description: task.description,
-    status: task.status,
-    ...(task.ownerMemberId === undefined ? {} : { ownerMemberId: task.ownerMemberId }),
-    blockedBy: [...task.blockedBy],
-    writeScopes: [...task.writeScopes],
-  };
-}
-
-function messageSnapshot(message: TeamMessage): Record<string, unknown> {
-  return {
-    id: message.id,
-    teamId: message.teamId,
-    from: message.from,
-    to: message.to,
-    kind: message.kind,
-    payload: message.payload,
-    deliveryState: message.deliveryState,
-    seq: message.seq,
-    ...(message.origin === undefined ? {} : { origin: message.origin }),
-    ...(message.deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult: message.deliveredAsToolResult }),
-    ...(message.pendingReason === undefined ? {} : { pendingReason: message.pendingReason }),
-    ...(message.failureReason === undefined ? {} : { failureReason: message.failureReason }),
-    ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode }),
-  };
-}
-
-/** Read one member snapshot back. A record that does not describe a member is dropped. */
-function readMember(value: unknown, teamId: string): TeamMember | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const record = value as Record<string, unknown>;
-  const id = record['id'];
-  const status = record['status'];
-  if (typeof id !== 'string' || typeof status !== 'string') return undefined;
-  return {
-    id,
-    teamId,
-    definitionId: typeof record['definitionId'] === 'string' ? record['definitionId'] : '',
-    definitionRevision: typeof record['definitionRevision'] === 'number' ? record['definitionRevision'] : 0,
-    definitionSnapshotHash: typeof record['definitionSnapshotHash'] === 'string' ? record['definitionSnapshotHash'] : '',
-    sessionId: typeof record['sessionId'] === 'string' ? record['sessionId'] : '',
-    status: status as TeamMemberStatus,
-    createdAt: typeof record['createdAt'] === 'number' ? record['createdAt'] : 0,
-    ...(typeof record['resultText'] === 'string' ? { resultText: record['resultText'] } : {}),
-    ...(typeof record['statusReason'] === 'string' ? { statusReason: record['statusReason'] } : {}),
-    lastSeq: typeof record['lastSeq'] === 'number' ? record['lastSeq'] : 0,
-  };
-}
-
-/** Read one task snapshot back. */
-function readTask(value: unknown, teamId: string): TeamTask | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const record = value as Record<string, unknown>;
-  const id = record['id'];
-  if (typeof id !== 'string') return undefined;
-  return {
-    id,
-    teamId,
-    revision: typeof record['revision'] === 'number' ? record['revision'] : 1,
-    title: typeof record['title'] === 'string' ? record['title'] : '',
-    description: typeof record['description'] === 'string' ? record['description'] : '',
-    status: (typeof record['status'] === 'string' ? record['status'] : 'pending') as TeamTaskStatus,
-    ...(typeof record['ownerMemberId'] === 'string' ? { ownerMemberId: record['ownerMemberId'] } : {}),
-    blockedBy: Array.isArray(record['blockedBy']) ? (record['blockedBy'] as string[]) : [],
-    writeScopes: Array.isArray(record['writeScopes']) ? (record['writeScopes'] as string[]) : [],
-  };
-}
-
-/** Read one message snapshot back. */
-function readMessage(value: unknown, teamId: string): TeamMessage | undefined {
-  if (typeof value !== 'object' || value === null) return undefined;
-  const record = value as Record<string, unknown>;
-  const id = record['id'];
-  if (typeof id !== 'string') return undefined;
-  return {
-    id,
-    teamId,
-    from: typeof record['from'] === 'string' ? record['from'] : '',
-    to: typeof record['to'] === 'string' ? record['to'] : '',
-    kind: (typeof record['kind'] === 'string' ? record['kind'] : 'result') as TeamMessageKind,
-    payload: record['payload'] ?? null,
-    deliveryState: (typeof record['deliveryState'] === 'string' ? record['deliveryState'] : 'queued') as TeamDeliveryState,
-    seq: typeof record['seq'] === 'number' ? record['seq'] : 0,
-    ...(typeof record['origin'] === 'string' ? { origin: record['origin'] as TeamMessageOrigin } : {}),
-    ...(typeof record['deliveredAsToolResult'] === 'boolean' ? { deliveredAsToolResult: record['deliveredAsToolResult'] } : {}),
-    ...(typeof record['pendingReason'] === 'string' ? { pendingReason: record['pendingReason'] } : {}),
-    ...(typeof record['failureReason'] === 'string' ? { failureReason: record['failureReason'] } : {}),
-    ...(typeof record['deliveryMode'] === 'string' ? { deliveryMode: record['deliveryMode'] as TeamDeliveryMode } : {}),
-  };
-}
-
-/* ------------------------------------------------------------------ 投影 ---- */
-
-function toMemberView(member: TeamMember): TeamMemberView {
-  return {
-    memberId: member.id,
-    definitionId: member.definitionId,
-    definitionRevision: member.definitionRevision,
-    definitionSnapshotHash: member.definitionSnapshotHash,
-    sessionId: member.sessionId,
-    status: member.status,
-    createdAt: member.createdAt,
-    lastSeq: member.lastSeq,
-    hasResult: member.resultText !== undefined,
-    ...(member.statusReason === undefined ? {} : { statusReason: member.statusReason }),
-    ...(member.resultText === undefined ? {} : { untrustedResult: boundTeamText(member.resultText) }),
-  };
-}
-
-function toTaskView(task: TeamTask): TeamTaskView {
-  return {
-    taskId: task.id,
-    revision: task.revision,
-    status: task.status,
-    ...(task.ownerMemberId === undefined ? {} : { ownerMemberId: task.ownerMemberId }),
-    blockedBy: [...task.blockedBy],
-    writeScopes: [...task.writeScopes],
-    untrusted: { title: task.title, description: task.description },
-  };
-}
-
-function toMessageView(message: TeamMessage): TeamMessageView {
-  return {
-    messageId: message.id,
-    seq: message.seq,
-    from: message.from,
-    to: message.to,
-    kind: message.kind,
-    deliveryState: message.deliveryState,
-    ...(message.origin === undefined ? {} : { origin: message.origin }),
-    ...(message.deliveredAsToolResult === undefined ? {} : { deliveredAsToolResult: message.deliveredAsToolResult }),
-    ...(message.pendingReason === undefined ? {} : { pendingReason: message.pendingReason }),
-    ...(message.failureReason === undefined ? {} : { failureReason: message.failureReason }),
-    ...(message.deliveryMode === undefined ? {} : { deliveryMode: message.deliveryMode }),
-    untrustedPayload: message.payload,
-  };
-}
+export {
+  DEFAULT_TEAM_WAIT_MS,
+  MAX_TEAM_WAIT_MS,
+  definitionSnapshotHash,
+} from './team-runtime-contract';
+export type {
+  TeamRuntimeOptions,
+  TeamTaskActor,
+  TeamTaskPatch,
+} from './team-runtime-contract';
