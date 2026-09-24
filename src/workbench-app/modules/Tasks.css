@@ -1,0 +1,296 @@
+/*
+ * 今日规划（Tasks）模块样式：快速捕获条 + 按紧迫度分组的密集任务列表。
+ *
+ * 只消费 styles.css 的设计令牌（表面 / 文本 / 语义色 / 间距 / 字号 / 圆角），
+ * 亮暗两套主题自动跟随，紧凑密度档也跟着 --sp-* 一起压。
+ * 类名前缀：`tasks-` 模块级容器与分组，`task-` 行内元素。
+ * 断点只有一个：≤480px 收起标签文字（保留色点），行内元素一律可折行，375px 不横向溢出。
+ */
+
+/* ================================================================ 容器与快速捕获 */
+
+.tasks { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+/* 常驻捕获条：随主区滚动吸顶，底衬用页面底色，行滚过去不会从圆角边透出来。 */
+.tasks-capture {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  padding: var(--sp-1) 0 var(--sp-2);
+  background: var(--bg);
+}
+
+.tasks-capture-body { padding: var(--sp-3); }
+
+.tasks-capture-form {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-height: 38px;
+  padding: 0 var(--sp-2) 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.tasks-capture-form:focus-within { border-color: var(--accent); background: var(--surface-0); }
+
+.tasks-capture-icon { display: grid; place-items: center; flex: none; color: var(--text-3); }
+
+.tasks-capture-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.tasks-capture-input::placeholder { color: var(--text-3); }
+
+.tasks-capture-hint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.tasks-capture-lead { color: var(--text-3); }
+
+/* 解析预览的小标记：和优先级/标签/截止日同色系，一眼看到小语法生效。 */
+.tasks-mark {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-weight: 550;
+}
+
+.tasks-mark.accent { background: var(--accent-soft); color: var(--accent); }
+.tasks-mark.warn { background: var(--warn-soft); color: var(--warn); }
+.tasks-mark.danger { background: var(--danger-soft); color: var(--danger); }
+
+/* ================================================================ 范围条 */
+
+.tasks-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+
+.tasks-bar-count {
+  margin-inline-start: auto;
+  color: var(--text-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ 分组头 */
+
+.tasks-groups { display: flex; flex-direction: column; gap: var(--sp-4); }
+.tasks-group { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.tasks-group-head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 2px; }
+
+.tasks-group-title {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: .04em;
+}
+
+.tasks-group-title.danger { color: var(--danger); }
+
+.tasks-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.tasks-group-count.danger { background: var(--danger-soft); color: var(--danger); }
+
+/* ================================================================ 行 */
+
+.tasks-list {
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+  overflow: hidden;
+}
+
+.task-row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+  transition: background .15s ease;
+}
+
+.task-row:last-child { border-bottom: 0; }
+.task-row:hover { background: var(--surface-1); }
+
+/* 自绘勾选框：勾上是实心 ok 色块 + 反色对钩（--on-accent 在两主题下都够对比）。 */
+.task-check {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  margin-top: 2px;
+  flex: none;
+  padding: 0;
+  border: 1.6px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--surface-0);
+  color: var(--on-accent);
+  cursor: pointer;
+  transition: background .15s ease, border-color .15s ease;
+}
+
+.task-check:hover { border-color: var(--accent); }
+.task-check[aria-checked="true"] { border-color: var(--ok); background: var(--ok); }
+.task-check:disabled { opacity: .5; cursor: default; }
+
+.task-body {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.task-title {
+  min-width: 0;
+  color: var(--text-1);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  cursor: text;
+}
+
+.task-row.is-done .task-title { color: var(--text-3); text-decoration: line-through; }
+
+.task-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.task-dot {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.task-prio { display: inline-flex; align-items: center; gap: 5px; font-weight: 550; }
+.task-prio.danger { color: var(--danger); }
+.task-prio.warn { color: var(--warn); }
+.task-prio.plain { color: var(--text-3); }
+
+.task-due { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.task-due.accent { color: var(--accent); font-weight: 550; }
+.task-due.danger { color: var(--danger); font-weight: 550; }
+.task-due.plain { color: var(--text-2); }
+.task-due.muted { color: var(--text-3); }
+
+.task-tag { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-2); }
+
+.task-tag-dot { width: 6px; height: 6px; flex: none; border-radius: 50%; background: var(--text-3); }
+.task-tag-dot[data-tone="accent"] { background: var(--accent); }
+.task-tag-dot[data-tone="ok"] { background: var(--ok); }
+.task-tag-dot[data-tone="info"] { background: var(--info); }
+.task-tag-dot[data-tone="warn"] { background: var(--warn); }
+.task-tag-dot[data-tone="danger"] { background: var(--danger); }
+
+.task-tag-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.task-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.task-refs.is-link { cursor: pointer; }
+.task-refs.is-link:hover { color: var(--accent); text-decoration: underline; }
+
+.task-edit {
+  width: 100%;
+  min-width: 0;
+  height: 26px;
+  padding: 0 var(--sp-2);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-md);
+  outline: none;
+}
+
+.task-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+.task-actions .icon-btn { width: 28px; height: 28px; }
+
+.task-star { color: var(--text-3); }
+.task-star.is-on { color: var(--warn); }
+.task-star.is-on svg { fill: currentColor; }
+
+.task-actions .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ================================================================ 底部统计 */
+
+.tasks-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-4);
+  padding: 0 2px var(--sp-4);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.tasks-foot-item { display: inline-flex; align-items: center; gap: 6px; }
+.tasks-foot-item b { color: var(--text-1); font-variant-numeric: tabular-nums; }
+.tasks-foot-flame { display: grid; place-items: center; color: var(--warn); }
+
+/* ================================================================ 小屏折叠 */
+
+/* ≤480px：标签只留色点（文字转 sr-only，读屏仍念得出来），动作按钮收一号。 */
+@media (max-width: 480px) {
+  .task-actions .icon-btn { width: 26px; height: 26px; }
+  .task-tag { gap: 0; }
+  .task-tag-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
+  .tasks-capture-hint { gap: 6px; }
+}

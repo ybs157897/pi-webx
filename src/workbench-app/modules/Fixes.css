@@ -1,0 +1,286 @@
+/*
+ * 问题修复模块样式：过滤面板（快速捕获 / 搜索 / 状态分段 / 优先级与标签 chips）、
+ * 问题表格（优先级色点、行内状态分段、标签、更新时间、操作）、行内展开的详情面板。
+ *
+ * 列宽只在 `--fixes-cols` 里写一遍，表头与行共用；两档断点：
+ * 900px 收起标签列，639px 起整行改成卡片式堆叠（表头隐藏）。
+ * 颜色、间距、字号一律走 styles.css 的令牌，亮/暗主题自动跟随。
+ */
+
+/* ================================================================ 过滤面板 */
+
+.fixes-quick { display: flex; align-items: center; gap: var(--sp-2); }
+.fixes-quick-icon { flex: none; color: var(--text-3); }
+
+/* 快速捕获与下面两行过滤器用虚线分开：上面是「记一条」，下面是「找一条」。 */
+.fixes-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px dashed var(--line-1);
+}
+
+.fixes-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.fixes-chips { gap: var(--sp-2); }
+
+.fixes-chip-label { color: var(--text-3); font-size: var(--fs-xs); font-weight: 650; }
+.fixes-chip-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+.fixes-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 200px;
+  min-width: 0;
+  height: var(--row-h-sm);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-3);
+  transition: border-color .15s ease;
+}
+
+.fixes-search:focus-within { border-color: var(--accent); }
+
+.fixes-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.fixes-search-input::placeholder { color: var(--text-3); }
+
+/* 文字型轻按钮（清空筛选 / 更多标签 / 详情里的跳转）。 */
+.fixes-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.fixes-plain:hover { text-decoration: underline; }
+
+/* 清空筛选永远贴在这一行的右端。 */
+.fixes-clear { margin-inline-start: auto; }
+
+/* ================================================================ 问题表格 */
+
+.fixes-table { --fixes-cols: 72px minmax(0, 1fr) 172px 132px 84px 76px; margin-top: var(--sp-4); }
+
+.fixes-table .table-head,
+.fixes-table .table-row { grid-template-columns: var(--fixes-cols); }
+
+/* 优先级：色点 + 小字（颜色之外还有文字，不靠颜色单独表意）。 */
+.fixes-pri {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-weight: 600;
+}
+
+.fixes-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.fixes-dot.danger { background: var(--danger); }
+.fixes-dot.warn { background: var(--warn); }
+
+/* 标题即展开按钮：表头「标题」与之同列。 */
+.fixes-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-md);
+  text-align: start;
+  cursor: pointer;
+}
+
+.fixes-title:hover { color: var(--accent); }
+.fixes-title-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.fixes-caret { flex: none; color: var(--text-3); transition: transform .15s ease, color .15s ease; }
+
+.fixes-title[aria-expanded="true"] { color: var(--accent); }
+.fixes-title[aria-expanded="true"] .fixes-caret { transform: rotate(90deg); color: var(--accent); }
+
+/* 行内状态分段：比工具栏里的分段更矮更窄，才塞得进一列。 */
+.fixes-status { display: flex; }
+.fixes-status .segmented { padding: 1px; }
+.fixes-status .segmented-item { height: 22px; padding: 0 var(--sp-2); }
+
+.fixes-tags { display: flex; flex-wrap: nowrap; align-items: center; gap: 4px; overflow: hidden; }
+
+/* `+n` 的 tooltip 挂在包一层的 span 上（Chip 本身不吃 title）。 */
+.fixes-tags-more { display: inline-flex; flex: none; }
+
+.fixes-time { color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+
+.fixes-row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 2px; }
+
+/* ================================================================ 行内详情 */
+
+.fixes-detail {
+  padding: var(--sp-4) var(--card-pad);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--surface-1);
+}
+
+.fixes-detail:last-child { border-bottom: 0; }
+
+.fixes-detail-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-3);
+}
+
+.fixes-detail-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+.fixes-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr);
+  gap: var(--sp-4);
+}
+
+.fixes-side { display: flex; flex-direction: column; gap: var(--sp-4); }
+
+.fixes-block-title { color: var(--text-2); font-size: var(--fs-xs); font-weight: 650; }
+
+.fixes-block-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+/* 「记一条日志」是这一块的主操作，靠右收尾。 */
+.fixes-block-head .btn { margin-inline-start: auto; }
+
+.fixes-block-hint { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 备注按原文换行渲染（复现步骤、命令行输出都保持原样）。 */
+.fixes-note {
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.fixes-muted { color: var(--text-2); font-size: var(--fs-sm); }
+
+.fixes-links { display: flex; flex-direction: column; gap: 4px; }
+
+.fixes-link {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 5px var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.fixes-link:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.fixes-link-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fixes-link-meta { flex: none; color: var(--text-3); font-size: var(--fs-xs); }
+
+.fixes-log {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-2);
+  padding: 5px var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-sm);
+  background: var(--surface-0);
+}
+
+.fixes-log-text { flex: 1 1 auto; min-width: 0; color: var(--text-1); font-size: var(--fs-sm); }
+.fixes-log .fixes-link-meta { margin-top: 2px; }
+
+/* ================================================================ 首启引导 */
+
+.fixes-guide-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); }
+
+/* ================================================================ 断点 */
+
+/* 中窄屏：表格放不下六列，收起标签列（表头与行同时收）。 */
+@media (max-width: 900px) {
+  .fixes-table { --fixes-cols: 72px minmax(0, 1fr) 164px 80px 72px; }
+  .fixes-table .fixes-tags { display: none; }
+}
+
+/* 375px 量级：表格改卡片式堆叠（表头隐藏，行内两列 + 整行的标题与标签）。 */
+@media (max-width: 639px) {
+  .fixes-panel .card-head { padding: var(--sp-3) var(--sp-3) 0; }
+  .fixes-panel .card-body { padding: var(--sp-3); }
+
+  .fixes-table .table-head { display: none; }
+
+  .fixes-table .fixes-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "pri   status"
+      "title title"
+      "tags  tags"
+      "time  actions";
+    row-gap: 6px;
+    padding: var(--sp-3) var(--sp-4);
+  }
+
+  .fixes-row .fixes-pri { grid-area: pri; }
+  .fixes-row .fixes-title { grid-area: title; }
+  .fixes-row .fixes-status { grid-area: status; justify-self: end; }
+  .fixes-row .fixes-tags { grid-area: tags; display: flex; }
+  .fixes-row .fixes-tags:empty { display: none; }
+  .fixes-row .fixes-time { grid-area: time; }
+  .fixes-row .fixes-row-actions { grid-area: actions; }
+
+  .fixes-detail { padding: var(--sp-4) var(--sp-4); }
+  .fixes-detail-grid { grid-template-columns: minmax(0, 1fr); }
+}

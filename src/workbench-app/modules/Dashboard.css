@@ -1,0 +1,430 @@
+/*
+ * 我的主页（指挥台）样式。
+ *
+ * 只用 styles.css 第 1 节的设计令牌，不写死任何颜色；类名统一 `dash-` 前缀，
+ * 避免与共享组件或其他模块互相踩。栅格用 `repeat(auto-fill, minmax(…))`：
+ * 宽屏三列、中屏两列、手机（<640px）强制单列，375px 宽度不溢出。
+ */
+
+/* ---------------- widget 板栅格 ---------------- */
+
+.dash {
+  min-width: 0;
+}
+
+/*
+ * 每列最小 260px：主区内容上限 1080px（styles.css `.main-inner`）扣掉内边距后
+ * 约 1030px，260px 才能实打实排出三列；窄容器用 min() 兜底，避免横向溢出。
+ */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(260px, 100%), 1fr));
+  gap: var(--gap);
+  align-items: start;
+}
+
+/* 每格一张 Card：撑满格子高度，卡片内部纵向排布（体块顶到格底，信息不悬空）。 */
+.dash-cell {
+  display: flex;
+  min-width: 0;
+}
+
+.dash-cell > .card {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.dash-cell > .card > .card-body {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dash-cell-wide {
+  grid-column: 1 / -1;
+}
+
+/* 首启引导：整块通栏，卡片居中且不铺满整行。 */
+.dash-cell-guide {
+  justify-content: center;
+}
+
+.dash-cell-guide > .card {
+  flex: 0 1 560px;
+}
+
+.dash-cell-guide .card-body {
+  padding: 0;
+}
+
+.dash-guide {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-7) var(--sp-5);
+  text-align: center;
+}
+
+.dash-guide-icon {
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.dash-guide-title {
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.dash-guide-text {
+  max-width: 40em;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.dash-guide-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-2);
+}
+
+/* ---------------- 问候卡 + AI 早报 ---------------- */
+
+.dash-greet {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-4) var(--sp-6);
+}
+
+.dash-greet-main {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+.dash-greet-title {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  letter-spacing: -.01em;
+}
+
+.dash-greet-date {
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.dash-greet-motto {
+  margin-top: var(--sp-2);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.dash-brief {
+  flex: 1 1 300px;
+  min-width: 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.dash-brief-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--accent);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+
+.dash-brief-text {
+  margin-top: 6px;
+  font-size: var(--fs-md);
+}
+
+/* ---------------- 今日进度 ---------------- */
+
+.dash-progress {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-4);
+}
+
+/* 进度环：conic-gradient 画外圈，::before 盖一个背景色圆盘留出环宽。 */
+.dash-ring {
+  --dash-pct: 0;
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 96px;
+  flex: none;
+  border-radius: 50%;
+  background: conic-gradient(var(--accent) calc(var(--dash-pct) * 1%), var(--surface-3) 0);
+}
+
+.dash-ring::before {
+  content: "";
+  position: absolute;
+  inset: 11px;
+  border-radius: 50%;
+  background: var(--surface-0);
+}
+
+.dash-ring-value {
+  position: relative;
+  font-size: var(--fs-lg);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-progress-side {
+  min-width: 0;
+}
+
+.dash-progress-value {
+  font-size: var(--fs-2xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+}
+
+.dash-progress-total {
+  color: var(--text-3);
+  font-size: var(--fs-lg);
+  font-weight: 600;
+}
+
+.dash-progress-label {
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+/* 卡片底部的一行小结（进度 / 问题速览共用）。 */
+.dash-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ---------------- 计数块（问题速览） ---------------- */
+
+.dash-figures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--sp-2);
+}
+
+.dash-figure {
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.dash-figure-value {
+  display: block;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-figure-label {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-figure.is-accent .dash-figure-value { color: var(--accent); }
+.dash-figure.is-ok .dash-figure-value { color: var(--ok); }
+
+/* ---------------- 列表原语（待办 / 日志 / 开发事项共用） ---------------- */
+
+.dash-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.dash-todo,
+.dash-log,
+.dash-code {
+  min-width: 0;
+  padding: var(--sp-2) 0;
+  border-bottom: 1px solid var(--line-1);
+}
+
+.dash-todo:first-child,
+.dash-log:first-child,
+.dash-code:first-child { padding-top: 0; }
+
+.dash-todo:last-child,
+.dash-log:last-child,
+.dash-code:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+/* ---------------- 今日待办 ---------------- */
+
+.dash-todo {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+
+.dash-check {
+  width: 16px;
+  height: 16px;
+  flex: none;
+  margin: 3px 0 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.dash-check:disabled {
+  cursor: default;
+  opacity: .5;
+}
+
+.dash-todo-main {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.dash-todo-title {
+  font-size: var(--fs-md);
+  overflow-wrap: anywhere;
+}
+
+.dash-todo-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.dash-due { color: var(--text-2); }
+.dash-due.is-overdue { color: var(--danger); }
+.dash-tag { overflow-wrap: anywhere; }
+
+/* ---------------- 最近日志 ---------------- */
+
+.dash-log-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dash-log-date {
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.dash-log-source {
+  margin-inline-start: auto;
+  max-width: 45%;
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-log-text {
+  display: -webkit-box;
+  margin-top: 4px;
+  overflow: hidden;
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+/* ---------------- 开发事项 ---------------- */
+
+.dash-code-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  min-width: 0;
+}
+
+.dash-code-name {
+  min-width: 0;
+  font-size: var(--fs-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-code-count {
+  margin-inline-start: auto;
+  flex: none;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-bar {
+  display: block;
+  height: 6px;
+  margin-top: 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  overflow: hidden;
+}
+
+.dash-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+}
+
+/* ---------------- 兜底与断点 ---------------- */
+
+.dash-none {
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* <640px：单列（即使容器够宽也不并排，拇指区一屏一格）。 */
+@media (max-width: 639px) {
+  .dash-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* 极窄视口：计数块两列也放不下时收成一列，保证 375px 不溢出。 */
+@media (max-width: 360px) {
+  .dash-figures {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

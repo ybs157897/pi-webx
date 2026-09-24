@@ -1,27 +1,35 @@
 /**
- * 应用外壳：三栏布局（左菜单 / 中详情 / 右 AI 面板）、模块路由、全量 state 的持有者。
+ * 应用外壳：顶栏 / 左导航 / 主区 / AI 副驾四件套 + 命令面板与设置的持有者。
  *
- * 数据流：pi-webx SQLite 接口一次拉全量 → `data`/`profile` 两个顶层状态；
- * 任何写操作都经 `mutate(action, okText)`：保存 → 重新拉 state → 轻提示。
- * 右侧对话使用独立的 pi-webx 会话客户端，不充当模块数据权威；
- * 面板正文复用 /chat 那套 @lobehub/ui Markdown（pi-webx/AssistantMarkdown.jsx），渲染与正文一致。
- * 模块统一 props：`data`、`profile`、`mutate`、`refresh`、`notify`、`navigate`、`modules`。
+ * 数据流不变：pi-webx SQLite 接口一次拉全量 → `data`/`profile`/`prefs`；
+ * 写操作经 `mutate(action, okText)`：保存 → 重新拉 state → 轻提示。与旧版的差别：
+ * 外壳拆成了 shell/ 下的独立组件，App 只做装配、快捷键与全局浮层；
+ * 模块契约新增 `prefs`/`setPref`（视图偏好）、`empty`/`onLoadDemo`（首启引导）
+ * 与 `askAI(text)`（把文本送进 AI 副驾并展开面板，知识库「问小台」用）。
+ * `askAI` 在 pi 接口不可用时（send 走失败路径、只留底层报错）先把文本落成一条本地
+ * pending 用户消息，内容不丢，错误条换成人话；pending 气泡的留存/撤销由
+ * `shell/AIPanel` 导出的纯函数 `nextAskState` 决策（发送在途 ≠ 面板被清空），
+ * transcript 回显成功后撤掉。
  * @module src/App
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api.mjs'
 import { useWorkbenchPiChat } from './pi-webx/useWorkbenchPiChat.jsx'
-import AssistantMarkdown from './pi-webx/AssistantMarkdown.jsx'
 import { PiDialog } from './pi-webx/PiDialog.jsx'
 import {
-  Card, ConfirmDialog, IconButton, Modal, ToastHost, useMediaQuery,
+  Card, ConfirmDialog, ToastHost, useMediaQuery,
 } from './ui.jsx'
 import {
-  IconClose, IconCode, IconHome, IconLogs, IconMenu, IconPanel,
-  IconPlus, IconRefresh, IconRequirements, IconSend, IconSparkles, IconTasks, IconWorks, IconBug,
+  IconBug, IconBook, IconCode, IconHome, IconLogs, IconMenu,
+  IconRefresh, IconRequirements, IconSparkles, IconTasks, IconWorks,
 } from './icons.jsx'
-import { formatStamp } from './util.mjs'
+import { usePrefs } from './state/prefs.js'
+import TopBar from './shell/TopBar.jsx'
+import SideNav from './shell/SideNav.jsx'
+import AIPanel, { nextAskState } from './shell/AIPanel.jsx'
+import CommandPalette from './shell/CommandPalette.jsx'
+import SettingsSheet from './shell/SettingsSheet.jsx'
 import Dashboard from './modules/Dashboard.jsx'
 import Tasks from './modules/Tasks.jsx'
 import Works from './modules/Works.jsx'
@@ -29,66 +37,47 @@ import Fixes from './modules/Fixes.jsx'
 import Logs from './modules/Logs.jsx'
 import Requirements from './modules/Requirements.jsx'
 import Codes from './modules/Codes.jsx'
+import Knowledge from './modules/Knowledge.jsx'
 
-/** 菜单注册表：左侧菜单、移动端抽屉、底部 tab、主页动态卡片都从这里取。 */
-const MODULES = [
+export const APP_NAME = 'AI 指挥台'
+
+/** 菜单注册表：左导航、底部 tab、移动端抽屉、命令面板跳转都从这里取。 */
+export const MODULES = [
   { id: 'dashboard', label: '我的主页', desc: '今天的全局一屏', icon: IconHome, Component: Dashboard },
   { id: 'tasks', label: '今日规划', desc: '待办、优先级与截止日', icon: IconTasks, Component: Tasks },
   { id: 'works', label: '工作助理', desc: '待办 / 进行中 / 已完成看板', icon: IconWorks, Component: Works },
-  { id: 'fixes', label: '问题修复', desc: '问题清单、严重程度与状态流转', icon: IconBug, Component: Fixes },
+  { id: 'fixes', label: '问题修复', desc: '问题清单、优先级与状态流转', icon: IconBug, Component: Fixes },
   { id: 'logs', label: '日志查询', desc: '对话框式检索与记录开发日志', icon: IconLogs, Component: Logs },
   { id: 'requirements', label: '需求管理', desc: '需求知识库：搜索、列表与阅读视图', icon: IconRequirements, Component: Requirements },
   { id: 'codes', label: '代码开发', desc: '文件树 + 编辑器工作区', icon: IconCode, Component: Codes },
+  { id: 'knowledge', label: '知识库', desc: '检索、阅读与关联沉淀的知识', icon: IconBook, Component: Knowledge },
 ]
 
-/** 底部 tab 的固定四项 + AI 入口。 */
+/** 底部 tab 的固定三项 + 更多 + AI。 */
 const TABS = ['dashboard', 'tasks', 'works']
+
+/** AI 副驾文案：hook 的底层报错在这里换成人话（useWorkbenchPiChat 只透出 error.message）。 */
+const AI_TEXT = {
+  askFailed: '小台暂时连不上，这条内容没有发出去。已保留在面板里，点右上角「重试连接」恢复后再发一次。',
+}
+
+/** 「问小台」本地草稿的初始态：引用稳定，供 setAsk(ASK_IDLE) 复用。 */
+const ASK_IDLE = { pending: null, failed: false }
 
 /** 空数据兜底：`data` 归一化用（服务端字段缺失时不至于让模块崩）。 */
 const EMPTY_DATA = {
   tasks: [], works: [], hotspots: [], exercises: [], meals: [], finance: [], reviews: [],
-  fixes: [], logs: [], requirements: [], codes: [],
+  fixes: [], logs: [], requirements: [], codes: [], knowledge: [], knowledgeBases: [], knowledgeFolders: [],
   pets: { profile: {}, records: [] },
   relationships: { profile: {}, records: [] },
 }
 
-const TEXT = {
-  appName: 'AI 个人工作台',
-  assistant: '小台',
-  assistantRole: 'Pi Agent',
-  clearChat: '新对话',
-  clearConfirm: '开始一段新对话？旧会话仍保存在 pi-webx，可以在 pi-webx 中找回。',
-  collapse: '收起 AI 面板',
-  expand: '展开 AI 面板',
-  more: '更多',
-  menu: '全部功能',
-  close: '关闭',
-  retry: '重试',
-  loading: '正在打开工作台…',
-  bootFailed: '读取工作台数据失败',
-  sendPlaceholder: '和小台说点什么…（Enter 发送，Shift+Enter 换行）',
-  send: '发送',
-  thinking: '小台正在想…',
-  welcome: 'Pi Agent 已接入',
-  welcomeText: '工作台记录保存在本机 SQLite。当前对话使用 pi-webx 会话，尚不能直接读取或修改这些记录。',
-  suggestions: ['介绍一下你能做什么', '帮我拟一份今日计划', '如何安排一周运动？'],
-  chatEmpty: '还没有对话，下面几个问题可以先试试',
-  stopHint: '回复中…',
-  busy: '上一轮还没结束，稍等一下',
-  refresh: '刷新数据',
-  refreshed: '数据已是最新',
-  clear: '已开始新对话',
-  tools: '工具',
-  toolFull: '完整输出',
-}
-
 /**
  * 把 `/api/state` 的 data 归一化成模块可以直接信任的结构。
- * 这是网络 + 持久化文件边界，字段缺失只在这里补一次，模块内部不再做防御性判断。
  * @param raw - 服务端返回的 data。
  * @returns 结构完整的 data。
  */
-function normalizeData(raw) {
+export function normalizeData(raw) {
   if (raw === null || typeof raw !== 'object') return EMPTY_DATA
   const safeArray = key => (Array.isArray(raw[key]) ? raw[key] : [])
   const safeAtom = key => ({
@@ -107,6 +96,9 @@ function normalizeData(raw) {
     logs: safeArray('logs'),
     requirements: safeArray('requirements'),
     codes: safeArray('codes'),
+    knowledge: safeArray('knowledge'),
+    knowledgeBases: safeArray('knowledgeBases'),
+    knowledgeFolders: safeArray('knowledgeFolders'),
     pets: safeAtom('pets'),
     relationships: safeAtom('relationships'),
   }
@@ -115,22 +107,26 @@ function normalizeData(raw) {
 export default function App() {
   const [data, setData] = useState(EMPTY_DATA)
   const [profile, setProfile] = useState({ name: '我', motto: '' })
+  const [empty, setEmpty] = useState(false)
   const [activeModule, setActiveModule] = useState('dashboard')
   const [ready, setReady] = useState(false)
   const [bootError, setBootError] = useState('')
-  // 首帧就按屏宽定面板开合：手机端若先渲染成展开，会闪一下全屏浮层。
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [confirmClear, setConfirmClear] = useState(false)
+  const [toasts, setToasts] = useState([])
+  const [prefs, setPref, replacePrefs] = usePrefs()
+  const isMobile = useMediaQuery('(max-width: 639px)')
   const [panelOpen, setPanelOpen] = useState(() => (
     typeof window === 'undefined' || typeof window.matchMedia !== 'function'
       ? true
       : !window.matchMedia('(max-width: 639px)').matches
   ))
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [toasts, setToasts] = useState([])
-  const [confirmClear, setConfirmClear] = useState(false)
-  const [dataToolsOpen, setDataToolsOpen] = useState(false)
-  const { chat, busy, modelName, status: piStatus, send, newConversation, dialog, respondToDialog } = useWorkbenchPiChat()
-  const isMobile = useMediaQuery('(max-width: 639px)')
-  const scrollRef = useRef(null)
+  const { chat, busy, modelName, status: piStatus, send, newConversation, retry, dialog, respondToDialog } = useWorkbenchPiChat()
+  // 「问小台」本地草稿：pi 不可用时 send() 内部吞掉异常、只往面板丢一条底层报错，
+  // 笔记标题 / 正文会整段消失。这里先落成 pending 用户消息，回显成功后撤掉。
+  const [ask, setAsk] = useState(ASK_IDLE)
   const toastId = useRef(0)
 
   const notify = useCallback((text, tone = 'ok') => {
@@ -145,6 +141,7 @@ export default function App() {
     const snapshot = await api.state()
     setData(normalizeData(snapshot.data))
     setProfile(snapshot.profile ?? { name: '我', motto: '' })
+    setEmpty(snapshot.empty === true)
   }, [])
 
   /** 写操作统一入口：请求 → 刷新 → 反馈；失败弹错误提示，不抛给调用方。 */
@@ -160,7 +157,46 @@ export default function App() {
     }
   }, [notify, refresh])
 
-  // 启动：从 pi-webx SQLite 服务拉取工作台数据；Pi 会话由独立 hook 恢复。
+  /** 模块「问小台」入口：把文本送进 AI 副驾并展开面板（空文本忽略）。 */
+  const askAI = useCallback((text) => {
+    const content = String(text ?? '').trim()
+    if (content === '') return
+    setPanelOpen(true)
+    // 先落本地 pending 气泡再 send：pi 不可用时 send 走失败路径也只丢报错，不丢内容。
+    setAsk({ pending: { text: content, at: Date.now() }, failed: false })
+    send(content)
+  }, [send])
+
+  // pending 气泡的留存 / 撤销统一走 nextAskState（纯函数，UI 门禁直测）：
+  // 发送在途时 chat 为空是正常空态、不能撤；只有回显成功或显式清空才撤；
+  // send 走完失败路径（有错误条）则保留气泡并把报错换成人话。
+  useEffect(() => {
+    setAsk((current) => {
+      const next = nextAskState(current, { chat, busy })
+      // 无变化时返回原引用，React 直接 bail out，effect 不会自触发成环。
+      return next.pending === current.pending && next.failed === current.failed ? current : next
+    })
+  }, [chat, busy])
+
+  // 面板消息 = hook 的 chat +（失败路径下）pending 用户气泡与友好错误文案。
+  const panelChat = useMemo(() => {
+    const messages = ask.failed
+      ? chat.map(message => (message.role === 'error'
+        ? { ...message, text: AI_TEXT.askFailed }
+        : message))
+      : chat
+    if (ask.pending === null) return messages
+    const pending = {
+      id: 'ask-pending', role: 'user', text: ask.pending.text, at: ask.pending.at, pending: true,
+    }
+    // pending 气泡排在错误条之前：先看到自己发的内容，再看到为什么没送达。
+    const errorAt = messages.findIndex(message => message.role === 'error')
+    return errorAt === -1
+      ? [...messages, pending]
+      : [...messages.slice(0, errorAt), pending, ...messages.slice(errorAt)]
+  }, [ask, chat])
+
+  // 启动：拉数据 + 偏好；偏好落到 <html>（主题/密度）。
   useEffect(() => {
     let cancelled = false
     async function boot() {
@@ -169,6 +205,8 @@ export default function App() {
         if (cancelled) return
         setData(normalizeData(snapshot.data))
         setProfile(snapshot.profile ?? { name: '我', motto: '' })
+        setEmpty(snapshot.empty === true)
+        replacePrefs(snapshot.prefs ?? {})
         setReady(true)
       } catch (error) {
         if (!cancelled) setBootError(String(error?.message ?? error))
@@ -176,32 +214,39 @@ export default function App() {
     }
     boot()
     return () => { cancelled = true }
-  }, [])
+  }, [replacePrefs])
 
-  // 手机端默认收起 AI 面板（右下角悬浮按钮唤出），回到宽屏默认展开。
+  // 全局快捷键：⌘K 命令面板、⌘1-8 切模块。
   useEffect(() => {
-    setPanelOpen(!isMobile)
-  }, [isMobile])
-
-  // 新消息进来滚到底部。
-  useEffect(() => {
-    const node = scrollRef.current
-    if (node !== null) node.scrollTop = node.scrollHeight
-  }, [chat, busy])
-
-  // 移动端抽屉：Esc 关闭（模态框自己处理，抽屉是手写的，需要补上）。
-  useEffect(() => {
-    if (!drawerOpen) return undefined
     const onKeyDown = event => {
-      if (event.key === 'Escape') setDrawerOpen(false)
+      const mod = event.metaKey || event.ctrlKey
+      if (mod && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setPaletteOpen(open => !open)
+      } else if (mod && event.key >= '1' && event.key <= String(MODULES.length)) {
+        event.preventDefault()
+        setActiveModule(MODULES[Number(event.key) - 1].id)
+        setDrawerOpen(false)
+      }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [drawerOpen])
+  }, [])
+
+  // AI 面板开合记忆在服务端偏好里（默认桌面展开）。
+  const applyPanel = useCallback((open) => {
+    setPanelOpen(open)
+    setPref('panelOpen', open)
+  }, [setPref])
+
+  useEffect(() => {
+    if (prefs.panelOpen !== undefined && !isMobile) setPanelOpen(prefs.panelOpen === true)
+  }, [prefs.panelOpen, isMobile])
 
   const byId = useMemo(() => new Map(MODULES.map(module => [module.id, module])), [])
   const active = byId.get(activeModule) ?? MODULES[0]
   const ModuleView = active.Component
+  const theme = typeof document === 'undefined' ? 'light' : (document.documentElement.dataset.theme ?? 'light')
 
   function openModule(id) {
     setActiveModule(id)
@@ -210,15 +255,16 @@ export default function App() {
   }
 
   async function clearChat() {
-    newConversation()
+    setAsk(ASK_IDLE)
+    await newConversation()
     setConfirmClear(false)
-    notify(TEXT.clear)
+    notify('已开始新对话')
   }
 
   async function manualRefresh() {
     try {
       await refresh()
-      notify(TEXT.refreshed, 'ok')
+      notify('数据已是最新')
     } catch (error) {
       notify(String(error?.message ?? error), 'error')
     }
@@ -241,28 +287,34 @@ export default function App() {
 
   async function importData(event) {
     const file = event.target.files?.[0]
-    event.target.value = ''
     if (!file) return
     if (!window.confirm('导入会覆盖本机 SQLite 中的工作台记录。请先导出备份。确定继续？')) return
     try {
       const parsed = JSON.parse(await file.text())
       await api.importData(parsed)
       await refresh()
-      setDataToolsOpen(false)
       notify('工作台数据已导入')
     } catch (error) {
       notify(`导入失败：${String(error?.message ?? error)}`, 'error')
     }
   }
 
+  async function loadDemo() {
+    await mutate(() => api.loadDemo(), '已灌入演示数据')
+  }
+
+  async function clearAll() {
+    await mutate(() => api.clearAll(), '已清空全部数据')
+  }
+
   if (bootError !== '') {
     return (
       <div className="loading-screen">
         <Card className="boot-error">
-          <p className="card-title">{TEXT.bootFailed}</p>
+          <p className="card-title">读取工作台数据失败</p>
           <p className="small muted" style={{ marginTop: '8px' }}>{bootError}</p>
           <button type="button" className="btn btn-primary" style={{ marginTop: '16px' }} onClick={() => window.location.reload()}>
-            {TEXT.retry}
+            重试
           </button>
         </Card>
       </div>
@@ -273,119 +325,36 @@ export default function App() {
     return (
       <div className="loading-screen">
         <span className="spinner" />
-        <p>{TEXT.loading}</p>
+        <p>正在打开工作台…</p>
       </div>
     )
   }
 
-  /** AI 面板在桌面与手机是同一个组件，只有外层定位不同。 */
-  const chatPanel = (
-    <>
-      <header className="aside-head">
-        <span className="aside-avatar"><IconSparkles size={18} /></span>
-        <div className="grow">
-          <p className="aside-title">{TEXT.assistant}</p>
-          <p className="aside-sub">
-            <span className={`status-dot ${piStatus === 'live' ? '' : 'off'}`} />
-            {busy ? TEXT.thinking : `${TEXT.assistantRole} · ${piStatus === 'live' ? modelName : '待连接'}`}
-          </p>
-        </div>
-        <div className="aside-actions">
-          <IconButton label={TEXT.refresh} onClick={manualRefresh}><IconRefresh size={17} /></IconButton>
-          <IconButton label={TEXT.clearChat} onClick={() => setConfirmClear(true)}><IconPlus size={17} /></IconButton>
-          {!isMobile && (
-            <IconButton label={TEXT.collapse} onClick={() => setPanelOpen(false)}><IconPanel size={17} /></IconButton>
-          )}
-          {isMobile && (
-            <IconButton label={TEXT.close} onClick={() => setPanelOpen(false)}><IconClose size={18} /></IconButton>
-          )}
-        </div>
-      </header>
-
-      <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
-        {chat.length === 0 && (
-          <div className="chat-empty">
-            <span className="empty-icon"><IconSparkles size={22} /></span>
-            <div>
-              <p className="chat-empty-title">{TEXT.welcome}</p>
-              <p className="chat-empty-text">{TEXT.welcomeText}</p>
-            </div>
-            <div className="suggest">
-              {TEXT.suggestions.map(question => (
-                <button type="button" className="suggest-item" key={question} onClick={() => send(question)}>
-                  {question}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {chat.map(message => <ChatMessage key={message.id} message={message} />)}
-      </div>
-
-      <div className="composer">
-        {busy && (
-          <div className="typing">
-            <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
-            {TEXT.stopHint}
-          </div>
-        )}
-        <Composer busy={busy} onSend={send} />
-      </div>
-    </>
-  )
-
   return (
     <div className="app" data-panel={panelOpen ? 'open' : 'closed'}>
-      <header className="topbar">
-        <div className="grow">
-          <p className="topbar-title">{active.label}</p>
-          <p className="topbar-sub">{active.desc}</p>
-        </div>
-        <IconButton label={TEXT.menu} onClick={() => setDrawerOpen(true)}><IconMenu size={20} /></IconButton>
-      </header>
+      <TopBar
+        appName={APP_NAME}
+        profileName={profile.name === '我' ? '' : profile.name}
+        theme={theme}
+        onOpenPalette={() => setPaletteOpen(true)}
+        onToggleTheme={() => setPref('theme', theme === 'dark' ? 'light' : 'dark')}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
 
-      <nav className="sidebar" aria-label={TEXT.menu}>
-        <div className="brand">
-          <span className="brand-mark"><IconSparkles size={18} /></span>
-          <span className="brand-text">
-            <span className="brand-name">{TEXT.appName}</span>
-            <span className="brand-sub">{profile.name}</span>
-          </span>
-        </div>
-        <ul className="nav">
-          {MODULES.map(module => {
-            const Icon = module.icon
-            return (
-              <li key={module.id}>
-                <button
-                  type="button"
-                  className={`nav-item ${module.id === activeModule ? 'is-active' : ''}`}
-                  onClick={() => openModule(module.id)}
-                  title={module.label}
-                  aria-current={module.id === activeModule ? 'page' : undefined}
-                >
-                  <span className="nav-icon"><Icon size={19} /></span>
-                  <span className="nav-label">{module.label}</span>
-                </button>
-              </li>
-            )
-          })}
-        </ul>
-        <div className="sidebar-foot">
-          <span className={`status-dot ${piStatus === 'live' ? '' : 'off'}`} />
-          <span>{TEXT.assistant}{busy ? TEXT.thinking : piStatus === 'live' ? '已连接' : '待连接'}</span>
-        </div>
-        <a className="pi-full-chat-link" href="/chat"><IconSparkles size={17} />完整 Pi 对话</a>
-      </nav>
+      <SideNav modules={MODULES} active={activeModule} data={data} piStatus={piStatus} onNavigate={openModule} />
 
       <main className="main">
-        <div className="main-inner">
+        <div className={`main-inner ${activeModule === 'knowledge' ? 'kb-main-inner' : ''}`}>
           <div className="page-head">
             <div>
               <h1 className="page-title">{active.label}</h1>
               <p className="page-desc">{active.desc}</p>
             </div>
-            <button type="button" className="btn btn-sm" onClick={() => setDataToolsOpen(true)}>数据导入/导出</button>
+            <div className="page-actions">
+              <button type="button" className="icon-btn" aria-label="刷新数据" title="刷新数据" onClick={manualRefresh}>
+                <IconRefresh size={17} />
+              </button>
+            </div>
           </div>
           <ModuleView
             data={data}
@@ -395,22 +364,38 @@ export default function App() {
             refresh={refresh}
             notify={notify}
             navigate={openModule}
+            prefs={prefs}
+            setPref={setPref}
+            empty={empty}
+            onLoadDemo={loadDemo}
+            askAI={askAI}
           />
         </div>
       </main>
 
-      <aside className="aside" aria-label={`AI 助理 ${TEXT.assistant}`}>
-        {chatPanel}
+      <aside className="aside" aria-label="AI 副驾">
+        <AIPanel
+          chat={panelChat}
+          busy={busy}
+          status={piStatus}
+          modelName={modelName}
+          onSend={send}
+          onNew={() => setConfirmClear(true)}
+          onRetry={retry}
+          onRefreshData={manualRefresh}
+          isMobile={isMobile}
+          onClose={() => applyPanel(false)}
+        />
       </aside>
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
       {panelOpen === false && (
-        <button type="button" className="fab" aria-label={TEXT.expand} title={TEXT.expand} onClick={() => setPanelOpen(true)}>
+        <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>
       )}
 
-      <nav className="tabbar" aria-label={TEXT.menu}>
+      <nav className="tabbar" aria-label="模块导航">
         {TABS.map(id => {
           const module = byId.get(id)
           const Icon = module.icon
@@ -428,7 +413,7 @@ export default function App() {
         })}
         <button type="button" className={`tab ${drawerOpen ? 'is-active' : ''}`} onClick={() => setDrawerOpen(true)}>
           <IconMenu size={20} />
-          {TEXT.more}
+          更多
         </button>
         <button type="button" className={`tab ${panelOpen ? 'is-active' : ''}`} onClick={() => setPanelOpen(true)}>
           <IconSparkles size={20} />
@@ -437,7 +422,7 @@ export default function App() {
       </nav>
 
       {drawerOpen && (
-        <div className="drawer" role="dialog" aria-modal="true" aria-label={TEXT.menu}>
+        <div className="drawer" role="dialog" aria-modal="true" aria-label="全部功能">
           <div
             className="drawer-backdrop"
             onMouseDown={event => {
@@ -445,7 +430,7 @@ export default function App() {
             }}
           />
           <div className="drawer-panel">
-            <p className="drawer-title">{TEXT.menu}</p>
+            <p className="drawer-title">全部功能</p>
             <div className="drawer-grid">
               {MODULES.map(module => {
                 const Icon = module.icon
@@ -461,154 +446,47 @@ export default function App() {
                   </button>
                 )
               })}
-              <a className="drawer-item pi-full-chat-drawer" href="/chat"><IconSparkles size={18} />完整 Pi 对话</a>
+              <a className="drawer-item" href="/chat"><IconSparkles size={18} />完整 Pi 对话</a>
             </div>
           </div>
         </div>
       )}
 
+      {paletteOpen && (
+        <CommandPalette
+          modules={MODULES}
+          theme={theme}
+          onNavigate={openModule}
+          onOpenSettings={() => { setSettingsOpen(true); setPaletteOpen(false) }}
+          onToggleTheme={() => setPref('theme', theme === 'dark' ? 'light' : 'dark')}
+          onClose={() => setPaletteOpen(false)}
+        />
+      )}
+
+      <SettingsSheet
+        open={settingsOpen}
+        prefs={prefs}
+        setPref={setPref}
+        onExport={exportData}
+        onImport={importData}
+        onLoadDemo={loadDemo}
+        onClearAll={clearAll}
+        onClose={() => setSettingsOpen(false)}
+      />
+
       <ConfirmDialog
         open={confirmClear}
-        title={TEXT.clearChat}
-        message={TEXT.clearConfirm}
+        title="新对话"
+        message="开始一段新对话？旧会话仍保存在 pi-webx，可以在 pi-webx 中找回。"
         confirmText="开始新对话"
         busy={busy}
         onCancel={() => setConfirmClear(false)}
         onConfirm={clearChat}
       />
 
-      <Modal open={dataToolsOpen} title="SQLite 数据" onClose={() => setDataToolsOpen(false)}>
-        <p className="small muted">全部模块的数据保存在本机 SQLite。直接导入旧版 JSON 不包含图片文件；配套 pi-webx 的迁移脚本可连同旧图片一起搬迁，原文件不会被修改。</p>
-        <div className="form-row" style={{ marginTop: '16px' }}>
-          <button type="button" className="btn" onClick={exportData}>导出 JSON 备份</button>
-          <label className="btn" style={{ cursor: 'pointer' }}>
-            导入工作台 JSON
-            <input type="file" accept=".json,application/json" onChange={importData} style={{ display: 'none' }} />
-          </label>
-        </div>
-      </Modal>
-
       <PiDialog request={dialog} onRespond={respondToDialog} />
 
       <ToastHost toasts={toasts} />
-    </div>
-  )
-}
-
-/** 工具行短预览：取第一行、折叠空白、截到 160 字；空输出返回空串（免得渲染出孤零零的「· 」）。 */
-function previewOf(output) {
-  const first = String(output ?? '').split('\n')[0] ?? ''
-  const flat = first.replace(/\s+/g, ' ').trim()
-  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat
-}
-
-/**
- * 工具活动行：一行摘要 + 可展开的完整输出。
- * assistant 消息附属的 tools 与独立的 toolResult 消息共用它——
- * useWorkbenchPiChat 会为每条 toolResult 单独发一条 role:'tool' 消息，
- * 只渲染其中一条路径会让完整输出在真实会话里几乎看不到。
- */
-function ToolRows({ tools }) {
-  const items = Array.isArray(tools) ? tools : []
-  if (items.length === 0) return null
-  return (
-    <div className="msg tool" data-testid="chat-tool-row">
-      {items.map((tool, index) => {
-        const summary = previewOf(tool.output)
-        return (
-          <div className="tool-entry" key={`${tool.name}-${index}`} data-testid="chat-tool-entry">
-            <p className="tool-line">
-              <span aria-hidden="true">🔧</span>
-              <span className="tool-name">{tool.name}</span>
-              {summary !== '' && <span className="tool-summary">· {summary}</span>}
-            </p>
-            {tool.output !== '' && (
-              <details className="tool-details" data-testid="chat-tool-details">
-                <summary>{TEXT.toolFull}</summary>
-                <pre className="tool-output">{tool.output}</pre>
-              </details>
-            )}
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-/**
- * 一条聊天记录：用户气泡（正文走 Markdown）、助手正文（无气泡，与 /chat 一致）、
- * 工具行、错误气泡。
- * @param props - `message` 为 chatLog 或本地流式拼出来的消息。
- * @returns 消息元素。
- */
-function ChatMessage({ message }) {
-  const time = formatStamp(message.at)
-  if (message.role === 'tool') return <ToolRows tools={message.tools} />
-  return (
-    <div className={`msg ${message.role}`} data-testid={`chat-msg-${message.role}`}>
-      <ToolRows tools={message.tools} />
-      {message.text !== '' && (message.role === 'error'
-        ? <p className="bubble">{message.text}</p>
-        : message.role === 'user'
-          ? (
-            <div className="bubble" data-testid="chat-msg-bubble">
-              <AssistantMarkdown text={message.text} />
-            </div>
-          )
-          : (
-            <div className="msg-body" data-testid="chat-msg-body">
-              <AssistantMarkdown text={message.text} />
-            </div>
-          ))}
-      {time !== '' && <span className="msg-time">{time}</span>}
-    </div>
-  )
-}
-
-/** 输入框：Enter 发送、Shift+Enter 换行，高度随内容自增到上限。 */
-function Composer({ busy, onSend }) {
-  const [value, setValue] = useState('')
-  const inputRef = useRef(null)
-
-  function submit() {
-    const text = value.trim()
-    if (text === '' || busy) return
-    setValue('')
-    onSend(text)
-  }
-
-  return (
-    <div className="composer-box">
-      <textarea
-        ref={inputRef}
-        className="composer-input"
-        rows={1}
-        value={value}
-        placeholder={TEXT.sendPlaceholder}
-        aria-label={TEXT.sendPlaceholder}
-        onChange={event => {
-          setValue(event.target.value)
-          const node = event.target
-          node.style.height = 'auto'
-          node.style.height = `${Math.min(132, node.scrollHeight)}px`
-        }}
-        onKeyDown={event => {
-          if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-            event.preventDefault()
-            submit()
-          }
-        }}
-      />
-      <button
-        type="button"
-        className="send-btn"
-        aria-label={TEXT.send}
-        title={TEXT.send}
-        disabled={busy || value.trim() === ''}
-        onClick={submit}
-      >
-        <IconSend size={17} />
-      </button>
     </div>
   )
 }

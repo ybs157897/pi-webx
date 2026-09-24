@@ -1,0 +1,295 @@
+/*
+ * 需求管理模块样式：知识列表两栏——左栏（新建 / 搜索 / 状态分段 / 条目列表），
+ * 右栏阅读区（标题 + 状态优先级 + 星标与编辑删除 / markdown 正文 / 元信息 /
+ * 关联任务 / 推进退回）。
+ *
+ * 类名一律 `req-` 前缀，两栏骨架写在本文件而不是 styles.css：P2 期间多个模块在并行重塑，
+ * 共用 `.split` 这类通用类名会退化成「谁最后加载谁生效」。窄屏（<900px）两栏改上下堆叠，
+ * 375px 不横向溢出。颜色、间距、字号全部取 styles.css 的令牌，亮/暗主题自动跟随。
+ */
+
+/* ================================================================ 两栏骨架 */
+
+.req-split {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr);
+  gap: var(--gap);
+  align-items: start;
+}
+
+/* 两栏都要能被压缩：长标题、长标签、长代码块不得把栅格撑破。 */
+.req-list-col,
+.req-reader-col { min-width: 0; }
+
+/* 左栏自己滚：条目多的时候右栏的阅读位置不跟着跳。 */
+.req-list-body { max-height: min(72dvh, 760px); overflow-y: auto; }
+
+/* ================================================================ 左栏：搜索与过滤 */
+
+.req-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--row-h-sm);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-3);
+  transition: border-color .15s ease;
+}
+
+.req-search:focus-within { border-color: var(--accent); }
+
+.req-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.req-search-input::placeholder { color: var(--text-3); }
+
+/* 原生 × 在窄栏里和状态分段抢宽度，收起。 */
+.req-search-input::-webkit-search-cancel-button { display: none; }
+
+.req-filter { margin-top: var(--sp-3); }
+
+/* 四档都带计数：撑满栏宽，且允许收缩——窄栏里宁可省略，也不许撑破卡片。 */
+.req-filter .segmented { display: flex; width: 100%; }
+
+.req-filter .segmented-item {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================================================================ 左栏：条目列表 */
+
+.req-list {
+  margin-top: var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+/* 条目 li 复用共享的 .list-item（分隔线 + flex），这里只补两行条目的排布。 */
+.req-list .req-item { padding: 0; align-items: stretch; }
+
+.req-item-btn {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  width: 100%;
+  padding: var(--sp-3) var(--card-pad);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+  transition: background .15s ease;
+}
+
+.req-item-btn:hover { background: var(--surface-1); }
+
+/* 选中态：accent-soft 底 + 左侧 accent 边界（inset 阴影不占位，行内容不会跳）。 */
+.req-list .req-item-btn.is-active {
+  background: var(--accent-soft);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.req-list .req-item-btn.is-active .req-item-title { color: var(--accent); font-weight: 600; }
+
+.req-item-top { display: flex; align-items: flex-start; gap: 6px; }
+
+/* 优先级色点：颜色之外条目里还有 sr-only 文字，不靠颜色单独表意。 */
+.req-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.req-dot.danger { background: var(--danger); }
+.req-dot.warn { background: var(--warn); }
+
+/* 标题最多两行，长标题不把列表撑散。 */
+.req-item-title {
+  min-width: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  font-size: var(--fs-md);
+  line-height: 1.45;
+}
+
+.req-item-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+
+/* 标签跟着换行，不裁切 chip（裁一半的标签比多一行更难看）。 */
+.req-item-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+
+.req-item-status { flex: none; margin-inline-start: auto; padding-inline-start: var(--sp-2); }
+
+/* ================================================================ 右栏：阅读区 */
+
+.req-reader { display: flex; flex-direction: column; gap: var(--sp-3); }
+
+.req-reader-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--sp-3);
+}
+
+.req-reader-title {
+  min-width: 0;
+  font-size: var(--fs-xl);
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -.01em;
+  overflow-wrap: anywhere;
+}
+
+.req-reader-tools { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+
+/* 星标按钮的定位槽：只做水平对齐，测试也认这个槽位。 */
+.req-star-slot { display: inline-flex; }
+
+/* 星标：点亮的是同一个描边图标，用 currentColor 填心 + 换色。 */
+.req-star.is-on { color: var(--warn); }
+.req-star.is-on svg { fill: currentColor; }
+
+.req-btn-danger { color: var(--danger); }
+.req-btn-danger:hover { border-color: var(--danger); background: var(--danger-soft); }
+
+.req-reader-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.req-reader-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.req-reader-tags { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
+.req-times { font-variant-numeric: tabular-nums; }
+
+/* markdown 正文：长 token 与代码块都不许把阅读栏撑破。 */
+.req-reader-body { min-width: 0; overflow-wrap: anywhere; font-size: var(--fs-md); color: var(--text-1); }
+.req-reader-body pre { max-width: 100%; overflow-x: auto; }
+
+.req-note-empty { color: var(--text-2); font-size: var(--fs-sm); }
+
+.req-muted { color: var(--text-2); font-size: var(--fs-sm); }
+
+/* 空关联任务的补充说明：另起一行、更淡一档。 */
+.req-hint { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 正文编辑器给足高度：写 markdown 的人需要看到一小段结构。 */
+.req-note-input { min-height: 160px; }
+
+/* ---------- 关联任务 ---------- */
+
+.req-section { padding-top: var(--sp-3); border-top: 1px solid var(--line-1); }
+
+.req-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-bottom: var(--sp-2);
+}
+
+.req-section-title { color: var(--text-2); font-size: var(--fs-sm); font-weight: 650; }
+
+/* 文字型轻按钮（去今日规划）。 */
+.req-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.req-plain:hover { text-decoration: underline; }
+
+.req-tasks { display: flex; flex-direction: column; gap: var(--sp-2); }
+
+.req-task {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  padding: 6px var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.req-task:hover { border-color: var(--accent); background: var(--accent-soft); }
+
+.req-task-icon { flex: none; color: var(--text-3); }
+
+.req-task-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---------- 推进 / 退回 ---------- */
+
+.req-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding-top: var(--sp-3);
+  border-top: 1px solid var(--line-1);
+}
+
+/* 推进是这一行的主操作，靠右收尾。 */
+.req-actions .req-advance { margin-inline-start: auto; }
+
+/* ================================================================ 断点 */
+
+/* 窄页两栏改上下堆叠：左栏列表回到自然高度，阅读区落到下面。 */
+@media (max-width: 899px) {
+  .req-split { grid-template-columns: minmax(0, 1fr); }
+  .req-list-body { max-height: none; overflow-y: visible; }
+}
+
+/* 手机：标题与操作按钮改成上下排，工具栏不互相挤压。 */
+@media (max-width: 639px) {
+  .req-reader-head { flex-direction: column; }
+  .req-reader-tools { width: 100%; }
+  .req-actions .req-advance { margin-inline-start: 0; }
+}

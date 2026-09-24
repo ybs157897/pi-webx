@@ -1,0 +1,372 @@
+/*
+ * 工作助理（Works）模块样式：双视图工具栏 + 看板列 + 卡片 + 列表微调。
+ *
+ * 只吃 styles.css 的令牌（颜色 / 间距 / 字号 / 圆角），亮暗主题自动跟随；
+ * 375px 下看板与列表都靠容器横向滚动兜底（列宽最小 260px），不做列折叠。
+ */
+
+.works {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+/* ---------- 工具栏：搜索 + 状态过滤 + 视图切换 ---------- */
+
+.works-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex-wrap: wrap;
+}
+
+.works-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 220px;
+  min-width: 0;
+  max-width: 320px;
+  height: var(--row-h-sm);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-3);
+  transition: border-color .15s ease;
+}
+
+.works-search:focus-within {
+  border-color: var(--accent);
+}
+
+.works-search svg {
+  flex: none;
+}
+
+.works-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.works-search-input::placeholder {
+  color: var(--text-3);
+}
+
+.works-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.works-views {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-inline-start: auto;
+}
+
+/* ---------- 空态引导 / 过滤无结果 ---------- */
+
+.works-guide {
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+.works-guide .empty {
+  padding: var(--sp-5) var(--sp-4);
+}
+
+.works-blank {
+  padding: var(--sp-3) var(--sp-4);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-md);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* ---------- 看板 ---------- */
+
+.works-board {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(260px, 1fr));
+  gap: var(--gap);
+  align-items: start;
+  overflow-x: auto;
+  padding-bottom: var(--sp-1);
+}
+
+.works-col {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+  transition: border-color .15s ease, background .15s ease;
+}
+
+.works-col.is-drop {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.works-col-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-2);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+
+.works-col-name {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.works-col-dot {
+  width: 8px;
+  height: 8px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.works-col[data-status="doing"] .works-col-dot {
+  background: var(--accent);
+}
+
+.works-col[data-status="done"] .works-col-dot {
+  background: var(--ok);
+}
+
+.works-col-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+}
+
+/* ---------- 卡片 ---------- */
+
+.work-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: calc(var(--sp-3) + 2px) var(--sp-3) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-1);
+  cursor: grab;
+  transition: border-color .15s ease, box-shadow .15s ease, opacity .15s ease;
+}
+
+.work-card:hover {
+  border-color: var(--line-2);
+  box-shadow: var(--shadow-2);
+}
+
+.work-card.is-dragging {
+  opacity: .45;
+  cursor: grabbing;
+}
+
+/* 顶部状态色条：待办中性色 / 进行中强调色 / 已完成成功色。 */
+.work-card-bar {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--text-3);
+}
+
+.work-card[data-status="doing"] .work-card-bar {
+  background: var(--accent);
+}
+
+.work-card[data-status="done"] .work-card-bar {
+  background: var(--ok);
+}
+
+.work-card-title {
+  padding-inline-end: 24px; /* 给右上角的 hover 编辑按钮留位，多行标题也不会被盖住 */
+  font-size: var(--fs-md);
+  font-weight: 600;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+/* 卡片右上角编辑入口：平时隐藏，悬停 / 键盘聚焦（focus-within）/ 触屏（无 hover）时露出。 */
+.work-card-edit {
+  position: absolute;
+  top: 5px;
+  inset-inline-end: 5px;
+  width: 26px;
+  height: 26px;
+  opacity: 0;
+}
+
+.work-card:hover .work-card-edit,
+.work-card:focus-within .work-card-edit {
+  opacity: 1;
+}
+
+@media (hover: none) {
+  .work-card-edit {
+    opacity: 1;
+  }
+}
+
+/* 备注预览固定两行，长文不再把卡片撑开。 */
+.work-card-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.work-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+}
+
+.work-card-refs {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.work-card-time {
+  margin-inline-start: auto;
+}
+
+/* 行内状态分段：小一档，是触屏 / 键盘环境的状态流转通道。 */
+.work-card-status {
+  margin-top: 2px;
+}
+
+.work-card-status .segmented {
+  display: flex;
+  padding: 1px;
+}
+
+.work-card-status .segmented-item {
+  flex: 1 1 0;
+  height: 22px;
+  padding: 0 var(--sp-1);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 标签 chips ---------- */
+
+.works-tags {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* ---------- 列底幽灵添加 ---------- */
+
+.works-add {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--row-h-sm);
+  padding: 0 var(--sp-3);
+  border: 1px dashed var(--line-2);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  text-align: start;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+
+.works-add:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.works-add-form {
+  display: flex;
+}
+
+.works-add-input {
+  height: var(--row-h-sm);
+  background: var(--surface-0);
+}
+
+/* ---------- 列表视图 ---------- */
+
+.works-table-scroll {
+  overflow-x: auto;
+}
+
+/* 窄屏靠横向滚动读完整列，不折叠信息。 */
+.works-table {
+  min-width: 640px;
+}
+
+.works-cell-status .segmented,
+.works-row-actions .icon-btn {
+  vertical-align: middle;
+}
+
+.works-cell-status .segmented-item {
+  height: 24px;
+  padding: 0 var(--sp-2);
+}
+
+.works-row-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+}
+
+/* ---------- 窄屏 ---------- */
+
+@media (max-width: 639px) {
+  .works-search {
+    flex-basis: 100%;
+    max-width: none;
+    order: 1;
+  }
+
+  .works-filters {
+    order: 2;
+  }
+
+  .works-views {
+    order: 3;
+  }
+
+  /* 列宽固定 260px，横向滚动而不是压成不可读的窄列。 */
+  .works-board {
+    grid-template-columns: repeat(3, 260px);
+  }
+}

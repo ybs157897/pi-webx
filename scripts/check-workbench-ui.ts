@@ -15,7 +15,7 @@
  *   6. 需求管理是知识列表（用户定调）：左右两栏 + 右栏 markdown 阅读区；
  *   7. 代码开发是编辑器工作区（用户定调）：文件树 + tab + 行号编辑区 + 状态栏；
  *   8. AI 面板正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
- *   9. 知识库三栏 + [[双链]]：选中态 / 预览态 / 旧数据 / 空库都要有 DOM 证据；
+ *   9. 知识库两态（首页搜索卡片 / 目录+阅读）：首页 / 选中 / 预览 / 旧数据 / 空库都有 DOM 证据；
  *   10. 「问小台」失败路径：pi 不可用时 pending 用户气泡保留笔记内容、错误条是人话；
  *       pending 气泡的留存/撤销走 nextAskState 状态机（发送在途 ≠ 面板被清空）。
  *
@@ -308,30 +308,34 @@ const data = fakeData();
   assert.ok(!textOf(markup).includes('**') && !textOf(markup).includes('```'), 'AssistantMarkdown 残留 markdown 标记');
 }
 
-/* ================================================== 9. 知识库：三栏 + [[双链]] 面板 */
+/* ================================================== 9. 知识库：库 / 目录 / 文档 / 阅读 */
 
 {
+  const KB_BASE = '9000000e-0000-4000-8000-00000000000e';
+  const KB_FOLDER = '9000000f-0000-4000-8000-00000000000f';
   const KB_A = '9000000a-0000-4000-8000-00000000000a';
   const KB_B = '9000000b-0000-4000-8000-00000000000b';
   const KB_C = '9000000c-0000-4000-8000-00000000000c';
   const TASK_KB = '9000000d-0000-4000-8000-00000000000d';
-
-  // 笔记 A 是选中项：正文 [[知识库字段约定]] 指向 B，refs 里还手写了一条指向任务；
-  // 笔记 C 与那条任务反向引用 A——出链 / 反链两个方向都有数据。
+  const base = { id: KB_BASE, title: '工作台知识库', description: '开发结论', createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z` };
+  const folder = { id: KB_FOLDER, title: '规范', knowledgeBaseId: KB_BASE, parentId: '' };
   const kbData: Record<string, unknown> = {
     ...fakeData(),
+    knowledgeBases: [base],
+    knowledgeFolders: [folder],
     knowledge: [
       {
         id: KB_A, title: '工作台双链设计', body: '正文引用 [[知识库字段约定]]，还有 **加粗** 与 `代码`。',
+        knowledgeBaseId: KB_BASE, folderId: KB_FOLDER,
         tags: ['设计', '知识库'], refs: [{ type: 'knowledge', id: KB_B }, { type: 'tasks', id: TASK_KB }],
         starred: true, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z`,
       },
       {
-        id: KB_B, title: '知识库字段约定', body: 'title 必填，body 长文本。',
+        id: KB_B, title: '知识库字段约定', body: 'title 必填，body 长文本。', knowledgeBaseId: KB_BASE, folderId: '',
         tags: ['约定'], refs: [], starred: false, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:30:00.000Z`,
       },
       {
-        id: KB_C, title: '链接面板验收清单', body: '检查 [[工作台双链设计]] 的反链。',
+        id: KB_C, title: '链接面板验收清单', body: '检查 [[工作台双链设计]] 的反链。', knowledgeBaseId: KB_BASE, folderId: '',
         tags: ['验收'], refs: [{ type: 'knowledge', id: KB_A }], starred: false, createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z`,
       },
     ],
@@ -344,94 +348,68 @@ const data = fakeData();
     ],
   };
 
-  // 未选中（默认）：左栏列表、来源徽标、动态来源筛选齐全。
-  const idle = render(Knowledge, kbData);
-  assert.ok(idle.includes('data-module="knowledge"'), '知识库缺 data-module');
-  assert.ok(idle.includes('data-testid="kb-split"'), '知识库应是三栏');
-  assert.equal(occurrences(idle, 'data-testid="kb-item"'), 3, '左栏条目数应等于笔记数');
-  assert.ok(idle.includes('data-testid="kb-search"'), '左栏缺搜索');
-  assert.ok(idle.includes('data-testid="kb-new"'), '左栏缺新建入口');
-  assert.ok(idle.includes('aria-label="新建笔记"'), '新建笔记应是带可访问名称的图标按钮');
-  assert.ok(idle.includes('data-testid="kb-tag-filter"'), '左栏缺标签过滤');
-  assert.ok(idle.includes('data-testid="kb-source-filter"'), '左栏缺来源筛选');
-  assert.ok(idle.includes('data-testid="kb-source-all"') && idle.includes('data-testid="kb-source-none"'), '来源筛选缺全部或无来源');
-  assert.ok(idle.includes('data-testid="kb-source-knowledge"') && idle.includes('data-testid="kb-source-tasks"'), '来源筛选应按知识笔记中实际 refs type 动态生成');
-  assert.ok(!idle.includes('data-testid="kb-source-requirements"'), '无对应来源的模块不应出现筛选 Chip');
-  assert.equal(occurrences(idle, 'data-testid="kb-item-sources"'), 2, '仅有 refs 的笔记应有来源徽标');
-  assert.ok(idle.includes('今日规划') && idle.includes('知识库'), '来源徽标应显示 LINK_LABELS 的中文名');
-  assert.ok(idle.includes('data-testid="kb-editor-empty"'), '未选中时应是编辑器空态');
-  assert.ok(idle.includes('data-testid="kb-backlinks"'), '缺右栏链接面板');
-  assert.ok(idle.includes('data-testid="kb-ask-ai"'), '缺「问小台」入口');
-  assertNoLeaks(idle, '知识库');
+  const list = render(Knowledge, kbData);
+  assert.ok(list.includes('data-testid="kb-bases"'), '入口应先展示知识库列表');
+  assert.equal(occurrences(list, 'data-testid="kb-base-item"'), 1, '知识库卡片数错误');
+  assert.ok(list.includes('工作台知识库') && list.includes('3 篇文档') && list.includes('1 个目录'), '知识库卡片缺名称或内容计数');
+  assert.ok(list.includes('data-testid="kb-new-base"'), '缺创建知识库入口');
+  assert.ok(!list.includes('data-testid="kb-editor"'), '库列表不应提前打开文档');
+  assertNoLeaks(list, '知识库列表');
 
-  // 选中 A（经 kbSelectedId 驱动 SSR 选中分支）：编辑器各件 + 出链 / 反链都要有 DOM 证据。
-  const selected = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A, kbView: 'edit' } });
-  assert.ok(selected.includes('data-testid="kb-editor"'), '选中态缺编辑器容器');
-  assert.ok(selected.includes('data-testid="kb-title-input"'), '编辑器缺标题输入');
-  assert.ok(selected.includes('data-testid="kb-body-input"'), '编辑器缺正文输入');
-  assert.ok(selected.includes('data-testid="kb-save"'), '编辑器缺保存按钮');
-  assert.ok(selected.includes('data-testid="kb-preview"'), '缺预览切换');
-  assert.ok(selected.includes('data-testid="kb-sources"') && selected.includes('data-testid="kb-source-link"'), '详情标题下缺跨模块来源条');
-  assert.ok(selected.includes('沉淀自：') && selected.includes('今日规划「给知识库补反链断言」'), '来源条应带模块名和目标标题');
-  assert.equal(occurrences(selected, 'data-testid="kb-source-link"'), 1, '知识库互链不应出现在来源条');
+  const documents = render(Knowledge, kbData, { prefs: { kbStage: 'documents', kbBaseId: KB_BASE } });
+  assert.ok(documents.includes('data-testid="kb-documents"'), '进入知识库后缺文档页');
+  assert.ok(documents.includes('文档目录') && documents.includes('规范'), '文档页缺目录树');
+  assert.equal(occurrences(documents, 'data-testid="kb-item"'), 3, '库内文档数错误');
+  assert.ok(documents.includes('data-testid="kb-search"'), '缺库内搜索');
+  assert.ok(documents.includes('data-testid="kb-tag-filter"') && documents.includes('data-testid="kb-source-filter"'), '缺标签或来源筛选');
+  assert.ok(documents.includes('今日规划') && documents.includes('知识库'), '来源筛选应由文档 refs 动态生成');
+  assert.ok(documents.includes('data-testid="kb-new"'), '缺新建文档入口');
+  assert.ok(!documents.includes('data-testid="kb-backlinks"'), '文档列表不应显示阅读关联');
+  assertNoLeaks(documents, '知识库文档列表');
+
+  const readingPrefs = { kbStage: 'reading', kbBaseId: KB_BASE, kbSelectedId: KB_A };
+  const selected = render(Knowledge, kbData, { prefs: { ...readingPrefs, kbView: 'edit' } });
+  assert.ok(selected.includes('data-testid="kb-split"'), '阅读态应是目录 + 正文两栏');
+  assert.equal(occurrences(selected, 'data-testid="kb-toc-item"'), 3, '阅读目录应覆盖本库所有文档');
+  assert.ok(selected.includes('data-testid="kb-back-home"'), '缺返回文档列表入口');
+  assert.ok(selected.includes('data-testid="kb-title-input"') && selected.includes('data-testid="kb-body-input"'), '编辑态缺标题或正文');
+  assert.ok(selected.includes('data-testid="kb-save"') && selected.includes('data-testid="kb-preview"'), '编辑态缺保存或预览');
+  assert.ok(selected.includes('aria-label="移动文档到目录"') && selected.includes('规范'), '阅读态缺目录归属');
+  assert.ok(selected.includes('data-testid="kb-sources"') && selected.includes('今日规划「给知识库补反链断言」'), '跨模块来源没有保留');
   const outgoingAt = selected.indexOf('data-testid="kb-outgoing"');
   const incomingAt = selected.indexOf('data-testid="kb-incoming"');
-  assert.ok(outgoingAt >= 0 && incomingAt > outgoingAt, '链接面板缺出链 / 反链分区');
-  assert.ok(selected.slice(outgoingAt, incomingAt).includes('知识库字段约定'), '出链缺 [[标题]] 解析出的笔记');
-  assert.ok(selected.slice(outgoingAt, incomingAt).includes('给知识库补反链断言'), '出链缺手写 refs 指向的任务');
-  const incomingSlice = selected.slice(incomingAt);
-  assert.ok(incomingSlice.includes('链接面板验收清单'), '反链缺引用本篇的笔记');
-  assert.ok(incomingSlice.includes('给知识库补反链断言'), '反链缺引用本篇的任务');
-  assertNoLeaks(selected, '知识库选中态');
+  assert.ok(outgoingAt >= 0 && incomingAt > outgoingAt, '双向链接分区缺失');
+  assert.ok(selected.slice(outgoingAt, incomingAt).includes('知识库字段约定'), '出链缺 [[标题]] 关联');
+  assert.ok(selected.slice(incomingAt).includes('链接面板验收清单'), '反链缺引用本篇的文档');
+  assertNoLeaks(selected, '知识库阅读');
 
-  // 缺省预览，已存 edit/preview 偏好仍按原值生效。
-  const preview = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A } });
-  assert.ok(preview.includes('data-testid="kb-preview-body"'), '预览态缺正文容器');
-  assert.ok(preview.includes('<strong>'), '预览应渲染 markdown 加粗');
-  assert.ok(!preview.includes('data-testid="kb-body-input"'), '预览态不该出现正文输入框');
-  assert.ok(selected.includes('data-testid="kb-body-input"') && !selected.includes('data-testid="kb-preview-body"'), '已存 edit 偏好应保留编辑态');
-  const savedPreview = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A, kbView: 'preview' } });
-  assert.ok(savedPreview.includes('data-testid="kb-preview-body"'), '已存 preview 偏好应保留预览态');
+  const preview = render(Knowledge, kbData, { prefs: readingPrefs });
+  assert.ok(preview.includes('data-testid="kb-preview-body"') && preview.includes('<strong>'), '阅读应渲染 markdown');
+  assert.ok(!preview.includes('data-testid="kb-body-input"'), '预览态不应有正文输入框');
+  const withAI = render(Knowledge, kbData, { prefs: readingPrefs, askAI: async () => {} });
+  assert.ok(withAI.includes('data-testid="kb-ask-ai"'), '问小台入口缺失');
   assertNoLeaks(preview, '知识库预览');
 
-  // askAI 两种形态都要能渲染：缺省（按钮禁用）与已接线。
-  const withAI = render(Knowledge, kbData, { prefs: { kbSelectedId: KB_A }, askAI: async () => {} });
-  assert.ok(withAI.includes('data-testid="kb-ask-ai"'), 'askAI 接线后「问小台」缺失');
-  assertNoLeaks(withAI, '知识库问小台');
+  const legacy = render(Knowledge, { ...fakeData(), knowledgeBases: [base], knowledgeFolders: [], knowledge: [{ id: KB_B, title: '旧笔记', knowledgeBaseId: KB_BASE }] }, { prefs: { kbStage: 'reading', kbBaseId: KB_BASE, kbSelectedId: KB_B } });
+  assert.ok(legacy.includes('data-testid="kb-preview-body"'), '旧文档缺字段时应能阅读');
+  assertNoLeaks(legacy, '知识库旧文档');
 
-  // 旧数据缺字段（无 body / tags / refs / starred / 时间戳）：不崩、无 undefined / NaN。
-  const legacy = render(
-    Knowledge,
-    { ...fakeData(), knowledge: [{ id: KB_B, title: '旧笔记' }] },
-    { prefs: { kbSelectedId: KB_B } },
-  );
-  assert.ok(legacy.includes('data-module="knowledge"'), '旧数据缺字段时模块应仍渲染');
-  assert.ok(legacy.includes('data-testid="kb-editor"'), '旧数据应能打开编辑器');
-  assertNoLeaks(legacy, '知识库旧数据');
-
-  // 完全没有 knowledge 键（库还没这个模块）：空态 + 空库引导 + 编辑器空态。
-  const blank = render(Knowledge, { ...fakeData() }, { empty: true, onLoadDemo: async () => {} });
-  assert.ok(blank.includes('data-testid="kb-empty"'), '无笔记时应是空态');
-  assert.ok(blank.includes('data-testid="kb-load-demo"'), '空库缺演示数据入口');
-  assert.ok(blank.includes('data-testid="kb-editor-empty"'), '无笔记时编辑器应是空态');
+  const blank = render(Knowledge, { ...fakeData(), knowledge: [], knowledgeBases: [], knowledgeFolders: [] }, { empty: true, onLoadDemo: async () => {} });
+  assert.ok(blank.includes('data-testid="kb-bases"') && blank.includes('还没有知识库'), '空库应有创建引导');
+  assert.ok(blank.includes('data-testid="kb-load-demo"'), '首启演示数据入口丢失');
   assertNoLeaks(blank, '知识库空库');
 
-  // 交互分支（⌘S、保存落库、[[解析]] 写 refs、问小台）SSR 不可达，照既有段读源码钉结构。
   const kbSource = sourceOf('../src/workbench-app/modules/Knowledge.jsx');
-  assert.ok(kbSource.includes("api.patchRecord('knowledge'"), '保存未接 patchRecord');
-  assert.ok(kbSource.includes("api.addRecord('knowledge'"), '新建未接 addRecord');
+  assert.ok(kbSource.includes("api.addRecord('knowledgeBases'") && kbSource.includes("api.addRecord('knowledgeFolders'"), '库或目录创建未接后端');
+  assert.ok(kbSource.includes("api.patchRecord('knowledge'") && kbSource.includes("api.addRecord('knowledge'"), '文档写入未接后端');
   assert.ok(kbSource.includes('WIKI_PATTERN') && kbSource.includes('buildRefs'), '[[双链]] 解析未落地');
-  assert.ok(kbSource.includes('metaKey') && kbSource.includes("'s'"), '编辑器缺 ⌘S 保存');
-  assert.ok(kbSource.includes('preventDefault'), '⌘S 未阻止浏览器默认保存');
-  assert.ok(kbSource.includes('AssistantMarkdown'), '预览未用 AssistantMarkdown');
-  assert.ok(kbSource.includes('api.links'), '链接面板未接服务端 links 端点');
-  assert.ok(kbSource.includes('activeSource') && kbSource.includes('sourceTypesOf(row).includes(activeSource)'), '来源 Chip 未接入列表过滤');
-  assert.ok(kbSource.includes('onClick={() => openLink(source)}'), '来源条未复用跨模块跳转');
-  assert.ok(kbSource.includes('askAI'), '「问小台」未接 askAI');
-  assert.ok(kbSource.includes('typeof window'), '渲染期浏览器访问未加 typeof window 守卫');
+  assert.ok(kbSource.includes('metaKey') && kbSource.includes("'s'") && kbSource.includes('preventDefault'), '编辑器缺 ⌘S 保存');
+  assert.ok(kbSource.includes('AssistantMarkdown') && kbSource.includes('api.links'), '阅读预览或链接图谱缺失');
+  assert.ok(kbSource.includes('onClick={() => openLink(source)}') && kbSource.includes('askAI'), '来源回跳或问小台缺失');
+  assert.ok(kbSource.includes('typeof window'), '渲染期浏览器访问未加守卫');
 }
 
-console.log('workbench UI: knowledge module (three columns, wiki links, ask-ai) passed')
+console.log('workbench UI: knowledge bases, folders, document list, reading and links passed')
 console.log('workbench UI: 7 modules (widget board, capture, dual views, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
 
 /* ================================================== 10. AI 面板：「问小台」失败路径的本地兜底 */

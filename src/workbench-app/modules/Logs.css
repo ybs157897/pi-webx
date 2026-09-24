@@ -1,0 +1,230 @@
+/*
+ * 日志查询（Logs）模块样式：工具行（实时搜索 + 级别 / 来源 chips）、条件条、
+ * 按日分组的密集日志表（4px 级别色条 / 时间 / 来源 chip / 两行正文点击展开），
+ * 以及表格改卡片堆叠的断点。
+ *
+ * 列宽只在 `--logs-cols` 里写一遍，表头与行共用；组头与表格同一张 surface，
+ * 组与组之间用一条虚线分开。颜色 / 间距 / 字号一律走 styles.css 的令牌，
+ * 亮暗双主题与紧凑密度自动跟随。类名前缀：`logs-` 容器与工具行，`log-` 行内元素。
+ */
+
+/* ================================================================ 容器与首启引导 */
+
+.logs { display: flex; flex-direction: column; }
+
+.logs-guide-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); }
+
+/* ================================================================ 工具行 */
+
+.logs-toolbar { display: flex; flex-direction: column; gap: var(--sp-2); }
+.logs-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
+
+.logs-chip-label { color: var(--text-3); font-size: var(--fs-xs); font-weight: 650; }
+.logs-chip-group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+
+/* 搜索框：输入进得去图标，边框只在聚焦时亮。形式与问题修复的搜索条一致。 */
+.logs-search {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  flex: 1 1 220px;
+  min-width: 0;
+  height: var(--row-h-sm);
+  padding: 0 var(--sp-3);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  color: var(--text-3);
+  transition: border-color .15s ease;
+}
+
+.logs-search:focus-within { border-color: var(--accent); }
+
+.logs-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  font-size: var(--fs-sm);
+  outline: none;
+}
+
+.logs-search-input::placeholder { color: var(--text-3); }
+
+/* 无边框文字按钮：更多来源 / 清空条件。 */
+.logs-plain {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-xs);
+  font-weight: 550;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.logs-plain:hover { text-decoration: underline; }
+
+/* ================================================================ 条件条 */
+
+.logs-cond {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+}
+
+.logs-cond-label { color: var(--text-3); font-size: var(--fs-xs); font-weight: 650; }
+
+/* 清空条件永远贴在这一行右端。 */
+.logs-cond .logs-plain { margin-inline-start: auto; }
+
+/* ================================================================ 日志表 */
+
+.logs-table { --logs-cols: 4px 92px 128px minmax(0, 1fr) 68px; margin-top: var(--sp-3); }
+
+.logs-table .table-head,
+.logs-table .table-row {
+  grid-template-columns: var(--logs-cols);
+  gap: 10px;
+  /* 左侧不留内边距，让 4px 色条贴着表格边缘。 */
+  padding: 5px var(--sp-3) 5px 0;
+}
+
+.logs-table .table-row { min-height: 32px; }
+
+/* 色条列：占满整行高度（展开时一起变高），窄到 4px 也只表意不抢视线。 */
+.logs-bar-head { display: block; }
+.logs-bar-cell { display: flex; align-self: stretch; }
+.logs-bar { display: block; flex: 1 1 auto; width: 4px; border-radius: 0 2px 2px 0; background: var(--text-3); }
+.logs-bar.info { background: var(--accent); }
+.logs-bar.warn { background: var(--warn); }
+.logs-bar.error { background: var(--danger); }
+
+.logs-group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-3) var(--sp-1);
+  background: var(--surface-0);
+}
+
+/* 组与组之间一条虚线：第一个组头前面是表头，不加；组尾行也不留实线，避免两条线叠在一起。 */
+.logs-table .table-row + .logs-group-head { border-top: 1px dashed var(--line-1); }
+.logs-table .table-row.is-group-end { border-bottom: 0; }
+
+.logs-group-label { color: var(--text-1); font-size: var(--fs-xs); font-weight: 650; }
+.logs-group-date { color: var(--text-3); font-size: var(--fs-xs); }
+.logs-group-count { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 时间列：今天只报时刻（日期交给组头），其余日子日期 + 时刻。 */
+.logs-time {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
+  font-size: var(--fs-xs);
+  white-space: nowrap;
+}
+
+.logs-time-day { color: var(--text-3); }
+.logs-time-hm { color: var(--text-2); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+/* 来源 chip：长来源名截断在列内，不挤后面的正文。 */
+.logs-source { min-width: 0; overflow: hidden; }
+.logs-source .chip { max-width: 100%; }
+.logs-source-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.logs-muted { color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 正文：默认两行截断，点它展开全文（同一按钮再点收起）。 */
+.logs-text { min-width: 0; }
+
+.logs-text-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+
+.logs-text-body {
+  display: -webkit-box;
+  flex: 1 1 auto;
+  min-width: 0;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logs-row.is-open .logs-text-body { display: block; overflow: visible; -webkit-line-clamp: none; }
+
+.logs-text-caret { flex: none; margin-top: 2px; color: var(--text-3); transition: transform .15s ease; }
+.logs-row.is-open .logs-text-caret { transform: rotate(90deg); }
+
+/* 展开后补的元信息：级别、标签、精确到分的记录时刻。 */
+.logs-detail { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; }
+.logs-detail-stamp { color: var(--text-3); font-size: var(--fs-xs); }
+
+/* 操作列：删除键只在悬停 / 聚焦时露出，密集列表不被一排垃圾桶打扰。 */
+.logs-actions { display: flex; align-items: center; justify-content: flex-end; }
+.logs-actions .icon-btn { opacity: 0; transition: opacity .15s ease; }
+.logs-row:hover .logs-actions .icon-btn,
+.logs-row:focus-within .logs-actions .icon-btn { opacity: 1; }
+
+/* 触屏没有 hover：删除键常驻。 */
+@media (hover: none) {
+  .logs-actions .icon-btn { opacity: 1; }
+}
+
+/* ================================================================ 断点 */
+
+/* 中窄屏：表格放不下五列，时间与来源列一起收窄。 */
+@media (max-width: 900px) {
+  .logs-table { --logs-cols: 4px 76px 104px minmax(0, 1fr) 60px; }
+}
+
+/* 375px 量级：表格改卡片式堆叠（表头隐藏，时刻 / 来源 / 操作一行，正文独占一行）。 */
+@media (max-width: 639px) {
+  .logs-search { flex: 1 1 100%; }
+
+  .logs-table .table-head { display: none; }
+
+  .logs-table .table-row {
+    grid-template-columns: 4px auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "bar time   source  actions"
+      "bar text   text    text";
+    row-gap: 4px;
+    padding: var(--sp-2) var(--sp-3) var(--sp-2) 0;
+    min-height: 0;
+  }
+
+  .logs-row .logs-bar-cell { grid-area: bar; }
+  .logs-row .logs-time { grid-area: time; }
+  .logs-row .logs-source { grid-area: source; }
+  .logs-row .logs-text { grid-area: text; }
+  .logs-row .logs-actions { grid-area: actions; }
+
+  .logs-group-head { padding-inline: var(--sp-3); }
+  .logs-cond .logs-plain { margin-inline-start: 0; }
+}

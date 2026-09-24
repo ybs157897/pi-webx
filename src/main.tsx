@@ -20,7 +20,7 @@ if (!container) throw new Error('#root not found in index.html');
 
 const showAgent = (window.location.pathname === '/chat' || window.location.pathname.startsWith('/chat/'))
   || new URLSearchParams(window.location.search).has('session');
-if (!showAgent) document.title = 'AI 个人工作台';
+if (!showAgent) document.title = 'AI 指挥台';
 
 createRoot(container).render(
   <StrictMode>

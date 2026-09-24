@@ -27,6 +27,7 @@ type RecordPayloadRow = { module: string; payload: string };
 type AtomProfileRow = { module: string; payload: string };
 
 const DEFAULT_PROFILE = { name: '我', motto: '把日子过成想要的样子' };
+const LEGACY_KB_ID = 'kb-legacy-default';
 
 /** 全部数组模块都维护 createdAt / updatedAt（旧记录导入时缺省由导入方补齐）。 */
 const STAMPED_MODULES: ReadonlySet<string> = new Set(ARRAY_MODULES);
@@ -118,6 +119,26 @@ function normalizeImport(raw: unknown): WorkbenchState {
       }),
     };
   }
+  const baseIds = new Set(state.knowledgeBases.map(base => base.id));
+  const folders = new Map(state.knowledgeFolders.map(folder => [folder.id, folder]));
+  for (const folder of state.knowledgeFolders) {
+    if (!baseIds.has(String(folder.knowledgeBaseId))) throw new WorkbenchInputError('知识目录指向不存在的知识库');
+    const seen = new Set([folder.id]);
+    let parentId = String(folder.parentId ?? '');
+    while (parentId !== '') {
+      if (seen.has(parentId)) throw new WorkbenchInputError('知识目录存在循环层级');
+      seen.add(parentId);
+      const parent = folders.get(parentId);
+      if (!parent || parent.knowledgeBaseId !== folder.knowledgeBaseId) throw new WorkbenchInputError('知识目录的上级目录不在同一个知识库');
+      parentId = String(parent.parentId ?? '');
+    }
+  }
+  for (const doc of state.knowledge) {
+    if (doc.knowledgeBaseId && !baseIds.has(String(doc.knowledgeBaseId))) throw new WorkbenchInputError('知识文档指向不存在的知识库');
+    if (doc.folderId && folders.get(String(doc.folderId))?.knowledgeBaseId !== doc.knowledgeBaseId) {
+      throw new WorkbenchInputError('知识文档的目录不在同一个知识库');
+    }
+  }
   return state;
 }
 
@@ -161,6 +182,55 @@ export class WorkbenchStore {
       );
       CREATE INDEX IF NOT EXISTS workbench_atom_records_module_seq ON workbench_atom_records(module, seq);
     `);
+    this.migrateLegacyKnowledge();
+  }
+
+  private getArrayRecord(module: string, id: string): RecordRow | null {
+    const row = this.db.prepare('SELECT payload FROM workbench_records WHERE module = ? AND id = ?').get(module, id) as PayloadRow | undefined;
+    return row ? parseRecord(row.payload) : null;
+  }
+
+  private ensureLegacyBase(): string {
+    if (this.getArrayRecord('knowledgeBases', LEGACY_KB_ID)) return LEGACY_KB_ID;
+    const now = new Date().toISOString();
+    const base = { id: LEGACY_KB_ID, title: '我的知识库', description: '从原有知识笔记整理而来', tags: [], refs: [], starred: false, createdAt: now, updatedAt: now };
+    this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
+      .run('knowledgeBases', base.id, JSON.stringify(base));
+    return LEGACY_KB_ID;
+  }
+
+  private migrateLegacyKnowledge(): void {
+    const rows = this.db.prepare('SELECT id, payload FROM workbench_records WHERE module = ?').all('knowledge') as Array<{ id: string; payload: string }>;
+    const legacy = rows.map(row => ({ id: row.id, record: parseRecord(row.payload) })).filter(row => !row.record.knowledgeBaseId);
+    if (legacy.length === 0) return;
+    this.db.transaction(() => {
+      const baseId = this.ensureLegacyBase();
+      const update = this.db.prepare('UPDATE workbench_records SET payload = ? WHERE module = ? AND id = ?');
+      for (const row of legacy) update.run(JSON.stringify({ ...row.record, knowledgeBaseId: baseId, folderId: '' }), 'knowledge', row.id);
+    })();
+  }
+
+  private validateKnowledgeLocation(record: RecordRow): void {
+    const baseId = String(record.knowledgeBaseId ?? '');
+    if (!this.getArrayRecord('knowledgeBases', baseId)) throw new WorkbenchInputError('知识库不存在', 404);
+    const folderId = String(record.folderId ?? '');
+    if (folderId !== '' && this.getArrayRecord('knowledgeFolders', folderId)?.knowledgeBaseId !== baseId) {
+      throw new WorkbenchInputError('目录不属于所选知识库');
+    }
+  }
+
+  private validateFolder(record: RecordRow): void {
+    const baseId = String(record.knowledgeBaseId ?? '');
+    if (!this.getArrayRecord('knowledgeBases', baseId)) throw new WorkbenchInputError('知识库不存在', 404);
+    const seen = new Set([record.id]);
+    let parentId = String(record.parentId ?? '');
+    while (parentId !== '') {
+      if (seen.has(parentId)) throw new WorkbenchInputError('目录不能形成循环层级');
+      seen.add(parentId);
+      const parent = this.getArrayRecord('knowledgeFolders', parentId);
+      if (!parent || parent.knowledgeBaseId !== baseId) throw new WorkbenchInputError('上级目录不属于所选知识库');
+      parentId = String(parent.parentId ?? '');
+    }
   }
 
   close(): void {
@@ -187,13 +257,13 @@ export class WorkbenchStore {
   }
 
   /** R3：正文双链只解析当前知识库标题，来源引用沿用本次写入后的 refs。 */
-  private knowledgeRefs(body: string, selfId: string, keepRefs: Array<{ type: string; id: string }>): Array<{ type: string; id: string }> {
+  private knowledgeRefs(body: string, selfId: string, baseId: string, keepRefs: Array<{ type: string; id: string }>): Array<{ type: string; id: string }> {
     const rows = this.db.prepare('SELECT payload FROM workbench_records WHERE module = ? ORDER BY seq').all('knowledge') as PayloadRow[];
     const byTitle = new Map<string, string[]>();
     for (const row of rows) {
       const note = parseRecord(row.payload);
       const title = typeof note.title === 'string' ? note.title.trim() : '';
-      if (title === '' || note.id === selfId) continue;
+      if (title === '' || note.id === selfId || note.knowledgeBaseId !== baseId) continue;
       const ids = byTitle.get(title) ?? [];
       ids.push(note.id);
       byTitle.set(title, ids);
@@ -226,8 +296,13 @@ export class WorkbenchStore {
       ...(module === 'tasks' ? { createdAt: now, doneAt: clean.done ? now : null } : {}),
       ...(STAMPED_MODULES.has(module) ? { createdAt: now, updatedAt: now } : {}),
     };
+    if (module === 'knowledge') {
+      if (!record.knowledgeBaseId) record.knowledgeBaseId = this.ensureLegacyBase();
+      this.validateKnowledgeLocation(record);
+    }
+    if (module === 'knowledgeFolders') this.validateFolder(record);
     if (module === 'knowledge' && isObject(fields) && typeof fields.body === 'string') {
-      record.refs = this.knowledgeRefs(fields.body, record.id, refsOf(record));
+      record.refs = this.knowledgeRefs(fields.body, record.id, String(record.knowledgeBaseId), refsOf(record));
     }
     this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
       .run(module, record.id, JSON.stringify(record));
@@ -240,8 +315,10 @@ export class WorkbenchStore {
     const row = this.db.prepare('SELECT payload FROM workbench_records WHERE module = ? AND id = ?').get(module, id) as PayloadRow | undefined;
     if (!row) throw new WorkbenchInputError('记录不存在', 404);
     const record = { ...parseRecord(row.payload), ...clean };
-    if (module === 'knowledge' && typeof clean.body === 'string') {
-      record.refs = this.knowledgeRefs(clean.body, id, refsOf(record));
+    if (module === 'knowledge') this.validateKnowledgeLocation(record);
+    if (module === 'knowledgeFolders') this.validateFolder(record);
+    if (module === 'knowledge' && (typeof clean.body === 'string' || typeof clean.knowledgeBaseId === 'string')) {
+      record.refs = this.knowledgeRefs(String(record.body ?? ''), id, String(record.knowledgeBaseId), refsOf(record));
     }
     if (module === 'tasks' && clean.done !== undefined) record.doneAt = clean.done ? new Date().toISOString() : null;
     if (STAMPED_MODULES.has(module)) record.updatedAt = new Date().toISOString();
@@ -252,6 +329,26 @@ export class WorkbenchStore {
 
   removeRecord(module: string, id: string): boolean {
     arrayModule(module);
+    if (module === 'knowledgeBases') {
+      return this.db.transaction(() => {
+        const base = this.getArrayRecord(module, id);
+        if (!base) return false;
+        for (const childModule of ['knowledge', 'knowledgeFolders']) {
+          const rows = this.db.prepare('SELECT id, payload FROM workbench_records WHERE module = ?').all(childModule) as Array<{ id: string; payload: string }>;
+          const remove = this.db.prepare('DELETE FROM workbench_records WHERE module = ? AND id = ?');
+          for (const row of rows) if (parseRecord(row.payload).knowledgeBaseId === id) remove.run(childModule, row.id);
+        }
+        this.db.prepare('DELETE FROM workbench_records WHERE module = ? AND id = ?').run(module, id);
+        return true;
+      })();
+    }
+    if (module === 'knowledgeFolders') {
+      const hasChild = this.db.prepare('SELECT payload FROM workbench_records WHERE module IN (?, ?)').all('knowledge', 'knowledgeFolders') as PayloadRow[];
+      if (hasChild.some(row => {
+        const record = parseRecord(row.payload);
+        return record.folderId === id || record.parentId === id;
+      })) throw new WorkbenchInputError('目录中仍有文档或子目录，请先移走');
+    }
     const result = this.db.prepare('DELETE FROM workbench_records WHERE module = ? AND id = ?').run(module, id);
     return result.changes > 0;
   }
@@ -310,6 +407,7 @@ export class WorkbenchStore {
         insertAtomProfile.run(module, JSON.stringify(state[module].profile));
         for (const record of state[module].records) insertAtomRecord.run(module, record.id, JSON.stringify(record));
       }
+      this.migrateLegacyKnowledge();
     })();
   }
 
@@ -406,7 +504,7 @@ export class WorkbenchStore {
   writePrefs(patch: unknown): Record<string, unknown> {
     if (!isObject(patch)) throw new WorkbenchInputError('偏好需要是对象');
     const allowed = new Set([
-      'theme', 'density', 'panelOpen', 'worksView', 'tasksScope', 'kbSelectedId', 'kbView',
+      'theme', 'density', 'panelOpen', 'worksView', 'tasksScope', 'kbSelectedId', 'kbView', 'kbBaseId', 'kbStage',
     ]);
     const merged = { ...this.readPrefs() };
     for (const [key, value] of Object.entries(patch)) {
@@ -447,5 +545,6 @@ function hitOf(module: string, record: RecordRow): SearchHit {
     .find(value => typeof value === 'string' && value.trim() !== '') ?? module;
   const body = [record.note, record.text, record.title].find(value => typeof value === 'string' && value.trim() !== '');
   const flat = String(body ?? '').replace(/\s+/g, ' ').trim();
-  return { module, id: record.id, title: String(title), snippet: flat.length > 80 ? `${flat.slice(0, 80)}…` : flat };
+  const destination = module === 'knowledgeBases' || module === 'knowledgeFolders' ? 'knowledge' : module;
+  return { module: destination, id: record.id, title: String(title), snippet: flat.length > 80 ? `${flat.slice(0, 80)}…` : flat };
 }

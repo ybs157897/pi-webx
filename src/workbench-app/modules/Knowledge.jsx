@@ -1,61 +1,44 @@
 /**
- * 知识库：三栏笔记工作台——左栏（搜索 + 标签过滤 + 条目列表），中栏（标题 / 标签 / 正文
- * 编辑器：⌘S 保存、编辑 / 预览切换，预览走 pi-webx/AssistantMarkdown），右栏（出链 / 反链
- * 面板 + 「问小台」）。记录落在 SQLite 的 knowledge 模块（title 必填、body 长文本、
- * tags/refs/starred 为通用字段），旧数据缺字段全程走默认值，向后兼容。
- *
- * 双链：正文写 [[标题]]，服务端写入时按 title 解析成 refs；编辑器保存时也会预先解析
- * （{type:'knowledge', id}）。重名笔记全部指过去，自己链自己跳过；解析不到的标题不落
- * refs，编辑器脚标提示「尚未解析」。手写进 refs 的跨模块关联（指向任务 / 需求）不是
- * [[解析]] 的产物，保存时原样保留。右栏优先用服务端 GET /api/workbench/links/:module/:id
- * （store.links() 扫描全库，含 pets/relationships 原子记录）；api.links 未接线或请求失败时，
- * 回落到客户端按同一规则扫描 data——链接面板永远有内容，SSR（不跑 effect）也直接渲染
- * 本地推算结果，selection / 视图 / 草稿全部从 props 与 data 派生。
- *
- * props 见 Requirements.jsx 顶部说明；本模块额外用到 `prefs` / `setPref`（记忆选中条目
- * kbSelectedId 与编辑/预览视图 kbView，写失败只是丢偏好、不打断操作）与 `askAI`
- * （「问小台」把笔记送进 AI 副驾；缺省或类型不对时按钮禁用并换提示文案）。渲染期不碰
- * window/document：⌘S 监听与链接拉取都进 effect 并加 typeof window 守卫。
- * 样式在 Knowledge.css，类名一律 `kb-` 前缀，颜色 / 间距 / 字号只取 styles.css 令牌。
- * @module src/modules/Knowledge
+ * WeKnora-inspired knowledge management: base cards → folder/document list → reading.
+ * A document belongs to one base and at most one folder. Existing Markdown notes keep
+ * their tags, refs and assistant action; [[title]] links resolve within the current base.
+ * Browser-only listeners and link fetches stay in effects for server rendering.
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { FileText, Folder, LayoutGrid, List } from 'lucide-react'
 import { api } from '../api.mjs'
 import {
-  Card, Chip, ChipButton, ConfirmDialog, Empty, IconButton,
+  Chip, ConfirmDialog, Empty, IconButton,
 } from '../ui.jsx'
 import {
-  IconBook, IconLink, IconPlus, IconSearch, IconSparkles, IconStar, IconTrash,
+  IconBook, IconLink, IconMenu, IconPlus, IconSearch, IconSparkles, IconStar, IconTrash,
 } from '../icons.jsx'
 import { byDateDesc, formatStamp } from '../util.mjs'
 import AssistantMarkdown from '../pi-webx/AssistantMarkdown.jsx'
 import './Knowledge.css'
 
 const TEXT = {
-  list: '笔记',
-  create: '新建笔记',
-  search: '搜索标题、正文或标签…',
-  searchLabel: '搜索笔记',
-  tagAll: '全部',
-  tagLabel: '标签筛选',
-  sourceLabel: '来源筛选',
-  sourceNone: '无来源',
+  backHome: '文档列表',
+  toc: '本库文档',
+  create: '新建文档',
+  search: '搜索文档标题、正文或标签…',
+  searchLabel: '搜索文档',
   sourceFrom: '沉淀自：',
+  recent: '最近更新',
+  pinned: '星标知识',
+  listMore: '显示知识列表',
+  listLess: '收起知识列表',
+  discardTitle: '放弃未保存的修改？',
+  discardMessage: '切换后，这篇文档未保存的内容会丢失。',
   totalText: total => `共 ${total} 条`,
   filteredText: (hits, total) => `筛选出 ${hits} / ${total} 条`,
-  listEmpty: '没有匹配的笔记',
-  listEmptyHint: '换个关键词，或清空标签与来源筛选',
-  clearFilter: '清空筛选',
-  empty: '还没有笔记',
-  emptyHint: '其他功能沉淀的结论会出现在这里；也可以手动新建',
-  emptyDemoHint: '库里还是空的，可以先灌一份演示数据，看看知识库长什么样',
+  empty: '此知识库还没有文档',
+  emptyHint: '新建一篇 Markdown 文档，开始整理知识',
   loadDemo: '灌入演示数据',
   loadingDemo: '灌入中…',
-  editorEmpty: '选一条笔记开始写',
-  editorEmptyHint: '在左侧列表点一条，或点右上角新建',
-  titlePlaceholder: '笔记标题',
-  bodyPlaceholder: '正文支持 markdown；用 [[标题]] 链接到另一篇笔记',
+  titlePlaceholder: '文档标题',
+  bodyPlaceholder: '正文支持 Markdown；用 [[标题]] 链接到另一篇文档',
   bodyLabel: '正文',
   fieldTitle: '标题',
   fieldTags: '标签',
@@ -70,31 +53,24 @@ const TEXT = {
   previewEmpty: '正文为空，预览没有内容',
   dirty: '未保存',
   delete: '删除',
-  deleteConfirm: '删除笔记',
-  deleteMessage: '确定删除这条笔记？删除后无法恢复。',
-  deleted: '笔记已删除',
-  created: '已新建笔记',
+  deleteConfirm: '删除文档',
+  deleteMessage: '确定删除这篇文档？删除后无法恢复。',
+  deleted: '文档已删除',
+  created: '已新建文档',
   star: '加星标',
-  unstar: '取消星标',
-  starred: '已加星标',
-  unstarred: '已取消星标',
-  untitled: '未命名笔记',
-  newTitle: '未命名笔记',
-  needTitle: '先写下笔记标题',
+  untitled: '未命名文档',
+  newTitle: '未命名文档',
+  needTitle: '先写下文档标题',
   tagsLimit: '标签最多 8 个',
   bodyLimit: '正文超过 50000 字上限',
   refsLimit: '双链最多 20 条，先删掉几段 [[标题]]',
-  links: '链接',
-  outgoing: '出链',
-  incoming: '反链',
-  outgoingCount: count => `出链 ${count}`,
-  incomingCount: count => `反链 ${count}`,
-  linksNa: '选中一条笔记后，这里显示它的出入链',
-  outgoingEmpty: '正文写 [[标题]]，保存后指向的笔记会出现在这里',
-  incomingEmpty: '别的记录把 refs 指向这篇笔记后，会出现在这里',
+  outgoingCount: count => `引用了 ${count}`,
+  incomingCount: count => `被引用 ${count}`,
+  outgoingEmpty: '在正文写 [[标题]]，保存后即可引用另一篇文档',
+  incomingEmpty: '引用这篇文档的内容会出现在这里',
   linkOpen: '打开这条记录',
   askAI: '问小台',
-  askAIHint: '把这篇笔记发给 AI 副驾：总结、追问、改写都行',
+  askAIHint: '把这篇文档发给 AI 副驾：总结、追问、改写都行',
   askAIUnwired: 'AI 副驾还没接线，暂时不能问',
   wikiResolved: count => `${count} 个双链已解析`,
   wikiUnresolved: count => `${count} 个 [[标题]] 尚未解析`,
@@ -102,7 +78,7 @@ const TEXT = {
   metaUpdated: '更新于',
 }
 
-/** 链接面板的模块徽章：镜像服务端 MODULE_LABELS（前端不 import 服务端代码）。 */
+/** 链接 / 来源徽章的模块名：镜像服务端 MODULE_LABELS（前端不 import 服务端代码）。 */
 const LINK_LABELS = {
   tasks: '今日规划',
   works: '工作助理',
@@ -159,6 +135,13 @@ function titleOf(row) {
 /** 正文：旧记录没有 body 字段时按空串处理。 */
 function bodyOf(row) {
   return typeof row?.body === 'string' ? row.body : ''
+}
+
+/** 卡片摘要：正文剥掉最浅一层 markdown 记号后截一段；空正文返回空串。 */
+function snippetOf(row) {
+  const text = bodyOf(row).replace(/\[\[|\]\]/g, '').replace(/[*`#>]/g, '').replace(/\s+/g, ' ').trim()
+  if (text === '') return ''
+  return text.length > 96 ? `${text.slice(0, 96)}…` : text
 }
 
 /** 徽章上的模块名：认不出的模块 key 原样显示，不猜。 */
@@ -309,28 +292,55 @@ export default function Knowledge({
   data, mutate, notify, navigate, prefs = {}, setPref, empty = false, onLoadDemo, askAI,
 }) {
   const rows = Array.isArray(data?.knowledge) ? data.knowledge : []
+  const bases = Array.isArray(data?.knowledgeBases) ? data.knowledgeBases : []
+  const folders = Array.isArray(data?.knowledgeFolders) ? data.knowledgeFolders : []
   const [selectedId, setSelectedId] = useState(() => String(prefs?.kbSelectedId ?? ''))
+  const [selectedBaseId, setSelectedBaseId] = useState(() => String(prefs?.kbBaseId ?? ''))
+  const [selectedFolderId, setSelectedFolderId] = useState('')
+  const [stage, setStage] = useState(() => {
+    const baseId = String(prefs?.kbBaseId ?? '')
+    const noteId = String(prefs?.kbSelectedId ?? '')
+    if (prefs?.kbStage === 'reading' && rows.some(row => row.id === noteId && row.knowledgeBaseId === baseId)) return 'reading'
+    if (prefs?.kbStage === 'documents' && bases.some(base => base.id === baseId)) return 'documents'
+    return 'bases'
+  })
+  const [baseQuery, setBaseQuery] = useState('')
+  const [sortOrder, setSortOrder] = useState('recent')
+  const [layout, setLayout] = useState('grid')
+  const [baseForm, setBaseForm] = useState(null)
+  const [folderForm, setFolderForm] = useState(null)
+  const [pendingBaseDelete, setPendingBaseDelete] = useState(null)
+  const [pendingFolderDelete, setPendingFolderDelete] = useState(null)
   const [keyword, setKeyword] = useState('')
   const [activeTag, setActiveTag] = useState('')
   const [activeSource, setActiveSource] = useState('')
   const [busy, setBusy] = useState(false)
   const [demoBusy, setDemoBusy] = useState(false)
   const [pendingDelete, setPendingDelete] = useState(null)
+  const [pendingNavigation, setPendingNavigation] = useState(null)
+  const [listOpen, setListOpen] = useState(false)
   // 草稿三件套照 Codes 的种子模式：saved 是脏标记基线，seedId 认「属于哪条笔记」——
   // mutate 之后 refresh() 会换掉整个 data，认对象会让正在打的内容被冲掉。
   const [seedId, setSeedId] = useState('')
   const [draft, setDraft] = useState(null)
   const [saved, setSaved] = useState(null)
-  // 链接面板：apiLinks 是服务端结果（null = 还没拉到或不可用，回落 computeLinks）。
+  // 链接分区：apiLinks 是服务端结果（null = 还没拉到或不可用，回落 computeLinks）。
   const [apiLinks, setApiLinks] = useState(null)
   const [linksToken, setLinksToken] = useState(0)
   // 新建记录的 id 在 action 内部暂存（mutate 只回布尔值），刷新落地后再选中它。
   const pendingId = useRef('')
   const saveRef = useRef(null)
 
+  // 阅读态默认预览；已存 edit 偏好的用户保留编辑态。
   const view = prefs?.kbView === 'edit' ? 'edit' : 'preview'
+  const selectedBase = bases.find(base => base.id === selectedBaseId) ?? null
+  const baseRows = useMemo(() => rows.filter(row => row.knowledgeBaseId === selectedBaseId), [rows, selectedBaseId])
+  const baseFolders = useMemo(() => folders.filter(folder => folder.knowledgeBaseId === selectedBaseId), [folders, selectedBaseId])
   // selected 从 data 现算：写操作刷新后 data 是全新数组，存对象快照会立刻陈旧。
   const selected = useMemo(() => rows.find(row => row.id === selectedId) ?? null, [rows, selectedId])
+  // 阅读态要求种子已落地：首帧（SSR / 渲染期重播前）draft 还是 null，先落首页那一帧；
+  // 种子 setState 会在同一次提交内触发渲染期更新，重播完成后直接以阅读态输出，不闪烁。
+  const reading = stage === 'reading' && selected !== null && draft !== null
 
   // 种子在渲染期重播（Codes 同款）：换人同一帧换草稿；选中的笔记被删掉时落回空态。
   if (selected !== null && selected.id !== seedId) {
@@ -346,16 +356,16 @@ export default function Knowledge({
 
   const tagCounts = useMemo(() => {
     const counts = new Map()
-    for (const row of rows) {
+    for (const row of baseRows) {
       for (const tag of tagsOf(row)) counts.set(tag, (counts.get(tag) ?? 0) + 1)
     }
     return [...counts.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1))
-  }, [rows])
+  }, [baseRows])
 
   const sourceCounts = useMemo(() => {
     const counts = new Map()
     let none = 0
-    for (const row of rows) {
+    for (const row of baseRows) {
       const types = sourceTypesOf(row)
       if (types.length === 0) none += 1
       for (const type of types) counts.set(type, (counts.get(type) ?? 0) + 1)
@@ -364,17 +374,56 @@ export default function Knowledge({
       types: [...counts.entries()].sort((a, b) => (b[1] - a[1]) || (a[0] < b[0] ? -1 : 1)),
       none,
     }
-  }, [rows])
+  }, [baseRows])
+
+  const folderRows = useMemo(() => {
+    const result = []
+    const seen = new Set()
+    const walk = (parentId, depth) => {
+      for (const folder of baseFolders.filter(item => String(item.parentId ?? '') === parentId).sort((a, b) => titleOf(a).localeCompare(titleOf(b), 'zh'))) {
+        if (seen.has(folder.id)) continue
+        seen.add(folder.id)
+        result.push({ ...folder, depth })
+        walk(folder.id, depth + 1)
+      }
+    }
+    walk('', 0)
+    return result
+  }, [baseFolders])
+
+  const scopedFolderIds = useMemo(() => {
+    if (selectedFolderId === '') return new Set(baseFolders.map(folder => folder.id))
+    const ids = new Set([selectedFolderId])
+    let changed = true
+    while (changed) {
+      changed = false
+      for (const folder of baseFolders) {
+        if (!ids.has(folder.id) && ids.has(folder.parentId)) { ids.add(folder.id); changed = true }
+      }
+    }
+    return ids
+  }, [baseFolders, selectedFolderId])
 
   const visible = useMemo(() => {
     const needle = keyword.trim().toLowerCase()
     // 关键词同时匹配标题、正文与标签；导入来的记录可能缺字段，先兜空值再比较。
-    return rows
+    const filtering = needle !== '' || activeTag !== '' || activeSource !== ''
+    return baseRows
+      .filter(row => selectedFolderId === '' || (filtering ? scopedFolderIds.has(row.folderId) : row.folderId === selectedFolderId))
       .filter(row => activeTag === '' || tagsOf(row).includes(activeTag))
       .filter(row => activeSource === '' || (activeSource === SOURCE_NONE ? sourceTypesOf(row).length === 0 : sourceTypesOf(row).includes(activeSource)))
       .filter(row => needle === '' || `${rawTitleOf(row)} ${bodyOf(row)} ${tagsOf(row).join(' ')}`.toLowerCase().includes(needle))
-      .sort(byUpdatedDesc)
-  }, [rows, keyword, activeTag, activeSource])
+      .sort(sortOrder === 'title' ? (a, b) => titleOf(a).localeCompare(titleOf(b), 'zh') : byUpdatedDesc)
+  }, [baseRows, keyword, activeTag, activeSource, selectedFolderId, scopedFolderIds, sortOrder])
+
+  // 来源是出处而不是分类；导航按星标与最近更新组织，不把多来源笔记塞进任意一组。
+  const tocGroups = useMemo(() => {
+    const sorted = [...baseRows].sort(byUpdatedDesc)
+    return [
+      { key: 'starred', label: TEXT.pinned, list: sorted.filter(row => row.starred === true) },
+      { key: 'recent', label: TEXT.recent, list: sorted.filter(row => row.starred !== true) },
+    ].filter(group => group.list.length > 0)
+  }, [baseRows])
 
   // 服务端链接图谱：选中项变化或保存后重拉；不可用时 computeLinks 兜底。
   const localLinks = useMemo(() => computeLinks(data, selected), [data, selected])
@@ -414,11 +463,11 @@ export default function Knowledge({
     const hits = []
     const missing = []
     for (const title of parseWikiTitles(draft.body)) {
-      if (resolveWiki(rows, title, selected.id).length > 0) hits.push(title)
+      if (resolveWiki(baseRows, title, selected.id).length > 0) hits.push(title)
       else missing.push(title)
     }
     return { hits, missing }
-  }, [draft, rows, selected])
+  }, [draft, baseRows, selected])
 
   const dirty = !(
     (draft === null && saved === null)
@@ -426,7 +475,7 @@ export default function Knowledge({
   )
   const stamp = selected === null ? '' : formatStamp(selected.updatedAt ?? selected.createdAt)
   const hasFilter = keyword.trim() !== '' || activeTag !== '' || activeSource !== ''
-  const subtitle = hasFilter ? TEXT.filteredText(visible.length, rows.length) : TEXT.totalText(rows.length)
+  const subtitle = hasFilter ? TEXT.filteredText(visible.length, baseRows.length) : TEXT.totalText(visible.length)
 
   function clearFilters() {
     setKeyword('')
@@ -434,10 +483,52 @@ export default function Knowledge({
     setActiveSource('')
   }
 
-  /** 选中条目：本地 state + 偏好记忆（写失败只是丢偏好，不打断操作）。 */
-  function selectNote(id) {
+  function switchStage(next) {
+    setStage(next)
+    if (typeof setPref === 'function') setPref('kbStage', next)
+  }
+
+  function openBase(id, skipGuard = false) {
+    if (!skipGuard && dirty && selected !== null && selected.knowledgeBaseId !== id) {
+      setPendingNavigation({ kind: 'base', id })
+      return
+    }
+    setSelectedBaseId(id)
+    setSelectedFolderId('')
+    switchStage('documents')
+    clearFilters()
+    if (typeof setPref === 'function') setPref('kbBaseId', id)
+  }
+
+  function backToBases() { switchStage('bases') }
+
+  function openFolder(id) {
+    setSelectedFolderId(id)
+    clearFilters()
+  }
+
+  /** 切笔记先处理未保存内容；新笔记单独进入编辑态。 */
+  function selectNote(id, skipGuard = false, edit = false) {
+    if (!skipGuard && dirty && selectedId !== '' && selectedId !== id) {
+      setPendingNavigation({ kind: 'note', id })
+      return
+    }
     setSelectedId(id)
+    const row = rows.find(item => item.id === id)
+    if (row?.knowledgeBaseId) {
+      setSelectedBaseId(row.knowledgeBaseId)
+      setSelectedFolderId(String(row.folderId ?? ''))
+      if (typeof setPref === 'function') setPref('kbBaseId', row.knowledgeBaseId)
+    }
+    switchStage(id === '' ? 'documents' : 'reading')
+    setListOpen(false)
     if (typeof setPref === 'function') setPref('kbSelectedId', id)
+    if (id !== '') switchView(edit ? 'edit' : 'preview')
+  }
+
+  /** 回文档列表保留草稿；换篇时才检查是否丢弃。 */
+  function backToHome() {
+    switchStage('documents')
   }
 
   /** 编辑 / 预览切换：视图偏好照 Works 的写法直接落 prefs。 */
@@ -445,13 +536,26 @@ export default function Knowledge({
     if (typeof setPref === 'function') setPref('kbView', next)
   }
 
-  /** 打开一条链接：知识库链接就地选中，跨模块链接跳对应模块。 */
+  /** 打开一条链接：知识库链接就地选中（进阅读态），跨模块链接跳对应模块。 */
   function openLink(link) {
     if (link.module === 'knowledge') {
       selectNote(link.id)
       return
     }
+    if (dirty) {
+      setPendingNavigation({ kind: 'link', link })
+      return
+    }
     if (typeof navigate === 'function') navigate(link.module)
+  }
+
+  function confirmNavigation() {
+    const next = pendingNavigation
+    setPendingNavigation(null)
+    if (next?.kind === 'note') selectNote(next.id, true)
+    if (next?.kind === 'create') createNote(true)
+    if (next?.kind === 'base') openBase(next.id, true)
+    if (next?.kind === 'link' && typeof navigate === 'function') navigate(next.link.module)
   }
 
   async function save() {
@@ -471,7 +575,7 @@ export default function Knowledge({
       notify(TEXT.bodyLimit, 'warn')
       return false
     }
-    const nextRefs = buildRefs(rows, body, selected.id, refsOf(selected))
+    const nextRefs = buildRefs(baseRows, body, selected.id, refsOf(selected))
     if (nextRefs.length > 20) {
       notify(TEXT.refsLimit, 'warn')
       return false
@@ -490,18 +594,94 @@ export default function Knowledge({
     return true
   }
 
-  async function createNote() {
+  async function createNote(skipGuard = false) {
+    if (selectedBase === null) return
+    if (!skipGuard && dirty) {
+      setPendingNavigation({ kind: 'create' })
+      return
+    }
     setBusy(true)
     const ok = await mutate(async () => {
-      const created = await api.addRecord('knowledge', { title: TEXT.newTitle })
+      const created = await api.addRecord('knowledge', { title: TEXT.newTitle, knowledgeBaseId: selectedBaseId, folderId: selectedFolderId })
       pendingId.current = String(created?.record?.id ?? '')
       return created
     }, TEXT.created)
     setBusy(false)
     if (!ok) return
-    // 新建后选中新条目，并清掉过滤条件，保证它确实出现在左栏里（否则「选中了却看不见」）。
-    selectNote(pendingId.current)
+    // 新建后选中并直接落编辑视图（空笔记预览没有意义），清掉过滤保证卡片可见。
+    selectNote(pendingId.current, true, true)
     clearFilters()
+  }
+
+  async function saveBaseForm() {
+    if (baseForm === null) return
+    if (!baseForm.id && dirty) { notify('请先保存当前文档，再新建知识库', 'warn'); return }
+    const title = baseForm.title.trim()
+    if (title === '') { notify('先填写知识库名称', 'warn'); return }
+    const description = baseForm.description.trim()
+    let createdId = ''
+    setBusy(true)
+    const ok = await mutate(async () => {
+      if (baseForm.id) return api.patchRecord('knowledgeBases', baseForm.id, { title, description })
+      const result = await api.addRecord('knowledgeBases', { title, description })
+      createdId = String(result?.record?.id ?? '')
+      return result
+    }, baseForm.id ? '知识库已更新' : '知识库已创建')
+    setBusy(false)
+    if (!ok) return
+    setBaseForm(null)
+    if (createdId !== '') openBase(createdId, true)
+  }
+
+  async function saveFolderForm() {
+    if (folderForm === null || selectedBase === null) return
+    const title = folderForm.title.trim()
+    if (title === '') { notify('先填写目录名称', 'warn'); return }
+    const parentId = folderForm.id ? String(baseFolders.find(item => item.id === folderForm.id)?.parentId ?? '') : selectedFolderId
+    if (baseFolders.some(item => item.id !== folderForm.id && item.parentId === parentId && titleOf(item) === title)) {
+      notify('同一位置已有这个目录', 'warn')
+      return
+    }
+    setBusy(true)
+    const ok = await mutate(() => folderForm.id
+      ? api.patchRecord('knowledgeFolders', folderForm.id, { title })
+      : api.addRecord('knowledgeFolders', { title, knowledgeBaseId: selectedBaseId, parentId }), folderForm.id ? '目录已重命名' : '目录已创建')
+    setBusy(false)
+    if (ok) setFolderForm(null)
+  }
+
+  async function confirmBaseDelete() {
+    if (pendingBaseDelete === null) return
+    setBusy(true)
+    const ok = await mutate(() => api.removeRecord('knowledgeBases', pendingBaseDelete.id), '知识库已删除')
+    setBusy(false)
+    if (!ok) return
+    if (selectedBaseId === pendingBaseDelete.id) {
+      setSelectedBaseId('')
+      setSelectedId('')
+      if (typeof setPref === 'function') { setPref('kbBaseId', ''); setPref('kbSelectedId', '') }
+      switchStage('bases')
+    }
+    setPendingBaseDelete(null)
+  }
+
+  async function confirmFolderDelete() {
+    if (pendingFolderDelete === null) return
+    setBusy(true)
+    const ok = await mutate(() => api.removeRecord('knowledgeFolders', pendingFolderDelete.id), '目录已删除')
+    setBusy(false)
+    if (!ok) return
+    setSelectedFolderId(String(pendingFolderDelete.parentId ?? ''))
+    setPendingFolderDelete(null)
+  }
+
+  async function moveSelectedDocument(folderId) {
+    if (selected === null || folderId === String(selected.folderId ?? '')) return
+    if (dirty) { notify('请先保存这篇文档，再移动目录', 'warn'); return }
+    setBusy(true)
+    const ok = await mutate(() => api.patchRecord('knowledge', selected.id, { folderId }), '文档已移动')
+    setBusy(false)
+    if (ok) setSelectedFolderId(folderId)
   }
 
   function toggleStar() {
@@ -509,7 +689,7 @@ export default function Knowledge({
     const on = selected.starred === true
     return mutate(
       () => api.patchRecord('knowledge', selected.id, { starred: !on }),
-      on ? TEXT.unstarred : TEXT.starred,
+      on ? '已取消星标' : '已加星标',
     )
   }
 
@@ -520,8 +700,8 @@ export default function Knowledge({
     setBusy(false)
     if (!ok) return
     setPendingDelete(null)
-    // 删掉的正是读着的那条：落回未选中，编辑器回到空态（种子重播会清掉草稿）。
-    if (target.id === selectedId) selectNote('')
+    // 删掉的正是读着的那条：清选中回首页（种子重播会清掉草稿）。
+    if (target.id === selectedId) selectNote('', true)
   }
 
   async function loadDemo() {
@@ -538,191 +718,254 @@ export default function Knowledge({
     askAI(`【知识库笔记】${titleOf(selected)}\n\n${body}`)
   }
 
-  return (
-    <div className="kb" data-module="knowledge">
-      <div className="kb-split" data-testid="kb-split">
-        <Card
-          className="kb-list-col"
-          bodyClassName="kb-list-body"
-          title={TEXT.list}
-          subtitle={subtitle}
-          action={(
-            <button type="button" className="kb-new-action" aria-label={TEXT.create} title={TEXT.create} data-testid="kb-new" disabled={busy} onClick={createNote}>
-              <IconPlus size={16} />
-            </button>
-          )}
-        >
-          {rows.length === 0
-            ? (
-              <div data-testid="kb-empty">
-                <Empty
-                  icon={<IconBook size={22} />}
-                  title={TEXT.empty}
-                  hint={empty === true ? TEXT.emptyDemoHint : TEXT.emptyHint}
-                  action={empty === true && typeof onLoadDemo === 'function'
-                    ? (
-                      <button
-                        type="button"
-                        className="btn btn-primary"
-                        data-testid="kb-load-demo"
-                        disabled={demoBusy}
-                        onClick={loadDemo}
-                      >
-                        {demoBusy ? TEXT.loadingDemo : TEXT.loadDemo}
-                      </button>
-                    )
-                    : undefined}
-                />
-              </div>
-            )
+  const starButton = (
+    <IconButton
+      label={selected !== null && selected.starred === true ? '取消星标' : TEXT.star}
+      className={`kb-star ${selected !== null && selected.starred === true ? 'is-on' : ''}`}
+      disabled={busy}
+      onClick={toggleStar}
+    >
+      <IconStar size={16} />
+    </IconButton>
+  )
+
+  const linksSection = (
+    <section className="kb-links" data-testid="kb-backlinks">
+      <h3 className="kb-links-heading">相关内容</h3>
+      <div className="kb-links-grid">
+        <section className="kb-link-group" data-testid="kb-outgoing">
+          <h4 className="kb-link-title">{TEXT.outgoingCount(links.outgoing.length)}</h4>
+          {links.outgoing.length === 0
+            ? <p className="kb-link-hint">{TEXT.outgoingEmpty}</p>
             : (
-              <>
-                <label className="kb-search">
-                  <IconSearch size={15} />
-                  <input
-                    className="kb-search-input"
-                    type="search"
-                    value={keyword}
-                    placeholder={TEXT.search}
-                    aria-label={TEXT.searchLabel}
-                    data-testid="kb-search"
-                    onChange={event => setKeyword(event.target.value)}
-                  />
-                </label>
-
-                {tagCounts.length > 0 && (
-                  <div className="kb-tags" data-testid="kb-tag-filter" role="group" aria-label={TEXT.tagLabel}>
-                    <ChipButton active={activeTag === ''} onClick={() => setActiveTag('')}>
-                      {TEXT.tagAll}
-                    </ChipButton>
-                    {tagCounts.map(([tag, count]) => (
-                      <ChipButton
-                        key={tag}
-                        active={activeTag === tag}
-                        title={`#${tag} · ${count} 条`}
-                        onClick={() => setActiveTag(activeTag === tag ? '' : tag)}
-                      >
-                        #{tag}
-                        <span className="kb-tag-count">{count}</span>
-                      </ChipButton>
-                    ))}
-                  </div>
-                )}
-
-                <div className="kb-source-filter" data-testid="kb-source-filter" role="group" aria-label={TEXT.sourceLabel}>
-                  <button type="button" className={`kb-source-chip ${activeSource === '' ? 'is-active' : ''}`} aria-pressed={activeSource === ''} data-testid="kb-source-all" onClick={() => setActiveSource('')}>
-                    {TEXT.tagAll}
-                  </button>
-                  {sourceCounts.types.map(([type, count]) => (
-                    <button key={type} type="button" className={`kb-source-chip ${activeSource === type ? 'is-active' : ''}`} aria-pressed={activeSource === type} data-testid={`kb-source-${type}`} title={`${labelOf(type)} · ${count} 条`} onClick={() => setActiveSource(activeSource === type ? '' : type)}>
-                      {labelOf(type)}<span className="kb-tag-count">{count}</span>
-                    </button>
-                  ))}
-                  <button type="button" className={`kb-source-chip ${activeSource === SOURCE_NONE ? 'is-active' : ''}`} aria-pressed={activeSource === SOURCE_NONE} data-testid="kb-source-none" onClick={() => setActiveSource(activeSource === SOURCE_NONE ? '' : SOURCE_NONE)}>
-                    {TEXT.sourceNone}<span className="kb-tag-count">{sourceCounts.none}</span>
-                  </button>
-                </div>
-
-                {visible.length === 0
-                  ? (
-                    <div data-testid="kb-list-empty">
-                      <Empty
-                        icon={<IconSearch size={20} />}
-                        title={TEXT.listEmpty}
-                        hint={TEXT.listEmptyHint}
-                        action={<button type="button" className="btn" onClick={clearFilters}>{TEXT.clearFilter}</button>}
-                      />
-                    </div>
-                  )
-                  : (
-                    <ul className="kb-list" data-testid="kb-list">
-                      {visible.map(row => {
-                        const active = selected !== null && row.id === selected.id
-                        const title = rawTitleOf(row).trim()
-                        return (
-                          <li className="list-item kb-item" key={row.id} data-testid="kb-item">
-                            <button
-                              type="button"
-                              className={`kb-item-btn ${active ? 'is-active' : ''}`}
-                              aria-pressed={active}
-                              onClick={() => selectNote(row.id)}
-                            >
-                              <span className="kb-item-top">
-                                {row.starred === true && <IconStar className="kb-item-star" size={13} />}
-                                <span className="kb-item-title">{title === '' ? TEXT.untitled : title}</span>
-                              </span>
-                              <span className="kb-item-foot">
-                                {sourceTypesOf(row).length > 0 && (
-                                  <span className="kb-item-sources" data-testid="kb-item-sources">
-                                    {sourceTypesOf(row).map(type => <Chip key={type}>{labelOf(type)}</Chip>)}
-                                  </span>
-                                )}
-                                <span className="kb-item-tags">
-                                  {tagsOf(row).map(tag => <Chip key={tag}>#{tag}</Chip>)}
-                                </span>
-                                <span className="kb-item-time">{formatStamp(row.updatedAt ?? row.createdAt)}</span>
-                              </span>
-                            </button>
-                          </li>
-                        )
-                      })}
-                    </ul>
-                  )}
-              </>
-            )}
-        </Card>
-
-        <Card className="kb-editor-col">
-          {selected === null || draft === null
-            ? (
-              <div data-testid="kb-editor-empty">
-                <Empty icon={<IconBook size={22} />} title={TEXT.editorEmpty} hint={TEXT.editorEmptyHint} />
-              </div>
-            )
-            : (
-              <div className="kb-editor" data-testid="kb-editor">
-                <header className="kb-editor-head">
-                  <input
-                    className="kb-title-input"
-                    value={draft.title}
-                    placeholder={TEXT.titlePlaceholder}
-                    aria-label={TEXT.fieldTitle}
-                    data-testid="kb-title-input"
-                    onChange={event => setDraft(current => (current === null ? current : { ...current, title: event.target.value }))}
-                  />
-                  <div className="kb-editor-tools">
-                    <IconButton
-                      label={selected.starred === true ? TEXT.unstar : TEXT.star}
-                      className={`kb-star ${selected.starred === true ? 'is-on' : ''}`}
-                      disabled={busy}
-                      onClick={toggleStar}
-                    >
-                      <IconStar size={16} />
-                    </IconButton>
+              <ul className="kb-link-list">
+                {links.outgoing.map(link => (
+                  <li key={`out:${link.module}:${link.id}`}>
                     <button
                       type="button"
-                      className="btn btn-sm kb-btn-danger"
-                      data-testid="kb-delete"
-                      onClick={() => setPendingDelete(selected)}
+                      className="kb-link"
+                      data-testid="kb-link"
+                      title={TEXT.linkOpen}
+                      onClick={() => openLink(link)}
                     >
-                      <IconTrash size={15} />
-                      {TEXT.delete}
+                      <IconLink className="kb-link-icon" size={13} />
+                      <span className="kb-link-text">{link.title === '' ? TEXT.untitled : link.title}</span>
+                      {link.module !== 'knowledge' && <Chip>{labelOf(link.module)}</Chip>}
                     </button>
-                  </div>
-                </header>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
 
-                {sources.length > 0 && (
-                  <div className="kb-sources" data-testid="kb-sources">
-                    <span className="kb-sources-label">{TEXT.sourceFrom}</span>
-                    {sources.map(source => (
-                      <button key={`${source.module}:${source.id}`} type="button" className="kb-source-link" data-testid="kb-source-link" title={TEXT.linkOpen} onClick={() => openLink(source)}>
-                        {labelOf(source.module)}「{source.title}」
-                      </button>
-                    ))}
-                  </div>
-                )}
+        <section className="kb-link-group" data-testid="kb-incoming">
+          <h4 className="kb-link-title">{TEXT.incomingCount(links.incoming.length)}</h4>
+          {links.incoming.length === 0
+            ? <p className="kb-link-hint">{TEXT.incomingEmpty}</p>
+            : (
+              <ul className="kb-link-list">
+                {links.incoming.map(link => (
+                  <li key={`in:${link.module}:${link.id}`}>
+                    <button
+                      type="button"
+                      className="kb-link"
+                      data-testid="kb-link"
+                      title={TEXT.linkOpen}
+                      onClick={() => openLink(link)}
+                    >
+                      <IconLink className="kb-link-icon" size={13} />
+                      <span className="kb-link-text">{link.title === '' ? TEXT.untitled : link.title}</span>
+                      {link.module !== 'knowledge' && <Chip>{labelOf(link.module)}</Chip>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+        </section>
+      </div>
+    </section>
+  )
 
-                <div className="kb-editor-bar">
+  const visibleBases = bases
+    .filter(base => `${titleOf(base)} ${String(base.description ?? '')}`.toLowerCase().includes(baseQuery.trim().toLowerCase()))
+    .sort((a, b) => Number(b.starred === true) - Number(a.starred === true) || byUpdatedDesc(a, b))
+
+  const baseList = (
+    <div className="kb-base-list" data-testid="kb-bases">
+      <div className="kb-base-intro">
+        <div>
+          <h2>我的知识库</h2>
+          <p>按主题管理文档，再用目录和标签整理内容。</p>
+        </div>
+        <button type="button" className="kb-create" data-testid="kb-new-base" onClick={() => setBaseForm({ id: '', title: '', description: '' })}>
+          <IconPlus size={17} />新建知识库
+        </button>
+      </div>
+      {bases.length > 0 && (
+        <label className="kb-base-search">
+          <IconSearch size={18} />
+          <input type="search" value={baseQuery} aria-label="搜索知识库" placeholder="搜索知识库名称或描述" onChange={event => setBaseQuery(event.target.value)} />
+        </label>
+      )}
+      {visibleBases.length === 0
+        ? <Empty icon={<IconBook size={26} />} title={bases.length === 0 ? '还没有知识库' : '没有匹配的知识库'} hint={bases.length === 0 ? '创建一个知识库，开始整理文档' : '换个名称试试'} action={empty === true && typeof onLoadDemo === 'function' ? <button type="button" className="btn" data-testid="kb-load-demo" disabled={demoBusy} onClick={loadDemo}>{demoBusy ? TEXT.loadingDemo : TEXT.loadDemo}</button> : undefined} />
+        : <div className="kb-base-grid">
+          {visibleBases.map(base => {
+            const docs = rows.filter(row => row.knowledgeBaseId === base.id)
+            const folderCount = folders.filter(folder => folder.knowledgeBaseId === base.id).length
+            return <article className="kb-base-card" key={base.id}>
+              <button type="button" className="kb-base-open" data-testid="kb-base-item" onClick={() => openBase(base.id)}>
+                <span className="kb-base-icon"><IconBook size={22} /></span>
+                <span className="kb-base-name">{base.starred === true && <IconStar size={15} className="kb-base-pin" />}{titleOf(base)}</span>
+                <span className="kb-base-description">{String(base.description ?? '').trim() || '暂无描述'}</span>
+                <span className="kb-base-stats"><span>{docs.length} 篇文档</span><span>{folderCount} 个目录</span></span>
+              </button>
+              <div className="kb-base-card-actions">
+                <span>{formatStamp(base.updatedAt ?? base.createdAt)}</span>
+                <button type="button" aria-label={`${base.starred === true ? '取消置顶' : '置顶'}${titleOf(base)}`} onClick={() => mutate(() => api.patchRecord('knowledgeBases', base.id, { starred: base.starred !== true }), base.starred === true ? '已取消置顶' : '已置顶')}>{base.starred === true ? '取消置顶' : '置顶'}</button>
+                <button type="button" aria-label={`编辑${titleOf(base)}`} onClick={() => setBaseForm({ id: base.id, title: titleOf(base), description: String(base.description ?? '') })}>编辑</button>
+                <button type="button" className="kb-danger-link" aria-label={`删除${titleOf(base)}`} onClick={() => setPendingBaseDelete(base)}>删除</button>
+              </div>
+            </article>
+          })}
+        </div>}
+    </div>
+  )
+
+  const documentsView = selectedBase === null
+    ? <Empty icon={<IconBook size={24} />} title="知识库不存在" action={<button type="button" className="btn" onClick={backToBases}>返回知识库</button>} />
+    : <div className="kb-documents" data-testid="kb-documents">
+      <nav className="kb-breadcrumb" aria-label="当前位置">
+        <button type="button" onClick={backToBases}>知识库</button><span>/</span><strong>{titleOf(selectedBase)}</strong>
+      </nav>
+      <header className="kb-collection-head">
+        <div><h2>{titleOf(selectedBase)}</h2><p>{String(selectedBase.description ?? '').trim() || '在此整理和阅读文档'}</p></div>
+        <button type="button" className="kb-new-note" onClick={() => setBaseForm({ id: selectedBase.id, title: titleOf(selectedBase), description: String(selectedBase.description ?? '') })}>编辑知识库</button>
+      </header>
+      <div className="kb-documents-shell">
+        <aside className="kb-folder-col">
+          <div className="kb-folder-head"><h3>目录</h3><button type="button" aria-label="新建目录" title="新建目录" onClick={() => setFolderForm({ id: '', title: '' })}><IconPlus size={16} /></button></div>
+          <nav aria-label="文档目录" className="kb-folder-tree">
+            <button type="button" className={`kb-folder-item ${selectedFolderId === '' ? 'is-active' : ''}`} aria-current={selectedFolderId === '' ? 'page' : undefined} onClick={() => openFolder('')}>
+              <Folder size={17} /><span>全部文档</span><small>{baseRows.length}</small>
+            </button>
+            {folderRows.map(folder => <div className="kb-folder-row" key={folder.id}>
+              <button type="button" className={`kb-folder-item ${selectedFolderId === folder.id ? 'is-active' : ''}`} style={{ paddingInlineStart: `${12 + folder.depth * 16}px` }} aria-current={selectedFolderId === folder.id ? 'page' : undefined} onClick={() => openFolder(folder.id)}>
+                <Folder size={16} /><span>{titleOf(folder)}</span><small>{baseRows.filter(row => row.folderId === folder.id).length}</small>
+              </button>
+              {selectedFolderId === folder.id && <span className="kb-folder-actions">
+                <button type="button" title="重命名目录" aria-label={`重命名${titleOf(folder)}`} onClick={() => setFolderForm({ id: folder.id, title: titleOf(folder) })}>改名</button>
+                <button type="button" title="删除目录" aria-label={`删除目录${titleOf(folder)}`} onClick={() => setPendingFolderDelete(folder)}>删除</button>
+              </span>}
+            </div>)}
+          </nav>
+        </aside>
+        <section className="kb-doc-list" aria-label="文档列表">
+          <div className="kb-doc-list-head">
+            <div><h3>{selectedFolderId === '' ? '全部文档' : titleOf(baseFolders.find(folder => folder.id === selectedFolderId))}</h3><span>{subtitle}</span></div>
+            <button type="button" className="kb-create" data-testid="kb-new" disabled={busy} onClick={() => createNote()}><IconPlus size={16} />{TEXT.create}</button>
+          </div>
+          <div className="kb-doc-toolbar">
+            <label className="kb-doc-search"><IconSearch size={17} /><input type="search" data-testid="kb-search" aria-label={TEXT.searchLabel} placeholder={TEXT.search} value={keyword} onChange={event => setKeyword(event.target.value)} /></label>
+            <select aria-label="按标签筛选" data-testid="kb-tag-filter" value={activeTag} onChange={event => setActiveTag(event.target.value)}>
+              <option value="">全部标签</option>{tagCounts.map(([tag, count]) => <option key={tag} value={tag}>{tag} · {count}</option>)}
+            </select>
+            <select aria-label="按来源筛选" data-testid="kb-source-filter" value={activeSource} onChange={event => setActiveSource(event.target.value)}>
+              <option value="">全部来源</option>{sourceCounts.types.map(([type, count]) => <option key={type} value={type}>{labelOf(type)} · {count}</option>)}<option value={SOURCE_NONE}>无来源 · {sourceCounts.none}</option>
+            </select>
+            <select aria-label="文档排序" value={sortOrder} onChange={event => setSortOrder(event.target.value)}><option value="recent">最近更新</option><option value="title">标题 A–Z</option></select>
+            <div className="kb-layout-switch" role="group" aria-label="显示方式">
+              <button type="button" className={layout === 'grid' ? 'is-active' : ''} aria-label="卡片视图" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')}><LayoutGrid size={17} /></button>
+              <button type="button" className={layout === 'list' ? 'is-active' : ''} aria-label="列表视图" aria-pressed={layout === 'list'} onClick={() => setLayout('list')}><List size={17} /></button>
+            </div>
+          </div>
+          {visible.length === 0
+            ? <div data-testid={baseRows.length === 0 ? 'kb-empty' : 'kb-list-empty'}><Empty icon={<FileText size={24} />} title={baseRows.length === 0 ? TEXT.empty : !hasFilter && selectedFolderId !== '' ? '此目录还没有文档' : '没有匹配的文档'} hint={baseRows.length === 0 ? TEXT.emptyHint : !hasFilter && selectedFolderId !== '' ? '在当前目录新建一篇文档' : '调整关键词、标签或目录后再试'} action={hasFilter ? <button type="button" className="btn" onClick={clearFilters}>清空筛选</button> : undefined} /></div>
+            : <div className={`kb-document-grid ${layout === 'list' ? 'is-list' : ''}`} data-testid="kb-cards">
+              {visible.map(row => <button type="button" className="kb-document-card" key={row.id} data-testid="kb-item" onClick={() => selectNote(row.id)}>
+                <span className="kb-document-card-title"><FileText size={17} />{titleOf(row)}</span>
+                <span className="kb-document-card-snippet">{snippetOf(row) || '暂无正文'}</span>
+                <span className="kb-document-card-foot"><span>{tagsOf(row).slice(0, 2).map(tag => <span className="kb-document-tag" key={tag}>#{tag}</span>)}</span><time>{formatStamp(row.updatedAt ?? row.createdAt)}</time></span>
+              </button>)}
+            </div>}
+        </section>
+      </div>
+    </div>
+
+  return (
+    <div className="kb" data-module="knowledge">
+      {reading ? (
+        <div className="kb-split" data-testid="kb-split">
+          <aside className={`kb-toc-col ${listOpen ? 'is-open' : ''}`} id="kb-reading-list">
+            <div className="kb-toc-head">
+              <h2>{TEXT.toc}</h2>
+              <span>{TEXT.totalText(baseRows.length)}</span>
+            </div>
+            <nav className="kb-toc-body kb-toc" data-testid="kb-toc" aria-label={TEXT.toc}>
+              {tocGroups.map(group => (
+                <section className="kb-toc-group" key={group.key}>
+                  <h3 className="kb-toc-group-title">
+                    {group.label}
+                    <span className="kb-tag-count">{group.list.length}</span>
+                  </h3>
+                  <ul className="kb-toc-list">
+                    {group.list.map(row => {
+                      const active = row.id === selectedId
+                      return (
+                        <li key={row.id}>
+                          <button
+                            type="button"
+                            className={`kb-toc-item ${active ? 'is-active' : ''}`}
+                            data-testid="kb-toc-item"
+                            aria-current={active ? 'true' : undefined}
+                            onClick={() => selectNote(row.id)}
+                          >
+                            {row.starred === true && <IconStar className="kb-item-star" size={12} />}
+                            <span className="kb-toc-item-text">{titleOf(row)}</span>
+                          </button>
+                        </li>
+                      )
+                    })}
+                  </ul>
+                </section>
+              ))}
+            </nav>
+          </aside>
+
+          <article className="kb-read-col">
+            <div className="kb-editor" data-testid="kb-editor">
+              <div className="kb-read-nav">
+                <button type="button" className="kb-back-link" onClick={backToBases}>知识库</button><span className="kb-crumb-separator">/</span>
+                <button type="button" className="kb-back-link" aria-label={TEXT.backHome} data-testid="kb-back-home" onClick={backToHome}>{titleOf(selectedBase)}</button>
+                <button type="button" className="kb-mobile-list-toggle" aria-expanded={listOpen} aria-controls="kb-reading-list" onClick={() => setListOpen(open => !open)}>
+                  <IconMenu size={16} />{listOpen ? TEXT.listLess : TEXT.listMore}
+                </button>
+                <button type="button" className="kb-new-note" data-testid="kb-new" disabled={busy} onClick={() => createNote()}>
+                  <IconPlus size={16} />{TEXT.create}
+                </button>
+              </div>
+              <header className="kb-article-head">
+                {view === 'edit'
+                  ? (
+                    <textarea
+                      className="kb-title-input"
+                      value={draft.title}
+                      rows={1}
+                      placeholder={TEXT.titlePlaceholder}
+                      aria-label={TEXT.fieldTitle}
+                      data-testid="kb-title-input"
+                      onChange={event => setDraft(current => (current === null ? current : { ...current, title: event.target.value }))}
+                    />
+                  )
+                  : <h2 className="kb-read-title">{titleOf(selected)}</h2>}
+                <div className="kb-article-meta">
+                  {stamp !== '' && <span>{TEXT.metaUpdated} {stamp}</span>}
+                  <span>{TEXT.chars(draft.body.length)}</span>
+                  {view === 'preview' && tagsOf(selected).map(tag => <Chip key={tag}>#{tag}</Chip>)}
+                  {dirty && <Chip tone="warn">{TEXT.dirty}</Chip>}
+                </div>
+              </header>
+              <div className="kb-editor-tools">
                   <div className="kb-view" role="group" aria-label={TEXT.viewLabel}>
                     <button
                       type="button"
@@ -743,6 +986,43 @@ export default function Knowledge({
                       {TEXT.previewView}
                     </button>
                   </div>
+                  {starButton}
+                  <button type="button" className="kb-new-action kb-btn-danger" aria-label={TEXT.delete} title={TEXT.delete} data-testid="kb-delete" disabled={busy} onClick={() => setPendingDelete(selected)}>
+                    <IconTrash size={15} />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-sm kb-ask-btn"
+                    data-testid="kb-ask-ai"
+                    disabled={typeof askAI !== 'function'}
+                    title={typeof askAI === 'function' ? TEXT.askAIHint : TEXT.askAIUnwired}
+                    onClick={askAboutNote}
+                  >
+                    <IconSparkles size={15} />
+                    {TEXT.askAI}
+                  </button>
+              </div>
+
+              {sources.length > 0 && (
+                <div className="kb-sources" data-testid="kb-sources">
+                  <span className="kb-sources-label">{TEXT.sourceFrom}</span>
+                  {sources.map(source => (
+                    <button key={`${source.module}:${source.id}`} type="button" className="kb-source-link" data-testid="kb-source-link" title={TEXT.linkOpen} onClick={() => openLink(source)}>
+                      {labelOf(source.module)}「{source.title}」
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <label className="kb-move-field"><Folder size={16} /><span>所在目录</span>
+                <select aria-label="移动文档到目录" value={String(selected.folderId ?? '')} disabled={busy} onChange={event => moveSelectedDocument(event.target.value)}>
+                  <option value="">全部文档</option>
+                  {folderRows.map(folder => <option key={folder.id} value={folder.id}>{'　'.repeat(folder.depth)}{titleOf(folder)}</option>)}
+                </select>
+              </label>
+
+              {view === 'edit' && (
+                <div className="kb-editor-bar">
                   <input
                     className="input kb-tag-field"
                     value={draft.tags}
@@ -763,120 +1043,43 @@ export default function Knowledge({
                     {busy ? TEXT.saving : TEXT.save}
                   </button>
                 </div>
-
-                {view === 'preview'
-                  ? (
-                    <div className="kb-preview-body" data-testid="kb-preview-body">
-                      {draft.body.trim() === ''
-                        ? <p className="kb-muted">{TEXT.previewEmpty}</p>
-                        : <AssistantMarkdown text={draft.body} />}
-                    </div>
-                  )
-                  : (
-                    <textarea
-                      className="textarea kb-body-input"
-                      value={draft.body}
-                      placeholder={TEXT.bodyPlaceholder}
-                      aria-label={TEXT.bodyLabel}
-                      data-testid="kb-body-input"
-                      onChange={event => setDraft(current => (current === null ? current : { ...current, body: event.target.value }))}
-                    />
-                  )}
-
-                <footer className="kb-editor-foot">
-                  {dirty && <Chip tone="warn">{TEXT.dirty}</Chip>}
-                  <span className="kb-foot-text">{TEXT.chars(draft.body.length)}</span>
-                  {stamp !== '' && <span className="kb-foot-text">{TEXT.metaUpdated} {stamp}</span>}
-                  {wikiLinks.hits.length > 0 && <Chip tone="accent">{TEXT.wikiResolved(wikiLinks.hits.length)}</Chip>}
-                  {wikiLinks.missing.length > 0 && (
-                    <span className="kb-foot-miss" title={wikiLinks.missing.join('、')}>
-                      {TEXT.wikiUnresolved(wikiLinks.missing.length)}
-                    </span>
-                  )}
-                </footer>
-              </div>
-            )}
-        </Card>
-
-        <Card
-          className="kb-links-col"
-          title={TEXT.links}
-          subtitle={selected === null ? undefined : `${TEXT.outgoingCount(links.outgoing.length)} · ${TEXT.incomingCount(links.incoming.length)}`}
-        >
-          <div className="kb-links" data-testid="kb-backlinks">
-            {selected === null
-              ? <p className="kb-link-hint">{TEXT.linksNa}</p>
-              : (
-                <>
-                  <section className="kb-link-group" data-testid="kb-outgoing">
-                    <h4 className="kb-link-title">{TEXT.outgoing}</h4>
-                    {links.outgoing.length === 0
-                      ? <p className="kb-link-hint">{TEXT.outgoingEmpty}</p>
-                      : (
-                        <ul className="kb-link-list">
-                          {links.outgoing.map(link => (
-                            <li key={`out:${link.module}:${link.id}`}>
-                              <button
-                                type="button"
-                                className="kb-link"
-                                data-testid="kb-link"
-                                title={TEXT.linkOpen}
-                                onClick={() => openLink(link)}
-                              >
-                                <IconLink className="kb-link-icon" size={13} />
-                                <span className="kb-link-text">{link.title === '' ? TEXT.untitled : link.title}</span>
-                                {link.module !== 'knowledge' && <Chip>{labelOf(link.module)}</Chip>}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                  </section>
-
-                  <section className="kb-link-group" data-testid="kb-incoming">
-                    <h4 className="kb-link-title">{TEXT.incoming}</h4>
-                    {links.incoming.length === 0
-                      ? <p className="kb-link-hint">{TEXT.incomingEmpty}</p>
-                      : (
-                        <ul className="kb-link-list">
-                          {links.incoming.map(link => (
-                            <li key={`in:${link.module}:${link.id}`}>
-                              <button
-                                type="button"
-                                className="kb-link"
-                                data-testid="kb-link"
-                                title={TEXT.linkOpen}
-                                onClick={() => openLink(link)}
-                              >
-                                <IconLink className="kb-link-icon" size={13} />
-                                <span className="kb-link-text">{link.title === '' ? TEXT.untitled : link.title}</span>
-                                {link.module !== 'knowledge' && <Chip>{labelOf(link.module)}</Chip>}
-                              </button>
-                            </li>
-                          ))}
-                        </ul>
-                      )}
-                  </section>
-                </>
               )}
 
-            <div className="kb-ask">
-              <button
-                type="button"
-                className="btn kb-ask-btn"
-                data-testid="kb-ask-ai"
-                disabled={selected === null || typeof askAI !== 'function'}
-                title={selected === null ? TEXT.editorEmpty : (typeof askAI === 'function' ? TEXT.askAIHint : TEXT.askAIUnwired)}
-                onClick={askAboutNote}
-              >
-                <IconSparkles size={15} />
-                {TEXT.askAI}
-              </button>
-              <p className="kb-ask-hint">{TEXT.askAIHint}</p>
+              {view === 'preview'
+                ? (
+                  <div className="kb-preview-body" data-testid="kb-preview-body">
+                    {draft.body.trim() === ''
+                      ? <p className="kb-muted">{TEXT.previewEmpty}</p>
+                      : <AssistantMarkdown text={draft.body} />}
+                  </div>
+                )
+                : (
+                  <textarea
+                    className="textarea kb-body-input"
+                    value={draft.body}
+                    placeholder={TEXT.bodyPlaceholder}
+                    aria-label={TEXT.bodyLabel}
+                    data-testid="kb-body-input"
+                    onChange={event => setDraft(current => (current === null ? current : { ...current, body: event.target.value }))}
+                  />
+                )}
+
+              <footer className="kb-editor-foot">
+                {wikiLinks.hits.length > 0 && <Chip tone="accent">{TEXT.wikiResolved(wikiLinks.hits.length)}</Chip>}
+                {wikiLinks.missing.length > 0 && (
+                  <span className="kb-foot-miss" title={wikiLinks.missing.join('、')}>
+                    {TEXT.wikiUnresolved(wikiLinks.missing.length)}
+                  </span>
+                )}
+              </footer>
+
+              {linksSection}
             </div>
-          </div>
-        </Card>
-      </div>
+          </article>
+        </div>
+      ) : (
+        (stage === 'bases' ? baseList : documentsView)
+      )}
 
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -886,6 +1089,45 @@ export default function Knowledge({
         onCancel={() => setPendingDelete(null)}
         onConfirm={confirmDelete}
       />
+      <ConfirmDialog
+        open={pendingNavigation !== null}
+        title={TEXT.discardTitle}
+        message={TEXT.discardMessage}
+        onCancel={() => setPendingNavigation(null)}
+        onConfirm={confirmNavigation}
+      />
+      <ConfirmDialog
+        open={pendingBaseDelete !== null}
+        title="删除知识库"
+        message={pendingBaseDelete === null ? '' : `删除「${titleOf(pendingBaseDelete)}」及其中所有文档和目录？此操作无法恢复。`}
+        busy={busy}
+        onCancel={() => setPendingBaseDelete(null)}
+        onConfirm={confirmBaseDelete}
+      />
+      <ConfirmDialog
+        open={pendingFolderDelete !== null}
+        title="删除目录"
+        message={pendingFolderDelete === null ? '' : `删除「${titleOf(pendingFolderDelete)}」？目录中有文档或子目录时需先移走。`}
+        busy={busy}
+        onCancel={() => setPendingFolderDelete(null)}
+        onConfirm={confirmFolderDelete}
+      />
+      {baseForm !== null && <div className="kb-modal-backdrop">
+        <form className="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-base-form-title" onSubmit={event => { event.preventDefault(); saveBaseForm() }}>
+          <h2 id="kb-base-form-title">{baseForm.id ? '编辑知识库' : '新建知识库'}</h2>
+          <label>名称<input autoFocus className="input" maxLength={200} value={baseForm.title} onChange={event => setBaseForm(current => ({ ...current, title: event.target.value }))} /></label>
+          <label>描述<textarea className="textarea" maxLength={5000} rows={3} value={baseForm.description} onChange={event => setBaseForm(current => ({ ...current, description: event.target.value }))} placeholder="这座知识库收录什么内容？" /></label>
+          <div className="kb-modal-actions"><button type="button" className="btn" onClick={() => setBaseForm(null)}>取消</button><button type="submit" className="btn btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button></div>
+        </form>
+      </div>}
+      {folderForm !== null && <div className="kb-modal-backdrop">
+        <form className="kb-modal" role="dialog" aria-modal="true" aria-labelledby="kb-folder-form-title" onSubmit={event => { event.preventDefault(); saveFolderForm() }}>
+          <h2 id="kb-folder-form-title">{folderForm.id ? '重命名目录' : '新建目录'}</h2>
+          <label>目录名称<input autoFocus className="input" maxLength={200} value={folderForm.title} onChange={event => setFolderForm(current => ({ ...current, title: event.target.value }))} /></label>
+          {!folderForm.id && <p className="kb-modal-hint">位置：{selectedFolderId === '' ? '知识库根目录' : titleOf(baseFolders.find(folder => folder.id === selectedFolderId))}</p>}
+          <div className="kb-modal-actions"><button type="button" className="btn" onClick={() => setFolderForm(null)}>取消</button><button type="submit" className="btn btn-primary" disabled={busy}>{busy ? '保存中…' : '保存'}</button></div>
+        </form>
+      </div>}
     </div>
   )
 }

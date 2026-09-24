@@ -3,6 +3,7 @@ import { once } from 'node:events';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import express from 'express';
 import { createWorkbenchRouter } from '../server/workbench/router';
 import { WorkbenchStore } from '../server/workbench/store';
@@ -30,6 +31,18 @@ try {
   store = new WorkbenchStore(path);
   assert.equal(store.read().tasks[0]?.done, true);
   assert.equal(store.read().pets.records[0]?.title, '学会握手');
+
+  // 真实旧库启动迁移：旧 SQLite 只有 knowledge 记录，重开后生成默认库并补归属。
+  const oldPath = join(dir, 'legacy-knowledge.sqlite');
+  const oldDb = new Database(oldPath);
+  oldDb.exec('CREATE TABLE workbench_records (seq INTEGER PRIMARY KEY AUTOINCREMENT, module TEXT NOT NULL, id TEXT NOT NULL, payload TEXT NOT NULL, UNIQUE(module, id))');
+  oldDb.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)').run('knowledge', 'legacy-doc-0001', JSON.stringify({ id: 'legacy-doc-0001', title: '原有笔记', body: '保留正文' }));
+  oldDb.close();
+  const migratedStore = new WorkbenchStore(oldPath);
+  assert.equal(migratedStore.read().knowledge[0]?.knowledgeBaseId, 'kb-legacy-default');
+  assert.equal(migratedStore.read().knowledge[0]?.body, '保留正文');
+  assert.equal(migratedStore.read().knowledgeBases[0]?.title, '我的知识库');
+  migratedStore.close();
 
   const imported = store.read();
   imported.tasks = [{ ...task, title: '从旧 JSON 导入' }];
@@ -113,10 +126,12 @@ try {
   const KB_PREF_ID = '9000000a-0000-4000-8000-00000000000a';
   const kbPrefsResponse = await fetch(`${base}/prefs`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ kbSelectedId: KB_PREF_ID, kbView: 'preview', unknownKey: 2 }),
+    body: JSON.stringify({ kbSelectedId: KB_PREF_ID, kbView: 'preview', kbBaseId: 'kb-legacy-default', kbStage: 'documents', unknownKey: 2 }),
   }).then((response) => response.json()) as { prefs: Record<string, unknown> };
   assert.equal(kbPrefsResponse.prefs.kbSelectedId, KB_PREF_ID, 'kbSelectedId 应在白名单内');
   assert.equal(kbPrefsResponse.prefs.kbView, 'preview', 'kbView 应在白名单内');
+  assert.equal(kbPrefsResponse.prefs.kbBaseId, 'kb-legacy-default', 'kbBaseId 应在白名单内');
+  assert.equal(kbPrefsResponse.prefs.kbStage, 'documents', 'kbStage 应在白名单内');
   assert.equal(kbPrefsResponse.prefs.unknownKey, undefined, '白名单外的键仍要丢弃');
   const stateWithKbPrefs = await fetch(`${base}/state`).then((response) => response.json()) as {
     prefs: { kbSelectedId?: string; kbView?: string };
@@ -278,11 +293,32 @@ try {
   assert.deepEqual(importedKnowledge?.refs ?? [], [], '旧数据缺 refs：读时按空数组兜底');
   const importedWiki = store.read().knowledge.find((record) => record.id === 'legacy000-0000-4000-8000-00000000k02e');
   assert.deepEqual(importedWiki?.refs, [], '导入有双链正文也不运行 R3，refs 原样保留');
+  assert.ok(store.read().knowledge.every((record) => typeof record.knowledgeBaseId === 'string' && record.knowledgeBaseId !== ''), '旧笔记必须迁入默认知识库');
+  assert.ok(store.read().knowledgeBases.some((record) => record.id === 'kb-legacy-default'), '迁移应创建可见的默认知识库');
+
+  const secondBase = store.addRecord('knowledgeBases', { title: '第二知识库', description: '范围隔离验证' });
+  const folder = store.addRecord('knowledgeFolders', { title: '设计', knowledgeBaseId: secondBase.id });
+  const childFolder = store.addRecord('knowledgeFolders', { title: '子目录', knowledgeBaseId: secondBase.id, parentId: folder.id });
+  assert.throws(() => store.updateRecord('knowledgeFolders', folder.id, { parentId: childFolder.id }), /循环层级/, '目录不能形成循环');
+  assert.equal(store.removeRecord('knowledgeFolders', childFolder.id), true, '空子目录可删除');
+  const folderDoc = store.addRecord('knowledge', { title: '第二库文档', knowledgeBaseId: secondBase.id, folderId: folder.id, body: '内容' });
+  assert.equal(store.read().knowledge.find((record) => record.id === folderDoc.id)?.folderId, folder.id, '文档目录归属应持久化');
+  assert.throws(() => store.updateRecord('knowledge', importedKnowledge!.id, { folderId: folder.id }), /目录不属于所选知识库/, '文档不可移入别的知识库目录');
+  assert.throws(() => store.removeRecord('knowledgeFolders', folder.id), /仍有文档/, '有内容的目录不可误删');
+  const otherTitle = store.addRecord('knowledge', { title: '精确标题', knowledgeBaseId: secondBase.id });
+  const scoped = store.addRecord('knowledge', { title: '库内双链', knowledgeBaseId: secondBase.id, body: '[[精确标题]]' });
+  assert.deepEqual(scoped.refs, [{ type: 'knowledge', id: otherTitle.id }], '双链只解析同一知识库的标题');
+  store.updateRecord('knowledge', folderDoc.id, { folderId: '' });
+  assert.equal(store.removeRecord('knowledgeFolders', folder.id), true, '空目录可删除');
+  assert.equal(store.removeRecord('knowledgeBases', secondBase.id), true, '知识库可删除');
+  assert.ok(!store.read().knowledge.some((record) => record.knowledgeBaseId === secondBase.id), '删除知识库应清理其文档');
+  assert.ok(!store.read().knowledgeFolders.some((record) => record.knowledgeBaseId === secondBase.id), '删除知识库应清理其目录');
   store.resetAll();
   assert.equal(store.read().tasks.length, 0);
   console.log('workbench SQLite: persistence, validation, import rollback and HTTP CRUD passed');
   console.log('workbench SQLite: common fields, timestamps, search, prefs (whitelist, kb keys, envelope) and demo data passed');
   console.log('workbench SQLite: knowledge R3 store and HTTP wiki refs passed');
+  console.log('workbench SQLite: knowledge base migration, folder ownership, scoped links and cascade passed');
 } finally {
   if (http) await new Promise<void>((resolve) => http!.close(() => resolve()));
   store.close();

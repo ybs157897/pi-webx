@@ -1,0 +1,503 @@
+/*
+ * 代码开发（Codes）模块样式：IDE 工作区外壳——活动栏 + 文件树面板 + 编辑器
+ * （tab 条 / 工具条 / 行号槽与等宽编辑区 / 状态栏）。
+ *
+ * 只吃 styles.css 的令牌（颜色 / 间距 / 字号 / 圆角 / 阴影），亮暗主题自动跟随。
+ * 行号槽与 textarea 共用 `--editor-line` 行高和同样的 `--sp-2` 上内边距，换字号要一起改；
+ * 两边滚动同步靠 JS 写 `gutter.scrollTop`（见 Codes.jsx 的 syncGutter）。
+ * <900px 收成单列：文件树默认折叠、活动栏横过来放在顶部，编辑器留 320px 可编辑高度。
+ */
+
+/* ---------- 1. 外壳 ---------- */
+
+.codes-shell {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 236px) minmax(0, 1fr);
+  /* 行高锁死在外壳高度上：正文再长也只让编辑区内部滚，不把外壳撑破（overflow: hidden 会裁掉）。 */
+  grid-template-rows: minmax(0, 1fr);
+  height: min(680px, calc(100dvh - 210px));
+  min-height: 420px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+
+/* 折叠文件树：活动栏留住，面板那一列收成 0。 */
+.codes-shell[data-tree="closed"] {
+  grid-template-columns: 48px 0 minmax(0, 1fr);
+}
+
+.codes-shell[data-tree="closed"] .codes-explorer {
+  display: none;
+}
+
+/* ---------- 2. 活动栏 ---------- */
+
+.codes-activity {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-2) 0;
+  background: var(--surface-1);
+  border-inline-end: 1px solid var(--line-1);
+}
+
+.codes-act {
+  color: var(--text-3);
+}
+
+.codes-act:hover {
+  color: var(--text-1);
+}
+
+.codes-act.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* 当前事项名：宽屏看编辑区 tab，窄屏活动栏横过来后才显示。 */
+.codes-activity-title {
+  display: none;
+  min-width: 0;
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+}
+
+/* ---------- 3. 文件树面板 ---------- */
+
+.codes-explorer {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border-inline-end: 1px solid var(--line-1);
+  background: var(--surface-0);
+}
+
+.codes-explorer-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  padding: var(--sp-1) var(--sp-1) var(--sp-1) var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+}
+
+.codes-explorer-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  letter-spacing: .06em;
+}
+
+.codes-explorer-count {
+  flex: none;
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.codes-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-2) var(--sp-2) var(--sp-3);
+  overflow-y: auto;
+}
+
+.tree-group + .tree-group {
+  margin-top: var(--sp-2);
+}
+
+.tree-group-head {
+  padding: var(--sp-1) var(--sp-2) 4px;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+
+.codes-item {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  border-radius: var(--radius-sm);
+}
+
+.codes-item:hover {
+  background: var(--surface-2);
+}
+
+.codes-item.is-active {
+  background: var(--accent-soft);
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 30px;
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  text-align: start;
+  cursor: pointer;
+}
+
+.codes-item.is-active .tree-item {
+  color: var(--text-1);
+  font-weight: 600;
+}
+
+/* 事项名当文件名看：等宽 + 溢出省略。 */
+.tree-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+}
+
+/* 状态色点：待办中性 / 进行中强调 / 已完成成功色（与看板同语义）。 */
+.tree-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.tree-item[data-status="doing"] .tree-dot {
+  background: var(--accent);
+}
+
+.tree-item[data-status="done"] .tree-dot {
+  background: var(--ok);
+}
+
+/* 未保存圆点：tab 条 / 文件树 / 状态栏共用。 */
+.dot-dirty {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+
+.codes-item-del {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  color: var(--text-3);
+}
+
+.codes-item-del:hover {
+  color: var(--danger);
+}
+
+/* 有悬停能力的环境把删除按钮收起来，行干净；触屏（无 hover）恒显。 */
+@media (hover: hover) {
+  .codes-item-del {
+    opacity: 0;
+  }
+
+  .codes-item:hover .codes-item-del,
+  .codes-item:focus-within .codes-item-del {
+    opacity: 1;
+  }
+}
+
+/* ---------- 4. 编辑器 ---------- */
+
+.codes-editor {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-1);
+}
+
+.codes-frame {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* tab 条 = 工作区 chrome（surface-2），当前 tab 与下方的工具条/编辑区同色，连成一体。 */
+.editor-tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  min-height: 34px;
+  padding: 0 var(--sp-1);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--surface-2);
+  overflow-x: auto;
+}
+
+.editor-tab {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  max-width: 220px;
+  padding: 0 2px 0 var(--sp-3);
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  color: var(--text-3);
+}
+
+.editor-tab.is-active {
+  background: var(--surface-1);
+  color: var(--text-1);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+
+.editor-tab-name {
+  max-width: 150px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--mono);
+  font-size: var(--fs-xs);
+  cursor: pointer;
+}
+
+.editor-tab-close {
+  width: 24px;
+  height: 24px;
+  flex: none;
+  color: var(--text-3);
+}
+
+/* ---------- 5. 工具条 ---------- */
+
+.editor-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  flex-wrap: wrap;
+  padding: var(--sp-3) var(--sp-3) var(--sp-2);
+  border-bottom: 1px solid var(--line-1);
+  background: var(--surface-1);
+}
+
+.editor-toolbar .field {
+  margin-bottom: 0;
+}
+
+.toolbar-title {
+  flex: 1 1 200px;
+  min-width: 0;
+}
+
+.toolbar-project {
+  flex: 0 1 160px;
+  min-width: 116px;
+}
+
+.toolbar-status {
+  flex: none;
+}
+
+.editor-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  margin-inline-start: auto;
+}
+
+/* styles.css 的 .icon-btn 没有 danger 档，工具条里的删除在这里补上语义色。 */
+.editor-actions .icon-btn.danger {
+  color: var(--text-3);
+}
+
+.editor-actions .icon-btn.danger:hover {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ---------- 6. 编辑区（行号槽 + textarea） ---------- */
+
+.editor-area {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  background: var(--surface-1);
+  /* 行号槽与 textarea 的唯一行高来源：改这里两边一起动，行才对得齐。 */
+  --editor-line: 22px;
+}
+
+.editor-gutter {
+  flex: none;
+  width: 48px;
+  padding: var(--sp-2) 0;
+  overflow: hidden;
+  border-inline-end: 1px solid var(--line-1);
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: var(--editor-line);
+  text-align: end;
+  user-select: none;
+}
+
+.editor-gutter span {
+  display: block;
+  padding-inline-end: var(--sp-2);
+}
+
+.editor-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--sp-2) var(--sp-3);
+  border: 0;
+  background: transparent;
+  color: var(--text-1);
+  font-family: var(--mono);
+  font-size: var(--fs-sm);
+  line-height: var(--editor-line);
+  white-space: pre;
+  tab-size: 2;
+  resize: none;
+  outline: none;
+}
+
+/* textarea 的焦点环画在外壳上，免得闪烁的描边跟着滚动区域跑。 */
+.editor-area:focus-within {
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* ---------- 7. 状态栏 ---------- */
+
+.editor-status {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: 30px;
+  padding: 0 var(--sp-3);
+  border-top: 1px solid var(--line-1);
+  background: var(--surface-0);
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  overflow: hidden;
+}
+
+.editor-status-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--mono);
+}
+
+.editor-status-item {
+  flex: none;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.editor-status-item[data-status="doing"] {
+  color: var(--accent);
+}
+
+.editor-status-item[data-status="done"] {
+  color: var(--ok);
+}
+
+.editor-status-save {
+  flex: none;
+  margin-inline-start: auto;
+  white-space: nowrap;
+  color: var(--ok);
+}
+
+.editor-status-save.is-dirty {
+  color: var(--warn);
+}
+
+/* ---------- 8. 空态 ---------- */
+
+.codes-blank .empty {
+  padding: var(--sp-5) var(--sp-3);
+}
+
+.codes-blank-editor {
+  display: grid;
+  place-items: center;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: var(--sp-4);
+}
+
+.codes-blank-editor .empty {
+  padding: var(--sp-6) var(--sp-4);
+}
+
+/* ---------- 9. 断点：<900px 收成单列 ---------- */
+
+@media (max-width: 899px) {
+  .codes-shell,
+  .codes-shell[data-tree="closed"] {
+    display: flex;
+    flex-direction: column;
+    height: auto;
+    min-height: 0;
+  }
+
+  /* 活动栏横过来当工作区标题条。 */
+  .codes-activity {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--sp-2);
+    padding: var(--sp-1) var(--sp-2);
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .codes-activity-title {
+    display: block;
+    margin-inline-start: var(--sp-1);
+  }
+
+  /* 展开时给文件树一块有限高度，编辑区不被挤走。 */
+  .codes-explorer {
+    max-height: 40dvh;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--line-1);
+  }
+
+  .codes-frame {
+    min-height: 320px;
+  }
+
+  /* 窄屏外壳高度是 auto，给编辑区一个上限，长正文走内部滚动而不是把页面拉长。 */
+  .editor-area {
+    min-height: 260px;
+    max-height: 56dvh;
+  }
+
+  .editor-gutter {
+    width: 40px;
+  }
+
+  .editor-status-time {
+    display: none;
+  }
+}
