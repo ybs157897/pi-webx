@@ -1043,7 +1043,7 @@ function Shell({
               <>
                 <WorkspaceSwitcher
                   cwd={cwd}
-                  recent={[...savedWorkspaces, ...(config?.suggestedCwds ?? [])]}
+                  workspaces={workspaces.map(({ key }) => key)}
                   {...(config?.home === undefined ? {} : { home: config.home })}
                   onPick={(path) => {
                     pickWorkspace(path);

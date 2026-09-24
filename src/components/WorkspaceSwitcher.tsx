@@ -31,8 +31,8 @@ function shortPath(path: string, home: string | undefined): string {
 
 export interface WorkspaceSwitcherProps {
   cwd: string;
-  /** candidates offered as one-click picks (server-provided + user history) */
-  recent: string[];
+  /** The same visible workspace paths shown in the sidebar. */
+  workspaces: string[];
   home?: string;
   disabled?: boolean;
   onPick: (path: string) => void;
@@ -42,7 +42,7 @@ export interface WorkspaceSwitcherProps {
 
 export function WorkspaceSwitcher({
   cwd,
-  recent,
+  workspaces,
   home,
   disabled,
   onPick,
@@ -52,7 +52,7 @@ export function WorkspaceSwitcher({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
 
-  const candidates = Array.from(new Set([cwd, ...recent])).filter(Boolean).slice(0, 8);
+  const candidates = Array.from(new Set([cwd, ...workspaces])).filter(Boolean);
 
   const items: MenuEntry[] = candidates.map((path) => ({
     id: path,
