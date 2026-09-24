@@ -13,26 +13,23 @@
  *
  * 形态是**列表态 ⇄ 表单态整页互斥切换**（上游 `isFormView`，:1629），不是同屏两栏。
  * 最大轮数与并发上限**不再渲染**，但仍在草稿里原样保留并提交（上游 :1020-1024 语义）。
+ *
+ * 这个文件只负责渲染：三路读取在 `use-agent-catalog.ts`，编辑状态机与写操作在
+ * `use-agent-form.ts`，可复用的表单/行零件在 `AgentDefinitionParts.tsx`。
+ * 表单字段的渲染顺序、只读行的分支与删除弹窗的原文留在这里，`check-agent-definitions-ui.ts`
+ * 逐字断言的就是这些。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type {
   AgentDefinition,
-  AgentDefinitionsResponse,
   AgentToolOption,
-  AgentToolsResponse,
 } from '../../shared/agent-definitions'
 import { type PiThinkingLevel } from '../../shared/protocol'
-import type { ModelCatalog } from '../../shared/model-catalog'
-import {
-  AgentDefinitionsApiError,
-  agentDefinitionsApi,
-} from '../../lib/agentDefinitions'
 import {
   catalogLabels,
   catalogModels,
-  modelCatalogApi,
   thinkingLevelsForModel,
 } from '../../lib/modelCatalog'
 import {
@@ -42,34 +39,34 @@ import {
   IconPlusOutline16,
   IconRefreshOutline16,
   IconSearchOutline16,
-  IconTrashOutline16,
   Modal,
 } from '../../ui/primitives/index.ts'
 import {
-  AGENT_COLOR_LABELS,
-  AGENT_COLOR_ORDER,
   addToolName,
-  agentFormValuesFromDefinition,
-  clearToolNames,
-  createAgentFormValues,
   agentDefinitionCounts,
-  createInputFromValues,
+  clearToolNames,
   decodeModelSelection,
   encodeModelSelection,
   groupAgentDefinitions,
   initialSelectedToolsForCustom,
-  isAgentFormDirty,
   marksUnavailableModel,
   modelSelectionValue,
-  patchFromValues,
-  reconcileConflict,
   removeToolName,
   selectAllToolNames,
   selectedToolNames,
   toggleAgentColor,
-  validateAgentForm,
-  type AgentFormValues,
 } from './agent-definitions-form.ts'
+import {
+  AgentColorPicker,
+  AgentFormIssues,
+  AgentRowActions,
+  DiscardDialog,
+  Field,
+  NoticeLine,
+  ToolCheckbox,
+} from './AgentDefinitionParts.tsx'
+import { useAgentCatalog } from './use-agent-catalog.ts'
+import { useAgentForm } from './use-agent-form.ts'
 import styles from './AgentDefinitionsSection.module.css'
 
 /** Props of {@link AgentDefinitionsSection}. */
@@ -77,15 +74,6 @@ export interface AgentDefinitionsSectionProps {
   /** Current session, when the app already has one; the tool catalog is per-session. */
   sessionId?: string
 }
-
-/** An independently-loadable read. */
-interface CatalogState<T> {
-  value: T | null
-  error: string | undefined
-  loading: boolean
-}
-
-const EMPTY_CATALOG: CatalogState<never> = { value: null, error: undefined, loading: false }
 
 /** Copy verbatim from the reference locale (zh-CN.ts:3314-3394). */
 const COPY = {
@@ -127,86 +115,20 @@ const COPY = {
   modelLoadFailed: '模型列表加载失败。',
 } as const
 
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function statusOf(error: unknown): number {
-  return error instanceof AgentDefinitionsApiError ? error.status : 0
-}
-
 /**
  * Render the sub-agent settings section.
  * @param props - the optional session id used to scope the tool catalog.
  * @returns the section content column.
  */
 export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionProps): ReactNode {
-  const [listed, setListed] = useState<AgentDefinitionsResponse | undefined>(undefined)
-  const [listLoading, setListLoading] = useState(true)
-  const [listError, setListError] = useState<string | undefined>(undefined)
-
-  const [models, setModels] = useState<CatalogState<ModelCatalog>>(EMPTY_CATALOG)
-  const [tools, setTools] = useState<CatalogState<AgentToolsResponse>>(EMPTY_CATALOG)
-
-  /** The definition being edited; `undefined` with `creating` false means the list. */
-  const [editing, setEditing] = useState<AgentDefinition | undefined>(undefined)
-  const [creating, setCreating] = useState(false)
-  const [draft, setDraft] = useState<AgentFormValues>(createAgentFormValues)
+  const { listed, setListed, listLoading, listError, loadDefinitions, models, loadModels, tools, loadTools } =
+    useAgentCatalog(sessionId)
 
   const [query, setQuery] = useState('')
-  const [busy, setBusy] = useState(false)
-  const [notice, setNotice] = useState<{ text: string; tone: 'info' | 'error' | 'success' } | undefined>(undefined)
-  const [formError, setFormError] = useState<string | undefined>(undefined)
   const [extraToolInput, setExtraToolInput] = useState('')
-  const [confirmDiscard, setConfirmDiscard] = useState<(() => void) | undefined>(undefined)
-  const [confirmDelete, setConfirmDelete] = useState<AgentDefinition | undefined>(undefined)
-
-  const loadDefinitions = useCallback(async (): Promise<AgentDefinitionsResponse | undefined> => {
-    setListLoading(true)
-    try {
-      const answer = await agentDefinitionsApi.read()
-      setListed(answer)
-      setListError(undefined)
-      return answer
-    } catch (error) {
-      setListError(messageOf(error))
-      return undefined
-    } finally {
-      setListLoading(false)
-    }
-  }, [])
-
-  const loadModels = useCallback(async (): Promise<void> => {
-    setModels({ value: null, error: undefined, loading: true })
-    try {
-      const value = await modelCatalogApi.read()
-      setModels({ value, error: undefined, loading: false })
-    } catch (error) {
-      setModels({ value: null, error: messageOf(error), loading: false })
-    }
-  }, [])
-
-  const loadTools = useCallback(async (): Promise<void> => {
-    setTools({ value: null, error: undefined, loading: true })
-    try {
-      const value = await agentDefinitionsApi.tools(sessionId)
-      setTools({ value, error: undefined, loading: false })
-    } catch (error) {
-      setTools({ value: null, error: messageOf(error), loading: false })
-    }
-  }, [sessionId])
-
-  /* Three independent reads; a failure in one must not blank the other two. */
-  useEffect(() => {
-    void loadDefinitions()
-    void loadModels()
-    void loadTools()
-  }, [loadDefinitions, loadModels, loadTools])
 
   const agents = listed?.agents ?? []
   const revision = listed?.revision
-  const dirty = isAgentFormDirty(draft, editing)
-  const showForm = creating || editing !== undefined
 
   /* Built-ins are product-shipped and read-only; split them out before anything
      else so they never enter the form and never carry an enable switch. */
@@ -214,10 +136,28 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
 
   /* Only the user's own definitions are siblings for the duplicate-name check: a
      definition of the same name shadows a built-in on purpose. */
-  const problems = useMemo(
-    () => validateAgentForm(draft, grouped.user, editing),
-    [draft, grouped.user, editing],
-  )
+  const {
+    editing,
+    showForm,
+    draft,
+    problems,
+    busy,
+    notice,
+    formError,
+    confirmDiscard,
+    confirmDelete,
+    update,
+    guardDirty,
+    openNew,
+    openExisting,
+    backToList,
+    save,
+    toggleEnabled,
+    doDelete,
+    setNotice,
+    setConfirmDiscard,
+    setConfirmDelete,
+  } = useAgentForm({ revision, userAgents: grouped.user, setListed, loadDefinitions })
 
   const matched = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -266,170 +206,12 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
   const excludedTools = tools.value?.excluded ?? []
   const chosen = selectedToolNames(draft)
 
-  const update = (patch: Partial<AgentFormValues>): void => {
-    setDraft((current) => ({ ...current, ...patch }))
-  }
-
-  /** Run `next` now, or after the user agrees to drop unsaved edits. */
-  const guardDirty = useCallback(
-    (next: () => void): void => {
-      if (!dirty) {
-        next()
-        return
-      }
-      setConfirmDiscard(() => () => {
-        setConfirmDiscard(undefined)
-        next()
-      })
-    },
-    [dirty],
-  )
-
-  const openNew = useCallback((): void => {
-    setEditing(undefined)
-    setCreating(true)
-    setDraft(createAgentFormValues())
-    setFormError(undefined)
-    setNotice(undefined)
-  }, [])
-
-  const openExisting = useCallback((agent: AgentDefinition): void => {
-    setEditing(agent)
-    setCreating(false)
-    setDraft(agentFormValuesFromDefinition(agent))
-    setFormError(undefined)
-    setNotice(undefined)
-  }, [])
-
-  const closeForm = useCallback((): void => {
-    setEditing(undefined)
-    setCreating(false)
-    setDraft(createAgentFormValues())
-    setFormError(undefined)
-  }, [])
-
-  /** Back to the list, guarding unsaved edits. */
-  const backToList = useCallback((): void => {
-    guardDirty(closeForm)
-  }, [closeForm, guardDirty])
-
-  /**
-   * A write lost the compare-and-set. The fresh list replaces the version; the
-   * draft is left on screen, because the user's unsaved text is the one thing a
-   * conflict must not throw away.
-   */
-  const onConflict = useCallback(async (): Promise<void> => {
-    const fresh = await loadDefinitions()
-    if (fresh === undefined) return
-    const reconciled = reconcileConflict(draft, fresh)
-    setNotice({ text: reconciled.notice, tone: 'error' })
-  }, [draft, loadDefinitions])
-
-  const save = useCallback(async (): Promise<void> => {
-    if (revision === undefined) return
-    if (problems.errors.length > 0) {
-      setFormError(problems.errors.join(' '))
-      return
-    }
-    setBusy(true)
-    setFormError(undefined)
-    try {
-      if (editing === undefined) {
-        const answer = await agentDefinitionsApi.create(revision, createInputFromValues(draft))
-        setListed(answer)
-        closeForm()
-        setNotice({ text: '已新增子智能体。', tone: 'success' })
-      } else {
-        const patch = patchFromValues(draft, editing)
-        const answer = await agentDefinitionsApi.update(editing.id, revision, patch)
-        setListed(answer)
-        closeForm()
-        setNotice({ text: '已保存。', tone: 'success' })
-      }
-    } catch (error) {
-      if (statusOf(error) === 409) await onConflict()
-      else setFormError(messageOf(error))
-    } finally {
-      setBusy(false)
-    }
-  }, [closeForm, draft, editing, onConflict, problems.errors, revision])
-
-  /**
-   * The list's enable switch writes through the same CAS as a form save — there
-   * is no separate endpoint, and a shortcut here is how a stale list overwrites a
-   * definition someone just edited.
-   */
-  const toggleEnabled = useCallback(
-    async (agent: AgentDefinition, enabled: boolean): Promise<void> => {
-      if (revision === undefined) return
-      setBusy(true)
-      setNotice(undefined)
-      try {
-        const answer = await agentDefinitionsApi.update(agent.id, revision, { enabled })
-        const fresh = answer.agents.find((candidate) => candidate.id === agent.id)
-        setListed(answer)
-        if (editing?.id === agent.id && fresh !== undefined) setEditing(fresh)
-        setNotice({
-          text: enabled
-            ? '已启用：下次调度可自动调用，当前正在运行的任务不受影响。'
-            : '已停用：下次调度不再自动调用，当前正在运行的任务不会被中断。',
-          tone: 'success',
-        })
-      } catch (error) {
-        if (statusOf(error) === 409) await onConflict()
-        else setNotice({ text: messageOf(error), tone: 'error' })
-      } finally {
-        setBusy(false)
-      }
-    },
-    [editing?.id, onConflict, revision],
-  )
-
-  const doDelete = useCallback(async (): Promise<void> => {
-    const target = confirmDelete
-    if (target === undefined || revision === undefined) return
-    setConfirmDelete(undefined)
-    setBusy(true)
-    try {
-      const answer = await agentDefinitionsApi.delete(target.id, revision)
-      // A draft that was never saved is kept: deleting a sibling is no reason to
-      // discard text the user is still writing.
-      setListed(answer)
-      if (editing?.id === target.id) closeForm()
-      setNotice({ text: '已删除。', tone: 'success' })
-    } catch (error) {
-      if (statusOf(error) === 404) {
-        await loadDefinitions()
-        setNotice({ text: '该子智能体已不存在，列表已刷新。', tone: 'error' })
-      } else if (statusOf(error) === 409) {
-        await onConflict()
-      } else {
-        setNotice({ text: messageOf(error), tone: 'error' })
-      }
-    } finally {
-      setBusy(false)
-    }
-  }, [closeForm, confirmDelete, editing?.id, loadDefinitions, onConflict, revision])
-
-  const noticeNode = notice === undefined
-    ? null
-    : (
-      <p
-        className={notice.tone === 'error'
-          ? `${styles.notice} ${styles.noticeAlert}`
-          : notice.tone === 'success' ? `${styles.notice} ${styles.noticeSuccess}` : styles.notice}
-        role={notice.tone === 'error' ? 'alert' : 'status'}
-      >
-        {notice.text}
-      </p>
-    )
-
   /* ------------------------------------------------------------- form view */
 
   if (showForm) {
     return (
       <div className={styles.section}>
-        {noticeNode}
+        <NoticeLine notice={notice} />
         <div className={styles.formHeader}>
           <button type="button" className={styles.backRow} onClick={backToList}>
             <IconChevronLeftOutline14 size={16} />
@@ -458,26 +240,11 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
           </Field>
 
           <Field label={COPY.colorLabel}>
-            <div className={styles.colorRow} role="group" aria-label={COPY.colorLabel}>
-              {AGENT_COLOR_ORDER.map((color) => (
-                <button
-                  key={color}
-                  type="button"
-                  className={draft.color === color
-                    ? `${styles.colorSwatch} ${styles.colorSwatchActive}`
-                    : styles.colorSwatch}
-                  aria-pressed={draft.color === color}
-                  aria-label={AGENT_COLOR_LABELS[color]}
-                  title={AGENT_COLOR_LABELS[color]}
-                  onClick={() => { update({ color: toggleAgentColor(draft.color, color) }) }}
-                >
-                  <span className={styles.colorDot} data-color={color} />
-                </button>
-              ))}
-              {draft.color === undefined
-                ? null
-                : <span className={styles.hint}>{AGENT_COLOR_LABELS[draft.color]}</span>}
-            </div>
+            <AgentColorPicker
+              label={COPY.colorLabel}
+              color={draft.color}
+              onSelect={(color) => { update({ color: toggleAgentColor(draft.color, color) }) }}
+            />
           </Field>
 
           <Field label={COPY.modelLabel}>
@@ -698,19 +465,7 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
 
           <p className={styles.hint}>{COPY.formDescription}</p>
 
-          {problems.warnings.length > 0 && (
-            <ul className={styles.hint}>
-              {problems.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-            </ul>
-          )}
-
-          {(formError !== undefined || problems.errors.length > 0) && (
-            <ul className={styles.errorList} role="alert">
-              {(formError !== undefined ? [formError] : problems.errors).map((text) => (
-                <li key={text}>{text}</li>
-              ))}
-            </ul>
-          )}
+          <AgentFormIssues problems={problems} formError={formError} />
 
           <div className={styles.formActions}>
             <Button variant="primary" size="sm" type="submit" disabled={busy || problems.errors.length > 0}>
@@ -778,7 +533,7 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
         </div>
       </div>
 
-      {noticeNode}
+      <NoticeLine notice={notice} />
 
       {listError !== undefined && (
         <p className={`${styles.notice} ${styles.noticeAlert}`} role="alert">
@@ -894,20 +649,6 @@ export function AgentDefinitionsSection({ sessionId }: AgentDefinitionsSectionPr
   )
 }
 
-/** One labelled field block, matching the reference's `FormFieldLabel` spacing. */
-function Field({ label, htmlFor, children }: {
-  label: string
-  htmlFor?: string
-  children: ReactNode
-}): ReactNode {
-  return (
-    <div className={styles.field}>
-      <label className={styles.label} {...(htmlFor === undefined ? {} : { htmlFor })}>{label}</label>
-      {children}
-    </div>
-  )
-}
-
 /** The model badge text for one row: its own model, else "继承当前对话". */
 function modelLabelOf(agent: AgentDefinition, modelNames: Record<string, string>): string {
   if (agent.model.mode === 'inherit') return COPY.modelInherit
@@ -973,57 +714,15 @@ function AgentRow({ agent, modelLabel, busy, onOpen, onToggle, onDelete }: {
       {agent.readOnly
         ? null
         : (
-          <div className={styles.agentActions}>
-            <label className={styles.switchRow}>
-              <input
-                type="checkbox"
-                role="switch"
-                checked={agent.enabled}
-                disabled={busy}
-                aria-label={`切换 ${agent.name}`}
-                onChange={(event) => { onToggle?.(event.target.checked) }}
-              />
-            </label>
-            <button
-              type="button"
-              className={styles.iconButton}
-              disabled={busy}
-              title="删除"
-              aria-label={`删除 ${agent.name}`}
-              onClick={onDelete}
-            >
-              <IconTrashOutline16 size={16} />
-            </button>
-          </div>
+          <AgentRowActions
+            name={agent.name}
+            enabled={agent.enabled}
+            busy={busy}
+            onToggle={onToggle}
+            onDelete={onDelete}
+          />
         )}
     </div>
-  )
-}
-
-/** One tool tick, mirroring the reference's `ToolCheckbox` (:400-440). */
-function ToolCheckbox({ label, title, checked, onToggle }: {
-  label: string
-  title: string
-  checked: boolean
-  onToggle: () => void
-}): ReactNode {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={checked}
-      title={title}
-      className={styles.toolItem}
-      onClick={onToggle}
-    >
-      <span
-        className={checked ? `${styles.tickBox} ${styles.tickBoxOn}` : styles.tickBox}
-        aria-hidden="true"
-      >
-        {checked ? '✓' : ''}
-      </span>
-      <span className={styles.toolName}>{label}</span>
-    </button>
   )
 }
 
@@ -1054,30 +753,5 @@ function DeleteDialog({ target, onCancel, onConfirm }: {
         </>
       )}
     />
-  )
-}
-
-/** Unsaved-edits guard (ours; the reference returns straight to the list). */
-function DiscardDialog({ open, onCancel, onConfirm }: {
-  open: boolean
-  onCancel: () => void
-  onConfirm: () => void
-}): ReactNode {
-  return (
-    <Modal
-      open={open}
-      onClose={onCancel}
-      title="放弃未保存的修改"
-      closeLabel="关闭"
-      description="当前表单有未保存的修改，继续操作会丢弃它们。"
-      footer={(
-        <>
-          <Button variant="ghost" size="sm" onClick={onCancel}>继续编辑</Button>
-          <Button variant="primary" size="sm" onClick={onConfirm}>放弃修改</Button>
-        </>
-      )}
-    >
-      <p className={styles.hint}>可以先「保存」，再切换。</p>
-    </Modal>
   )
 }
