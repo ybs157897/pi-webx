@@ -1,11 +1,13 @@
 /**
- * 应用外壳：顶栏 / 左导航 / 主区 / AI 副驾四件套 + 命令面板与设置的持有者。
+ * 应用外壳：顶栏 / 左导航 / 主区 + 全屏 AI 对话浮层 + 命令面板与设置的持有者。
  *
  * 数据流不变：pi-webx SQLite 接口一次拉全量 → `data`/`profile`/`prefs`；
  * 写操作经 `mutate(action, okText)`：保存 → 重新拉 state → 轻提示。与旧版的差别：
  * 外壳拆成了 shell/ 下的独立组件，App 只做装配、快捷键与全局浮层；
  * 模块契约新增 `prefs`/`setPref`（视图偏好）、`empty`/`onLoadDemo`（首启引导）
- * 与 `askAI(text)`（把文本送进 AI 副驾并展开面板，知识库「问小台」用）。
+ * 与 `askAI(text)`（把文本送进 AI 对话并展开浮层，知识库「问小台」用）。
+ * AI 对话展开后占据整屏、正文列居中，正文渲染复用 /chat 的 TranscriptView
+ * （简洁模式规范见 docs/workbench-ai-chat-compact-mode.md）。
  * `askAI` 在 pi 接口不可用时（send 走失败路径、只留底层报错）先把文本落成一条本地
  * pending 用户消息，内容不丢，错误条换成人话；pending 气泡的留存/撤销由
  * `shell/AIPanel` 导出的纯函数 `nextAskState` 决策（发送在途 ≠ 面板被清空），
@@ -18,7 +20,7 @@ import { api } from './api.mjs'
 import { useWorkbenchPiChat } from './pi-webx/useWorkbenchPiChat.jsx'
 import { PiDialog } from './pi-webx/PiDialog.jsx'
 import {
-  Card, ConfirmDialog, ToastHost, useMediaQuery,
+  Card, ConfirmDialog, ToastHost,
 } from './ui.jsx'
 import {
   IconBug, IconBook, IconCode, IconHome, IconLogs, IconMenu,
@@ -117,13 +119,9 @@ export default function App() {
   const [confirmClear, setConfirmClear] = useState(false)
   const [toasts, setToasts] = useState([])
   const [prefs, setPref, replacePrefs] = usePrefs()
-  const isMobile = useMediaQuery('(max-width: 639px)')
-  const [panelOpen, setPanelOpen] = useState(() => (
-    typeof window === 'undefined' || typeof window.matchMedia !== 'function'
-      ? true
-      : !window.matchMedia('(max-width: 639px)').matches
-  ))
-  const { chat, busy, modelName, status: piStatus, send, newConversation, retry, dialog, respondToDialog } = useWorkbenchPiChat()
+  // AI 对话是全屏浮层（不再是右侧常驻副驾），默认收起，由星星按钮 / tab / askAI 展开。
+  const [panelOpen, setPanelOpen] = useState(false)
+  const { chat, transcript, localRows, busy, modelName, status: piStatus, send, newConversation, retry, dialog, respondToDialog } = useWorkbenchPiChat()
   // 「问小台」本地草稿：pi 不可用时 send() 内部吞掉异常、只往面板丢一条底层报错，
   // 笔记标题 / 正文会整段消失。这里先落成 pending 用户消息，回显成功后撤掉。
   const [ask, setAsk] = useState(ASK_IDLE)
@@ -178,23 +176,24 @@ export default function App() {
     })
   }, [chat, busy])
 
-  // 面板消息 = hook 的 chat +（失败路径下）pending 用户气泡与友好错误文案。
-  const panelChat = useMemo(() => {
-    const messages = ask.failed
-      ? chat.map(message => (message.role === 'error'
+  // 浮层兜底条 = hook 的本地行 +（失败路径下）pending 用户气泡与友好错误文案；
+  // 正文（transcript）由 TranscriptView 渲染，与 /chat 同源，见 docs/workbench-ai-chat-compact-mode.md。
+  const assistRows = useMemo(() => {
+    const rows = ask.failed
+      ? localRows.map(message => (message.role === 'error'
         ? { ...message, text: AI_TEXT.askFailed }
         : message))
-      : chat
-    if (ask.pending === null) return messages
+      : localRows
+    if (ask.pending === null) return rows
     const pending = {
       id: 'ask-pending', role: 'user', text: ask.pending.text, at: ask.pending.at, pending: true,
     }
     // pending 气泡排在错误条之前：先看到自己发的内容，再看到为什么没送达。
-    const errorAt = messages.findIndex(message => message.role === 'error')
+    const errorAt = rows.findIndex(message => message.role === 'error')
     return errorAt === -1
-      ? [...messages, pending]
-      : [...messages.slice(0, errorAt), pending, ...messages.slice(errorAt)]
-  }, [ask, chat])
+      ? [...rows, pending]
+      : [...rows.slice(0, errorAt), pending, ...rows.slice(errorAt)]
+  }, [ask, localRows])
 
   // 启动：拉数据 + 偏好；偏好落到 <html>（主题/密度）。
   useEffect(() => {
@@ -233,15 +232,10 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [])
 
-  // AI 面板开合记忆在服务端偏好里（默认桌面展开）。
+  // 浮层开合只是会话内状态：对话框不记忆「上次是否打开」（全屏形态下自动弹出不合适）。
   const applyPanel = useCallback((open) => {
     setPanelOpen(open)
-    setPref('panelOpen', open)
-  }, [setPref])
-
-  useEffect(() => {
-    if (prefs.panelOpen !== undefined && !isMobile) setPanelOpen(prefs.panelOpen === true)
-  }, [prefs.panelOpen, isMobile])
+  }, [])
 
   const byId = useMemo(() => new Map(MODULES.map(module => [module.id, module])), [])
   const active = byId.get(activeModule) ?? MODULES[0]
@@ -251,7 +245,8 @@ export default function App() {
   function openModule(id) {
     setActiveModule(id)
     setDrawerOpen(false)
-    if (isMobile) setPanelOpen(false)
+    // 全屏浮层挡住整个工作台：从命令面板等入口切模块时顺手收起，露出目标模块。
+    setPanelOpen(false)
   }
 
   async function clearChat() {
@@ -331,7 +326,7 @@ export default function App() {
   }
 
   return (
-    <div className="app" data-panel={panelOpen ? 'open' : 'closed'}>
+    <div className="app">
       <TopBar
         appName={APP_NAME}
         profileName={profile.name === '我' ? '' : profile.name}
@@ -373,20 +368,23 @@ export default function App() {
         </div>
       </main>
 
-      <aside className="aside" aria-label="AI 副驾">
+      {/* 全屏居中的 AI 对话浮层：展开占据整屏，正文列与 /chat 同源；收起后右下角星星召回。 */}
+      {panelOpen && (
         <AIPanel
-          chat={panelChat}
+          transcript={transcript}
+          assistRows={assistRows}
           busy={busy}
           status={piStatus}
           modelName={modelName}
+          themeMode={theme}
           onSend={send}
           onNew={() => setConfirmClear(true)}
           onRetry={retry}
           onRefreshData={manualRefresh}
-          isMobile={isMobile}
+          onAction={send}
           onClose={() => applyPanel(false)}
         />
-      </aside>
+      )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
       {panelOpen === false && (

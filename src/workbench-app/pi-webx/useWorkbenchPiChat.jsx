@@ -128,16 +128,24 @@ export function useWorkbenchPiChat() {
     }
   }, [ensureSession])
 
+  // 工作台本地状态（软提示 / 错误条）：不属于会话 transcript，钉在浮层输入框
+  // 上方的兜底条里；chat 是它的超集，供 nextAskState 观测回显与错误。
+  const localRows = useMemo(() => {
+    const rows = []
+    const detail = error || pi.transcript.lastError || (fatal ? pi.error : '')
+    if (notice !== '') rows.push({ id: 'pi-notice', role: 'notice', text: notice, at: Date.now() })
+    if (detail !== '') rows.push({ id: 'pi-error', role: 'error', text: detail, at: Date.now(), retry: fatal })
+    for (const entry of pi.notifications.filter((item) => item.level === 'error')) {
+      rows.push({ id: entry.id, role: 'error', text: entry.detail ? `${entry.text}：${entry.detail}` : entry.text, at: entry.at })
+    }
+    return rows
+  }, [error, fatal, notice, pi.error, pi.notifications, pi.transcript.lastError])
+
   const chat = useMemo(() => {
     const messages = toChatMessages(pi.transcript.entries)
-    const detail = error || pi.transcript.lastError || (fatal ? pi.error : '')
-    if (notice !== '') messages.push({ id: 'pi-notice', role: 'notice', text: notice, at: Date.now() })
-    if (detail !== '') messages.push({ id: 'pi-error', role: 'error', text: detail, at: Date.now(), retry: fatal })
-    for (const entry of pi.notifications.filter((item) => item.level === 'error')) {
-      messages.push({ id: entry.id, role: 'error', text: entry.detail ? `${entry.text}：${entry.detail}` : entry.text, at: entry.at })
-    }
+    messages.push(...localRows)
     return messages
-  }, [error, fatal, notice, pi.error, pi.notifications, pi.transcript.entries, pi.transcript.lastError])
+  }, [localRows, pi.transcript.entries])
 
   // idle：还没有会话（首次发送时才懒创建，不给不聊天的用户白开会话）；
   // connecting：正在建会话或会话刚建好还在连；error：真失败，可重试。
@@ -145,6 +153,10 @@ export function useWorkbenchPiChat() {
 
   return {
     chat,
+    // 正文直接渲染 TranscriptState（与 /chat 的 TranscriptView 同源）；localRows 是
+    // 工作台本地兜底（软提示/错误），由浮层钉在输入框上方。
+    transcript: pi.transcript,
+    localRows,
     busy: sending || pi.transcript.running,
     modelName: pi.piState?.model?.id ?? 'pi-webx',
     status,

@@ -14,16 +14,18 @@
  *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
  *   6. 需求管理是知识列表（用户定调）：左右两栏 + 右栏 markdown 阅读区；
  *   7. 代码开发是编辑器工作区（用户定调）：文件树 + tab + 行号编辑区 + 状态栏；
- *   8. AI 面板正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
+ *   8. AI 对话兜底正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
  *   9. 知识库两态（首页搜索卡片 / 目录+阅读）：首页 / 选中 / 预览 / 旧数据 / 空库都有 DOM 证据；
- *   10. 「问小台」失败路径：pi 不可用时 pending 用户气泡保留笔记内容、错误条是人话；
- *       pending 气泡的留存/撤销走 nextAskState 状态机（发送在途 ≠ 面板被清空）。
+ *  10. AI 对话浮层（全屏居中）：展开占据整屏、正文复用 /chat 的 TranscriptView
+ *      （简洁模式规范见 docs/workbench-ai-chat-compact-mode.md）；「问小台」失败路径：
+ *      pi 不可用时 pending 用户气泡保留笔记内容、错误条是人话，钉在输入框上方的兜底条；
+ *      pending 气泡的留存/撤销走 nextAskState 状态机（发送在途 ≠ 面板被清空）。
  *
  * 交互分支（拖拽、弹窗内提交、⌘S、勾选）SSR 不可达，按 `check-task-panel.ts` 的做法
  * 读源码钉结构；真实浏览器验收由 ego 截图阶段完成。
  */
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { ConfigProvider } from '@lobehub/ui';
 import { motion } from 'motion/react';
 import { createElement as h } from 'react';
@@ -50,8 +52,10 @@ const navigate = (): void => {};
 const setPref = async (): Promise<void> => {};
 
 const TODAY = todayISO();
-const YESTERDAY = String(new Date(Date.now() - 86400000).toISOString().slice(0, 10));
-const TOMORROW = String(new Date(Date.now() + 86400000).toISOString().slice(0, 10));
+// 假数据的相对日期必须和 todayISO 同走本地时钟：用 UTC toISOString 偏移 24h，
+// 会在本地已过午夜、UTC 未过的窗口里算出 TOMORROW === TODAY，明天的任务漏进今天档。
+const YESTERDAY = todayISO(new Date(Date.now() - 86400000));
+const TOMORROW = todayISO(new Date(Date.now() + 86400000));
 
 /** 纯文本形态：把标签剥掉。 */
 const textOf = (markup: string): string => markup.replace(/<[^>]*>/g, '');
@@ -412,28 +416,40 @@ const data = fakeData();
 console.log('workbench UI: knowledge bases, folders, document list, reading and links passed')
 console.log('workbench UI: 7 modules (widget board, capture, dual views, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
 
-/* ================================================== 10. AI 面板：「问小台」失败路径的本地兜底 */
+/* ================================================== 10. AI 对话浮层：全屏居中 + 正文同源 + 「问小台」失败兜底 */
 
 {
+  // 空转录：浮层应渲染全屏壳（ai-overlay）与空态建议，兜底条钉住 pending 气泡与人话错误。
   // pi 接口不可用时 send() 只往面板丢一条底层 destructure 报错，笔记标题 / 正文整段消失。
   // App 把文本落成 pending 用户气泡（带「未送达」脚标），错误条换成人话——面板必须看得到内容。
+  const emptyTranscript = {
+    entries: [], streamingEntryId: null, running: false, compacting: false,
+    retrying: null, queued: { steering: [], followUp: [], pending: [] },
+    lastError: null, title: null, turnSeq: 0, activeTurn: null, turnProcesses: {},
+  };
   const askText = '【知识库笔记】工作台双链设计\n\n正文引用 [[知识库字段约定]]。';
-  const markup = renderToStaticMarkup(h(AIPanel, {
-    chat: [
+  const panelProps = {
+    transcript: emptyTranscript,
+    assistRows: [
       { id: 'ask-pending', role: 'user', text: askText, at: Date.now(), pending: true },
       { id: 'pi-error', role: 'error', text: '小台暂时连不上，这条内容没有发出去。已保留在面板里，点右上角「重试连接」恢复后再发一次。', at: Date.now() },
     ],
     busy: false,
     status: 'error',
     modelName: 'pi-webx',
+    themeMode: 'light',
     onSend: () => {},
     onNew: () => {},
     onRetry: () => {},
     onRefreshData: () => {},
-    isMobile: false,
+    onAction: () => {},
     onClose: () => {},
-  }));
-  assert.ok(markup.includes('data-testid="chat-scroll"'), 'AI 面板缺对话容器');
+  };
+  const markup = renderToStaticMarkup(h(AIPanel, panelProps));
+  assert.ok(markup.includes('data-testid="ai-overlay"'), 'AI 对话应是全屏浮层（ai-overlay）');
+  assert.ok(markup.includes('role="dialog"'), '浮层应是对话框语义（role=dialog）');
+  assert.ok(markup.includes('data-testid="chat-scroll"'), 'AI 对话缺正文容器');
+  assert.ok(markup.includes('data-testid="chat-fallback"'), '本地兜底条缺失（pending/错误应钉在输入框上方）');
   assert.ok(markup.includes('data-pending="true"'), '问小台失败后应保留 pending 用户气泡');
   assert.ok(textOf(markup).includes('【知识库笔记】工作台双链设计'), 'pending 气泡应原样保留笔记标题/正文');
   assert.ok(textOf(markup).includes('未送达'), 'pending 气泡应标注未送达');
@@ -441,13 +457,43 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
   const pendingAt = markup.indexOf('data-pending="true"');
   const errorAt = markup.indexOf('data-testid="chat-msg-error"');
   assert.ok(pendingAt >= 0 && errorAt > pendingAt, 'pending 气泡应排在错误条之前');
+  assert.ok(textOf(markup).includes('帮我拟一份今日计划'), '空态应保留建议入口');
+
+  // 有转录时正文走 /chat 的 TranscriptView：同一实现，保证「与正文输出一致」。
+  const withTurns = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps,
+    assistRows: [],
+    status: 'live',
+    transcript: {
+      ...emptyTranscript,
+      entries: [{ kind: 'user', id: 'u1', at: 1_700_000_000_000, text: '帮我拟一份今日计划', imageCount: 0 }],
+    },
+  }));
+  assert.ok(withTurns.includes('pi-message-item'), '正文应复用 /chat 的 TranscriptView（pi-message-item）');
+  assert.ok(textOf(withTurns).includes('帮我拟一份今日计划'), '转录用户消息应渲染在正文里');
+  assert.ok(!withTurns.includes('data-testid="chat-fallback"'), '无本地状态时不应渲染兜底条');
 
   // 接线钉在 App 源码上（错误路径依赖 send 内部吞异常，SSR 不可达）。
   const appSource = sourceOf('../src/workbench-app/App.jsx');
-  assert.ok(appSource.includes("setAsk({ pending:"), 'askAI 失败路径的本地草稿未接线');
+  assert.ok(appSource.includes('{panelOpen && ('), '浮层应按开合条件挂载');
+  assert.ok(appSource.includes('transcript={transcript}'), '浮层正文未接 transcript');
+  assert.ok(appSource.includes('assistRows={assistRows}'), '浮层未接本地兜底行');
+  assert.ok(appSource.includes('themeMode={theme}'), '浮层未随工作台主题切换');
+  assert.ok(appSource.includes('useState(false)'), '全屏浮层默认应收起');
+  assert.ok(!appSource.includes("prefs.panelOpen"), '全屏浮层不应再读写 panelOpen 偏好');
+  assert.ok(appSource.includes('setAsk({ pending:'), 'askAI 失败路径的本地草稿未接线');
   assert.ok(appSource.includes('nextAskState(current, { chat, busy })'), 'pending 状态机未按 nextAskState 派生');
   assert.ok(appSource.includes('AI_TEXT.askFailed'), '失败路径的友好错误文案未接线');
-  assert.ok(appSource.includes('chat={panelChat}'), '面板应渲染带兜底的消息列表');
+
+  // 正文同源 + 简洁模式规范钉在源码与文档上：改 AIPanel 前先读 docs/workbench-ai-chat-compact-mode.md。
+  const panelSource = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  assert.ok(panelSource.includes("from '../../components/TranscriptView'"), '正文必须复用 /chat 的 TranscriptView，不得自绘');
+  assert.ok(panelSource.includes('ThemeProvider'), '正文令牌需随工作台主题（ThemeProvider）');
+  assert.ok(existsSync(new URL('../docs/workbench-ai-chat-compact-mode.md', import.meta.url)), '简洁模式输出规范文档缺失');
+  const styleSource = sourceOf('../src/workbench-app/styles.css');
+  assert.ok(styleSource.includes('.ai-overlay') && styleSource.includes('inset: 0'), '全屏浮层样式缺失');
+  assert.ok(styleSource.includes('max-width: 900px'), '输入区应与正文列同宽居中（900px）');
+  assert.ok(!styleSource.includes('.aside {') && !styleSource.includes('.aside,'), '右侧 aside 样式应随旧形态移除');
 
   // pending 气泡状态机：decision 是纯函数，逐场景直测（浏览器验收回归点）——
   // pi 不可用时 send 先在途空跑一截（chat 空、busy=true）才把错误落进 chat，
@@ -491,4 +537,4 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
   );
 }
 
-console.log('workbench UI: AI panel ask-ai fallback (pending user bubble + friendly error + nextAskState) passed');
+console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + compact mode) + ask-ai fallback passed');

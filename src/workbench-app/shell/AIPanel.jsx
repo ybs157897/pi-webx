@@ -1,15 +1,22 @@
 /**
- * 右侧 AI 副驾：从 App.jsx 抽出的完整对话面板。
- * 连接状态三档：live / connecting / error（可重试）；消息含用户气泡、
- * 助手正文（@lobehub/ui Markdown，与 /chat 一致）、工具行、软提示与错误条。
- * `pending` 用户气泡（App 的「问小台」失败兜底）：内容已上屏但还没送达，
- * 带「未送达」脚标——pi 不可用时用户也看得见自己刚发了什么。
+ * 全屏 AI 对话浮层：展开后占据整屏、正文列居中（900px，与 /chat 正文同源）。
+ *
+ * 正文渲染不再自绘气泡，直接复用 /chat 的 TranscriptView——简洁模式（对齐
+ * deepseek-harness 的「工作步骤展示 · 简洁」）随它一并到位：过程（思考 + 工具 +
+ * 中间回复）折叠成摘要行、最终答案永不折叠、单段过程手动展开。输出规范见
+ * docs/workbench-ai-chat-compact-mode.md，两处共用同一实现，不会漂移。
+ *
+ * 工作台本地兜底（「问小台」pending 气泡 / 软提示 / 错误条）钉在输入框上方的
+ * 固定条里：不滚进正文、永远可见。`pending` 用户气泡（App 的「问小台」失败兜底）：
+ * 内容已上屏但还没送达，带「未送达」脚标——pi 不可用时用户也看得见自己刚发了什么。
  * @module shell/AIPanel
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { ThemeProvider } from '@lobehub/ui'
+import { TranscriptView } from '../../components/TranscriptView'
 import AssistantMarkdown from '../pi-webx/AssistantMarkdown.jsx'
-import { IconClose, IconPanel, IconPlus, IconRefresh, IconSparkles } from '../icons.jsx'
+import { IconClose, IconPlus, IconRefresh, IconSparkles } from '../icons.jsx'
 import { formatStamp } from '../util.mjs'
 
 /**
@@ -40,8 +47,6 @@ export function nextAskState(current, observe = {}) {
   if (busy) return { pending, failed: false }
   // 空闲且面板空：只有显式新对话会把 transcript 清空，草稿一并撤。
   if (messages.length === 0) return { pending: null, failed: false }
-  // 空闲且面板空：只有显式新对话会把 transcript 清空，草稿一并撤。
-  if (messages.length === 0) return { pending: null, failed: false }
   // 空闲且有错误条：send 走完了失败路径——草稿留着上屏，错误换成人话。
   if (messages.some(message => message?.role === 'error')) return { pending, failed: true }
   // 空闲且有其他内容（例如助手还在回复、本条尚未回显）：继续等。
@@ -51,8 +56,7 @@ export function nextAskState(current, observe = {}) {
 const TEXT = {
   assistant: '小台',
   clearChat: '新对话',
-  collapse: '收起 AI 面板',
-  close: '关闭',
+  close: '收起对话（Esc）',
   send: '发送',
   retry: '重试连接',
   thinking: '小台正在想…',
@@ -68,71 +72,43 @@ const TEXT = {
   refresh: '刷新数据',
 }
 
-/** 工具行短预览：取第一行、折叠空白、截到 160 字。 */
-function previewOf(output) {
-  const first = String(output ?? '').split('\n')[0] ?? ''
-  const flat = first.replace(/\s+/g, ' ').trim()
-  return flat.length > 160 ? `${flat.slice(0, 160)}…` : flat
-}
-
-/** 工具活动行：一行摘要 + 可展开的完整输出。 */
-function ToolRows({ tools }) {
-  const items = Array.isArray(tools) ? tools : []
-  if (items.length === 0) return null
+/**
+ * 输入框上方的本地兜底条：pending 气泡 / 软提示 / 错误条都是工作台自己叠的状态，
+ * 不属于会话 transcript，固定钉在这里（不随正文滚动，永远看得见）。
+ */
+function FallbackRows({ rows, onRetry }) {
+  if (rows.length === 0) return null
   return (
-    <div className="msg tool" data-testid="chat-tool-row">
-      {items.map((tool, index) => {
-        const summary = previewOf(tool.output)
+    <div className="ai-fallback" data-testid="chat-fallback">
+      {rows.map((message) => {
+        const time = formatStamp(message.at)
+        if (message.role === 'notice') {
+          return <p className="small muted ai-fallback-note" key={message.id}>💡 {message.text}</p>
+        }
+        if (message.role === 'user') {
+          return (
+            <div className={`msg ${message.role}`} key={message.id}>
+              <div className="bubble" data-testid="chat-msg-bubble" data-pending={message.pending === true ? 'true' : undefined}>
+                <AssistantMarkdown text={message.text} />
+                {message.pending === true && (
+                  <p className="small muted" style={{ marginTop: 'var(--sp-2)' }}>{TEXT.pending}</p>
+                )}
+              </div>
+              {time !== '' && <span className="msg-time">{time}</span>}
+            </div>
+          )
+        }
         return (
-          <div className="tool-entry" key={`${tool.name}-${index}`}>
-            <p className="tool-line">
-              <span aria-hidden="true">🔧</span>
-              <span className="tool-name">{tool.name}</span>
-              {summary !== '' && <span className="tool-summary">· {summary}</span>}
+          <div className="msg error" key={message.id} data-testid="chat-msg-error">
+            <p className="bubble">
+              <span>⚠️ {message.text}</span>
+              {message.retry && (
+                <button type="button" className="btn btn-sm" onClick={onRetry}>{TEXT.retry}</button>
+              )}
             </p>
-            {tool.output !== '' && (
-              <details className="tool-details">
-                <summary>完整输出</summary>
-                <pre className="tool-output">{tool.output}</pre>
-              </details>
-            )}
           </div>
         )
       })}
-    </div>
-  )
-}
-
-/** 一条聊天记录。 */
-function ChatMessage({ message, onRetry }) {
-  const time = formatStamp(message.at)
-  if (message.role === 'tool') return <ToolRows tools={message.tools} />
-  if (message.role === 'notice') {
-    return <p className="small muted" style={{ marginBottom: 'var(--sp-4)' }}>💡 {message.text}</p>
-  }
-  return (
-    <div className={`msg ${message.role}`} data-testid={`chat-msg-${message.role}`}>
-      <ToolRows tools={message.tools} />
-      {message.text !== '' && (message.role === 'error'
-        ? (
-          <p className="bubble">
-            <span>⚠️ {message.text}</span>
-            {message.retry && (
-              <button type="button" className="btn btn-sm" onClick={onRetry}>{TEXT.retry}</button>
-            )}
-          </p>
-        )
-        : message.role === 'user'
-          ? (
-            <div className="bubble" data-testid="chat-msg-bubble" data-pending={message.pending === true ? 'true' : undefined}>
-              <AssistantMarkdown text={message.text} />
-              {message.pending === true && (
-                <p className="small muted" style={{ marginTop: 'var(--sp-2)' }}>{TEXT.pending}</p>
-              )}
-            </div>
-          )
-          : <div className="msg-body" data-testid="chat-msg-body"><AssistantMarkdown text={message.text} /></div>)}
-      {time !== '' && <span className="msg-time">{time}</span>}
     </div>
   )
 }
@@ -180,78 +156,86 @@ function Composer({ busy, onSend }) {
 }
 
 export default function AIPanel({
-  chat, busy, status, modelName, onSend, onNew, onRetry, onRefreshData, isMobile, onClose,
+  transcript, assistRows, busy, status, modelName, themeMode, onSend, onNew, onRetry, onRefreshData, onAction, onClose,
 }) {
-  const scrollRef = useRef(null)
-
+  // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
-    const node = scrollRef.current
-    if (node !== null) node.scrollTop = node.scrollHeight
-  }, [chat, busy])
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+    const onKeyDown = event => {
+      if (event.key === 'Escape') onClose()
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [onClose])
 
   const statusText = status === 'live'
     ? `Pi Agent · ${modelName}`
     : status === 'connecting' ? TEXT.connecting : status === 'idle' ? TEXT.idle : TEXT.retryHint
 
+  const entries = Array.isArray(transcript?.entries) ? transcript.entries : []
+  const rows = Array.isArray(assistRows) ? assistRows : []
+
+  // 正文走 antd/lobehub 令牌（与 /chat 同一套），外面用 ThemeProvider 对齐工作台主题，
+  // 暗色模式下不会出现浅色气泡。
   return (
-    <>
-      <header className="aside-head">
-        <span className="aside-avatar"><IconSparkles size={17} /></span>
-        <div className="grow">
-          <p className="aside-title">{TEXT.assistant}</p>
-          <p className="aside-sub">
-            <span className={`status-dot ${status === 'live' ? '' : status === 'connecting' ? 'connecting' : 'off'}`} />
-            {busy ? TEXT.thinking : statusText}
-          </p>        </div>
-        <div className="aside-actions">
-          <button type="button" className="icon-btn" aria-label={TEXT.refresh} title={TEXT.refresh} onClick={onRefreshData}>
-            <IconRefresh size={17} />
-          </button>
-          <button type="button" className="icon-btn" aria-label={TEXT.clearChat} title={TEXT.clearChat} onClick={onNew}>
-            <IconPlus size={17} />
-          </button>
-          {!isMobile && (
-            <button type="button" className="icon-btn" aria-label={TEXT.collapse} title={TEXT.collapse} onClick={onClose}>
-              <IconPanel size={17} />
+    <ThemeProvider themeMode={themeMode === 'dark' ? 'dark' : 'light'}>
+      <div className="ai-overlay" role="dialog" aria-modal="true" aria-label="AI 对话" data-testid="ai-overlay">
+        <div className="ai-overlay-surface">
+        <header className="aside-head">
+          <span className="aside-avatar"><IconSparkles size={17} /></span>
+          <div className="grow">
+            <p className="aside-title">{TEXT.assistant}</p>
+            <p className="aside-sub">
+              <span className={`status-dot ${status === 'live' ? '' : status === 'connecting' ? 'connecting' : 'off'}`} />
+              {busy ? TEXT.thinking : statusText}
+            </p>
+          </div>
+          <div className="aside-actions">
+            <button type="button" className="icon-btn" aria-label={TEXT.refresh} title={TEXT.refresh} onClick={onRefreshData}>
+              <IconRefresh size={17} />
             </button>
-          )}
-          {isMobile && (
+            <button type="button" className="icon-btn" aria-label={TEXT.clearChat} title={TEXT.clearChat} onClick={onNew}>
+              <IconPlus size={17} />
+            </button>
             <button type="button" className="icon-btn" aria-label={TEXT.close} title={TEXT.close} onClick={onClose}>
               <IconClose size={18} />
             </button>
-          )}
+          </div>
+        </header>
+
+        <div className="chat-scroll" data-testid="chat-scroll">
+          {entries.length === 0
+            ? (
+              <div className="chat-empty">
+                <span className="empty-icon"><IconSparkles size={22} /></span>
+                <div>
+                  <p className="chat-empty-title">{TEXT.welcome}</p>
+                  <p className="chat-empty-text">{TEXT.welcomeText}</p>
+                </div>
+                <div className="suggest">
+                  {TEXT.suggestions.map(question => (
+                    <button type="button" className="suggest-item" key={question} onClick={() => onSend(question)}>
+                      {question}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )
+            : <TranscriptView transcript={transcript} onAction={onAction} />}
         </div>
-      </header>
 
-      <div className="chat-scroll" ref={scrollRef} data-testid="chat-scroll">
-        {chat.length === 0 && (
-          <div className="chat-empty">
-            <span className="empty-icon"><IconSparkles size={22} /></span>
-            <div>
-              <p className="chat-empty-title">{TEXT.welcome}</p>
-              <p className="chat-empty-text">{TEXT.welcomeText}</p>
+        <div className="composer">
+          {busy && (
+            <div className="typing">
+              <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
+              {TEXT.stopHint}
             </div>
-            <div className="suggest">
-              {TEXT.suggestions.map(question => (
-                <button type="button" className="suggest-item" key={question} onClick={() => onSend(question)}>
-                  {question}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-        {chat.map(message => <ChatMessage key={message.id} message={message} onRetry={onRetry} />)}
+          )}
+          <FallbackRows rows={rows} onRetry={onRetry} />
+          <Composer busy={busy} onSend={onSend} />
+        </div>
+        </div>
       </div>
-
-      <div className="composer">
-        {busy && (
-          <div className="typing">
-            <span className="typing-dot" /><span className="typing-dot" /><span className="typing-dot" />
-            {TEXT.stopHint}
-          </div>
-        )}
-        <Composer busy={busy} onSend={onSend} />
-      </div>
-    </>
+    </ThemeProvider>
   )
 }

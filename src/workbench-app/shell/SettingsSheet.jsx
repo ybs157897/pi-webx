@@ -1,6 +1,7 @@
 /**
- * 设置面板：外观（主题 / 密度 / AI 面板默认开合）、数据（导入导出 / 演示数据）、快捷键表。
+ * 设置面板：外观（主题 / 密度）、数据（导入导出 / 演示数据）、快捷键表。
  * 从各页面右上角收回来的「数据导入/导出」安放在此——运维操作不再占门面。
+ * （AI 对话改为全屏浮层后不再有「默认开合」偏好，该项已移除。）
  * @module shell/SettingsSheet
  */
 
@@ -17,11 +18,6 @@ const THEME_OPTIONS = [
 const DENSITY_OPTIONS = [
   { value: 'comfortable', label: '舒适' },
   { value: 'compact', label: '紧凑' },
-]
-
-const PANEL_OPTIONS = [
-  { value: 'open', label: '展开' },
-  { value: 'closed', label: '收起' },
 ]
 
 const SHORTCUTS = [
@@ -49,15 +45,6 @@ export default function SettingsSheet({
           <div className="field">
             <span className="field-label">密度</span>
             <Segmented options={DENSITY_OPTIONS} value={prefs.density ?? 'comfortable'} onChange={value => setPref('density', value)} label="密度" />
-          </div>
-          <div className="field">
-            <span className="field-label">AI 面板</span>
-            <Segmented
-              options={PANEL_OPTIONS}
-              value={prefs.panelOpen === false ? 'closed' : 'open'}
-              onChange={value => setPref('panelOpen', value === 'open')}
-              label="AI 面板默认状态"
-            />
           </div>
         </div>
       </section>

@@ -140,7 +140,7 @@
 | --- | --- |
 | 模块导航定义（8 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / tasks 今日规划 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 |
 | 模块实现 | `src/workbench-app/modules/*.jsx`（样式同名 .css；**已退役**的生活模块 Meals/Pets/Relationships/Reviews/Finance/Hotspots/Exercises 文件还在，数据仍在 SQLite，可随时加回导航；AtomBoard 是它们共享的看板组件） |
-| 外壳（侧导航/顶栏/AI 面板/命令面板/设置） | `src/workbench-app/shell/` |
+| 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
 | SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`、`schema.mjs` |
@@ -178,6 +178,7 @@
 
 - 根 `AGENTS.md` — 必跑门禁与硬规则
 - `docs/workbench-knowledge-protocol.md` — 知识库写入契约与读/写口子
+- `docs/workbench-ai-chat-compact-mode.md` — AI 对话全屏浮层形态与简洁模式输出规范
 - `docs/system-prompt-design.md` — 提示词分层设计
 - `docs/workbench-redesign.md` — 工作台重塑的需求与决策记录
 - `docs/tests/subagents.md` — 子智能体手测记录（历史口径）

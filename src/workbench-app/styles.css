@@ -210,15 +210,14 @@ a:hover { text-decoration: underline; }
   z-index: 1;
   display: grid;
   height: 100dvh;
-  grid-template-columns: 208px minmax(0, 1fr) 336px;
+  grid-template-columns: 208px minmax(0, 1fr);
   grid-template-rows: 52px minmax(0, 1fr);
   grid-template-areas:
-    "topbar topbar topbar"
-    "sidebar main   aside";
+    "topbar topbar"
+    "sidebar main";
 }
 
-.app[data-panel="closed"] { grid-template-columns: 208px minmax(0, 1fr) 0; }
-.app[data-panel="closed"] .aside { display: none; }
+/* AI 对话是全屏浮层（.ai-overlay，见下），不再占据网格列；主区始终占满可用宽。 */
 
 /* ---------- 顶栏 ---------- */
 
@@ -389,15 +388,24 @@ kbd {
 .page-desc { margin-top: 2px; color: var(--text-2); font-size: var(--fs-sm); }
 .page-actions { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
 
-/* ---------- AI 面板 ---------- */
+/* ---------- 全屏 AI 对话浮层 ---------- */
 
-.aside {
-  grid-area: aside;
+/* 展开后占据整屏（盖过顶栏与导航），正文列由 TranscriptView 居中（900px），
+   与 /chat 正文同源；层级在抽屉之上、弹窗与命令面板之下。 */
+.ai-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-drawer);
+  display: flex;
+}
+
+.ai-overlay-surface {
   display: flex;
   flex-direction: column;
+  width: 100%;
+  height: 100%;
   min-width: 0;
-  background: var(--surface-0);
-  border-inline-start: 1px solid var(--line-1);
+  background: var(--bg);
 }
 
 .aside-head {
@@ -406,6 +414,7 @@ kbd {
   gap: var(--sp-3);
   padding: var(--sp-3) var(--sp-4);
   border-bottom: 1px solid var(--line-1);
+  background: var(--surface-0);
 }
 
 .aside-avatar {
@@ -423,9 +432,25 @@ kbd {
 .aside-sub { display: flex; align-items: center; gap: 6px; color: var(--text-3); font-size: var(--fs-xs); }
 .aside-actions { margin-inline-start: auto; display: flex; gap: 2px; }
 
-.chat-scroll { flex: 1 1 auto; overflow-y: auto; padding: var(--sp-4); }
+/* 正文容器：滚动由 TranscriptView 自管（跟随底部 / 回到最新），这里只做弹性壳。 */
+.chat-scroll {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+}
 
-.chat-empty { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); text-align: center; padding: var(--sp-6) var(--sp-2); }
+/* 空态在整屏里垂直居中。 */
+.chat-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: auto;
+  padding: var(--sp-6) var(--sp-2);
+  text-align: center;
+}
 
 .empty-icon {
   display: grid;
@@ -457,7 +482,6 @@ kbd {
 .suggest-item:hover { border-color: var(--accent); background: var(--accent-soft); }
 
 .msg { margin-bottom: var(--sp-4); }
-.msg-body { font-size: var(--fs-md); color: var(--text-1); }
 
 .bubble {
   padding: 9px var(--sp-3);
@@ -496,7 +520,19 @@ kbd {
   30% { transform: translateY(-3px); opacity: 1; }
 }
 
-.composer { padding: var(--sp-3) var(--sp-4) var(--sp-4); border-top: 1px solid var(--line-1); }
+/* 输入区与正文同宽居中（900px，对齐 TranscriptView 的正文列）。 */
+.composer {
+  width: 100%;
+  max-width: 900px;
+  margin: 0 auto;
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+  border-top: 1px solid var(--line-1);
+}
+
+/* 兜底条：工作台本地状态（pending 气泡 / 软提示 / 错误条），钉在输入框上方不随正文滚动。 */
+.ai-fallback { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-2) var(--sp-2) var(--sp-3); }
+.ai-fallback .msg:last-child { margin-bottom: 0; }
+.ai-fallback-note { margin: 0; }
 
 .composer-box {
   display: flex;
@@ -1006,10 +1042,9 @@ kbd {
 
 /* ================================================================ 6. 断点 */
 
-/* 断点 2：640–1080px，左栏收成图标轨，AI 面板收窄。 */
+/* 断点 2：640–1080px，左栏收成图标轨（AI 对话是全屏浮层，与网格无关）。 */
 @media (max-width: 1080px) {
-  .app { grid-template-columns: 60px minmax(0, 1fr) 300px; }
-  .app[data-panel="closed"] { grid-template-columns: 60px minmax(0, 1fr) 0; }
+  .app { grid-template-columns: 60px minmax(0, 1fr); }
   .nav-item { justify-content: center; padding: 0; }
   .nav-label, .nav-badge { display: none; }
   .brand-text { display: none; }
@@ -1017,16 +1052,10 @@ kbd {
   .main-inner { padding: var(--sp-5) var(--sp-4) 48px; }
 }
 
-/* 断点 3：<640px，顶栏 + 底部 tab，AI 面板全屏浮层。 */
+/* 断点 3：<640px，顶栏 + 底部 tab；AI 对话浮层全档位同形（占据整屏、正文居中）。 */
 @media (max-width: 639px) {
-  .app, .app[data-panel="closed"] { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topbar" "main"; }
+  .app { grid-template-columns: minmax(0, 1fr); grid-template-areas: "topbar" "main"; }
   .sidebar { display: none; }
-  .aside {
-    position: fixed;
-    inset: 52px 0 0 0;
-    z-index: var(--z-drawer);
-    background: var(--bg);
-  }
   .tabbar { display: flex; }
   .brand-name { display: none; }
   .topbar-search { width: auto; flex: 1 1 auto; margin-inline-start: var(--sp-2); }
