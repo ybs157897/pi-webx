@@ -1,5 +1,5 @@
 /**
- * Self-check harness for the transcript reducer (`src/lib/transcript.ts`).
+ * Self-check harness for the transcript reducer (`src/lib/transcript/`).
  *
  * Plain `node:assert` + console output, no test framework:
  *

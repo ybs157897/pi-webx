@@ -1,7 +1,8 @@
 /**
  * Transcript model: the shape the UI renders, plus the pure reducer contract.
  *
- * The reducer lives in `src/lib/transcript.ts`. Two ways to fill the model:
+ * The reducer lives in `src/lib/transcript/` (a directory; `index.ts` is the
+ * public barrel). Two ways to fill the model:
  *   - `applySnapshot` rebuilds from a `get_messages` reply (used on connect/reconnect)
  *   - `applyPiEvent` folds streaming events in incrementally
  *
