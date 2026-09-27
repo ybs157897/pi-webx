@@ -40,7 +40,10 @@ import Requirements from '../src/workbench-app/modules/Requirements.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
 import Knowledge from '../src/workbench-app/modules/Knowledge.jsx';
 import AIPanel, { nextAskState } from '../src/workbench-app/shell/AIPanel.jsx';
+import SettingsSheet from '../src/workbench-app/shell/SettingsSheet.jsx';
 import AssistantMarkdown from '../src/workbench-app/pi-webx/AssistantMarkdown.jsx';
+import { AssistantMessageItem } from '../src/components/MessageItem';
+import { TranscriptView } from '../src/components/TranscriptView';
 import { todayISO } from '../src/workbench-app/util.mjs';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
@@ -473,6 +476,31 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
   assert.ok(textOf(withTurns).includes('帮我拟一份今日计划'), '转录用户消息应渲染在正文里');
   assert.ok(!withTurns.includes('data-testid="chat-fallback"'), '无本地状态时不应渲染兜底条');
 
+  const waiting = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, assistRows: [], status: 'live', busy: true, stepsMode: 'compact',
+    transcript: { ...emptyTranscript, running: true },
+  }));
+  assert.ok(waiting.includes('data-testid="live-process-row"') && waiting.includes('正在分析请求'),
+    '首条消息到达前，工作台也应显示正在分析而非停在欢迎面');
+  assert.ok(!waiting.includes('小台已就位'), '运行中空转录不应回到欢迎面');
+
+  // 提问形态钉 dsh：问题占据输入框座位（与 /chat 同一 QuestionComposer，内嵌作答），
+  // 不得回到弹窗（PiDialog 已删——回归成 modal 是本次改动的反例）。
+  const pendingQuestion = {
+    request: { id: 'q1', method: 'select', title: '选择部署方式', options: ['Docker', '本地进程'] },
+    at: 1_700_000_000_000,
+  };
+  const withQuestion = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, assistRows: [], status: 'live', busy: true,
+    transcript: { ...emptyTranscript, running: true },
+    dialog: pendingQuestion,
+    onRespondDialog: () => {},
+  }));
+  assert.ok(withQuestion.includes('data-testid="question-composer"'), '有提问时浮层应内嵌 QuestionComposer（输入框座位）');
+  assert.ok(textOf(withQuestion).includes('选择部署方式'), '问题标题应出现在浮层里');
+  assert.ok(withQuestion.includes('Docker') && withQuestion.includes('本地进程'), '问题选项应出现在浮层里');
+  assert.ok(withQuestion.includes('composer-input'), '提问作答期间原输入框应保持挂载（隐藏，草稿存活）');
+
   // 接线钉在 App 源码上（错误路径依赖 send 内部吞异常，SSR 不可达）。
   const appSource = sourceOf('../src/workbench-app/App.jsx');
   assert.ok(appSource.includes('{panelOpen && ('), '浮层应按开合条件挂载');
@@ -488,6 +516,9 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
   // 正文同源 + 简洁模式规范钉在源码与文档上：改 AIPanel 前先读 docs/workbench-ai-chat-compact-mode.md。
   const panelSource = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
   assert.ok(panelSource.includes("from '../../components/TranscriptView'"), '正文必须复用 /chat 的 TranscriptView，不得自绘');
+  assert.ok(panelSource.includes("from '../../components/QuestionComposer'"), '提问必须复用 /chat 的 QuestionComposer（输入框座位），不得自绘');
+  assert.ok(!panelSource.includes('PiDialog') && !appSource.includes('PiDialog'), '提问不得回到弹窗（PiDialog 已删）');
+  assert.ok(appSource.includes('dialog={dialog}') && appSource.includes('onRespondDialog={respondToDialog}'), 'App 应把 pending dialog 与作答回调接进浮层');
   assert.ok(panelSource.includes('ThemeProvider'), '正文令牌需随工作台主题（ThemeProvider）');
   assert.ok(existsSync(new URL('../docs/workbench-ai-chat-compact-mode.md', import.meta.url)), '简洁模式输出规范文档缺失');
   const styleSource = sourceOf('../src/workbench-app/styles.css');
@@ -538,3 +569,189 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
 }
 
 console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + compact mode) + ask-ai fallback passed');
+
+/* ================================================== 11. 工作步骤展示：四档模式（dsh 策略表移植） */
+
+{
+  // 策略表在 src/lib/transcript/presentation.ts；渲染层只读策略字段、不比模式枚举。
+  // 夹具：一轮已完成（u1 → a1 过程步 → a2 答案，fold 已算进 turnProcesses）
+  // + 一轮进行中（u2 → a3 流式思考 + running 的 bash）。
+  const emptyTranscript = {
+    entries: [], streamingEntryId: null, running: false, compacting: false,
+    retrying: null, queued: { steering: [], followUp: [], pending: [] },
+    lastError: null, title: null, turnSeq: 0, activeTurn: null, turnProcesses: {},
+  };
+  const transcript = {
+    ...emptyTranscript,
+    entries: [
+      { kind: 'user', id: 'u1', at: 1, text: '帮我查', imageCount: 0 },
+      {
+        kind: 'assistant', id: 'a1', at: 2, text: '中间叙述', thinking: '先想一下', streaming: false,
+        tools: [{ toolCallId: 't1', toolName: 'bash', args: { command: 'npm run build' }, output: '', status: 'success', startedAt: 2 }],
+      },
+      { kind: 'assistant', id: 'a2', at: 3, text: '答案是 42', thinking: '', streaming: false, tools: [] },
+      { kind: 'user', id: 'u2', at: 4, text: '再跑一遍', imageCount: 0 },
+      {
+        kind: 'assistant', id: 'a3', at: 5, text: '', thinking: '盘算中', streaming: true,
+        tools: [{ toolCallId: 't2', toolName: 'bash', args: { command: 'npm run check' }, output: '', status: 'running', startedAt: 5 }],
+      },
+    ],
+    streamingEntryId: 'a3',
+    running: true,
+    turnSeq: 2,
+    activeTurn: { id: 2, startId: 'u2' },
+    turnProcesses: {
+      1: { hiddenIds: ['a1'], anchorId: 'a2', messages: 1, toolCalls: 1, thought: true, anchorThought: false },
+    },
+  };
+  const renderMode = (mode: string): string =>
+    renderToStaticMarkup(h(ConfigProvider, { motion }, h(TranscriptView, { transcript, mode })));
+  /** The live header row's own markup (ends at its closing </div>; it holds only spans/svg). */
+  const liveRowOf = (markup: string): string => {
+    const at = markup.indexOf('data-testid="live-process-row"');
+    assert.ok(at >= 0, `mode 渲染应包含 live-process-row（检查 ${markup.length} 字符产物）`);
+    const end = markup.indexOf('</div>', at);
+    return markup.slice(at, end);
+  };
+
+  // verbose 完全展开：不折任何轮次——没有摘要行，也没有折叠体。
+  const verbose = renderMode('verbose');
+  assert.ok(!verbose.includes('turn-process-row'), 'verbose 不应渲染已完成轮的摘要行');
+  assert.ok(!verbose.includes('pi-turn-process-collapsed'), 'verbose 不应有任何折叠体');
+
+  // detailed 详细：pi-webx 引入模式前的原行为——已完成轮折叠、进行中轮平铺。
+  const detailed = renderMode('detailed');
+  assert.ok(detailed.includes('data-testid="turn-process-row"'), 'detailed 应保留已完成轮摘要行');
+  assert.ok(!detailed.includes('live-process-row'), 'detailed 的进行中轮应平铺（无活动头）');
+
+  // standard 标准（默认）：进行中轮折成活动头，且 liveProcessDetail 带命令细节。
+  const standard = renderMode('standard');
+  assert.ok(standard.includes('data-testid="turn-process-row"'), 'standard 的已完成轮仍折叠');
+  const standardLiveRow = liveRowOf(standard);
+  assert.ok(standardLiveRow.includes('正在运行命令'), 'standard 活动头应显示活动类型');
+  assert.ok(standardLiveRow.includes('npm run check'), 'standard 活动头应带命令细节（liveProcessDetail）');
+
+  // compact 简洁：活动头只留活动类型，命令细节不进标题。
+  const compact = renderMode('compact');
+  const compactLiveRow = liveRowOf(compact);
+  assert.ok(compactLiveRow.includes('正在运行命令'), 'compact 活动头应显示活动类型');
+  assert.ok(!compactLiveRow.includes('npm run check'), 'compact 活动头不应带命令细节');
+  assert.ok(compact.includes('执行了命令'), '已完成的命令过程应显示类别摘要');
+  // 折叠体仍在 DOM（浏览器端 ref 挂 hidden=until-found 供页内搜索，SSR 只能钉类名）。
+  assert.ok(compact.includes('pi-turn-process-collapsed'), 'compact 的过程行应收进折叠体');
+
+  const waitingTranscript = {
+    ...emptyTranscript, running: true, turnSeq: 1,
+    entries: [{ kind: 'user', id: 'u-wait', at: 1, text: '请分析', imageCount: 0 }],
+  };
+  const waitingMarkup = renderToStaticMarkup(h(ConfigProvider, { motion },
+    h(TranscriptView, { transcript: waitingTranscript, mode: 'compact' })));
+  assert.ok(liveRowOf(waitingMarkup).includes('正在分析请求'),
+    'agent_start 与首个过程消息之间必须有活动头');
+
+  // 叙述窗口：一步先流思考、文字已开始而工具调用未落地——该步自己的思考不得从
+  // 折叠体弹出（输出期间自己展开的回归点），也不得拿空过程合成假的完成摘要。
+  const narratingWindow = {
+    ...emptyTranscript,
+    entries: [
+      { kind: 'user', id: 'u-n', at: 1, text: '查一下', imageCount: 0 },
+      { kind: 'assistant', id: 'a-n', at: 2, text: '先说结论前的叙述', thinking: 'SECRET思考内容', streaming: true, tools: [] },
+    ],
+    streamingEntryId: 'a-n',
+    running: true,
+    turnSeq: 1,
+    activeTurn: { id: 1, startId: 'u-n' },
+  };
+  const narratingMarkup = renderToStaticMarkup(h(ConfigProvider, { motion },
+    h(TranscriptView, { transcript: narratingWindow, mode: 'compact' })));
+  assert.ok(liveRowOf(narratingMarkup).includes('正在分析请求'),
+    '叙述窗口（尚无过程）应保持分析提示，不得合成完成摘要');
+  assert.ok(!narratingMarkup.includes('SECRET思考内容'),
+    '叙述窗口不得把该步自己的思考行平铺出来');
+  assert.ok(narratingMarkup.includes('先说结论前的叙述'),
+    '正在书写的叙述文本保持可见');
+
+  const afterTool = {
+    ...transcript,
+    entries: transcript.entries.map((entry) => entry.id === 'a3'
+      ? { ...entry, tools: entry.tools.map((run) => ({ ...run, status: 'success' })) }
+      : entry),
+  };
+  const afterToolMarkup = renderToStaticMarkup(h(ConfigProvider, { motion },
+    h(TranscriptView, { transcript: afterTool, mode: 'compact' })));
+  assert.ok(liveRowOf(afterToolMarkup).includes('正在分析请求'),
+    '命令已结束、模型继续工作时不应仍显示正在运行命令');
+
+  const answering = {
+    ...afterTool,
+    entries: [...afterTool.entries, {
+      kind: 'assistant', id: 'a4', at: 6, text: '这是正在输出的答案', thinking: '', streaming: true, tools: [],
+    }],
+  };
+  const answeringMarkup = renderToStaticMarkup(h(ConfigProvider, { motion },
+    h(TranscriptView, { transcript: answering, mode: 'compact' })));
+  assert.ok(liveRowOf(answeringMarkup).includes('执行了命令'),
+    '开始输出答案后，过程头应立即切换成完成摘要');
+  assert.ok(answeringMarkup.includes('这是正在输出的答案'), '流式答案正文必须可见');
+
+  const analysisDone = {
+    ...emptyTranscript,
+    entries: [
+      { kind: 'user', id: 'u-analysis', at: 1, text: '分析一下', imageCount: 0 },
+      { kind: 'assistant', id: 'a-analysis', at: 2, text: '结论', thinking: '推理内容', streaming: false, tools: [] },
+    ],
+    turnProcesses: {
+      1: { hiddenIds: [], anchorId: 'a-analysis', messages: 0, toolCalls: 0, thought: true, anchorThought: true },
+    },
+  };
+  const analysisMarkup = renderToStaticMarkup(h(ConfigProvider, { motion },
+    h(TranscriptView, { transcript: analysisDone, mode: 'compact' })));
+  assert.ok(analysisMarkup.includes('已完成分析') && analysisMarkup.includes('结论'),
+    '纯推理的已完成轮次应同时显示完成摘要与答案');
+
+  // settledReasoningPreview：已结算思考行的首行预览只在开关打开时出现；流式中的预览不受开关影响。
+  const settledEntry = {
+    kind: 'assistant', id: 's1', at: 1, text: '正文', thinking: '首行预览应当出现的思考内容', streaming: false, tools: [],
+  };
+  const previewOn = renderToStaticMarkup(
+    h(ConfigProvider, { motion }, h(AssistantMessageItem, { entry: settledEntry, thinkingPreview: true })),
+  );
+  const previewOff = renderToStaticMarkup(
+    h(ConfigProvider, { motion }, h(AssistantMessageItem, { entry: settledEntry, thinkingPreview: false })),
+  );
+  const previewStreaming = renderToStaticMarkup(
+    h(ConfigProvider, { motion }, h(AssistantMessageItem, { entry: { ...settledEntry, streaming: true }, thinkingPreview: false })),
+  );
+  assert.ok(previewOn.includes('首行预览应当出现的思考内容'), '开关打开时已结算思考行应有首行预览');
+  assert.ok(!previewOff.includes('首行预览应当出现的思考内容'), 'compact 下已结算思考行不应有首行预览');
+  assert.ok(previewStreaming.includes('首行预览应当出现的思考内容'), '流式中的思考行预览不受开关影响');
+
+  // 设置入口：设置弹窗「外观」区有工作步骤展示四档，默认停在「标准」，prefs 回显当前档。
+  const renderSheet = (prefs: Record<string, unknown>): string =>
+    renderToStaticMarkup(h(SettingsSheet, {
+      open: true, prefs, setPref: () => {}, onExport: () => {}, onImport: () => {},
+      onLoadDemo: () => {}, onClearAll: () => {}, onClose: () => {},
+    }));
+  const sheetDefault = renderSheet({});
+  assert.ok(sheetDefault.includes('data-testid="settings-steps-mode"'), '设置弹窗应有工作步骤展示设置项');
+  for (const label of ['工作步骤展示', '简洁', '标准', '详细', '完全展开']) {
+    assert.ok(sheetDefault.includes(label), `设置项应含「${label}」选项`);
+  }
+  assert.ok(sheetDefault.includes('aria-pressed="true"') && sheetDefault.includes('is-active'), '设置项应有选中态');
+  const sheetVerbose = renderSheet({ transcriptView: 'verbose' });
+  // is-active 在「主题/密度」选择器里也有，必须从本设置项区域里找选中态。
+  const stepsRegion = sheetVerbose.slice(sheetVerbose.indexOf('data-testid="settings-steps-mode"'));
+  const activeAt = stepsRegion.indexOf('is-active');
+  assert.ok(activeAt >= 0 && stepsRegion.slice(activeAt, activeAt + 80).includes('完全展开'), 'prefs.transcriptView=verbose 时应选中「完全展开」');
+
+  // 接线钉在源码上：App 解析 prefs 并透传，AIPanel 把模式交给 TranscriptView。
+  const appSource = sourceOf('../src/workbench-app/App.jsx');
+  assert.ok(appSource.includes('parseTranscriptViewMode(prefs.transcriptView)'), 'App 应从 prefs 解析工作步骤展示模式');
+  assert.ok(appSource.includes('stepsMode={stepsMode}'), 'App 应把模式传给 AI 浮层');
+  const panelSource2 = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  assert.ok(panelSource2.includes('mode={stepsMode}'), 'AIPanel 应把模式透传给 TranscriptView');
+  const policySource = sourceOf('../src/lib/transcript/presentation.ts');
+  assert.ok(policySource.includes("mode: 'compact'") && policySource.includes("mode: 'verbose'"), '策略表应保留 dsh 四档定义');
+}
+
+console.log('workbench UI: transcript work-details modes (compact/standard/detailed/verbose) + settings entry passed');

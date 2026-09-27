@@ -31,7 +31,7 @@
 | --- | --- |
 | 入口组合根（40 行） | `src/App.tsx` |
 | 外壳组合（hook 接线 + 布局） | `src/app/Shell.tsx` |
-| 主题/渲染风格/侧栏偏好 | `src/app/preferences.ts`（读写在函数体内，模块级不碰 localStorage） |
+| 主题/渲染风格/侧栏/工作步骤展示偏好 | `src/app/preferences.ts`（读写在函数体内，模块级不碰 localStorage） |
 | 连接状态/引导配置 | `src/app/connection.ts` |
 | 会话打开/创建/发送/写模型 | `src/app/use-session-lifecycle.ts` |
 | 会话列表加载、地址栏恢复 | `src/app/use-session-runtime.ts` |
@@ -43,7 +43,8 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| UI 渲染 | `src/components/TranscriptView.tsx`、`MessageItem.tsx`、`ToolCard.tsx` |
+| UI 渲染 | `src/components/TranscriptView.tsx`、`MessageItem.tsx`、`ToolCard.tsx`；轮次摘要行/进行中活动头在 `TranscriptProcessRow.tsx` |
+| 工作步骤展示（简洁/标准/详细/完全展开四档，默认标准） | 策略表 `src/lib/transcript/presentation.ts`（模式→渲染开关，渲染层只读字段不比枚举；`liveProcessSpec` 派生活动头）；工作台存 SQLite prefs `transcriptView`，/chat 存 localStorage（`src/app/preferences.ts`）；规范 `docs/workbench-ai-chat-compact-mode.md` |
 | 归约器（reducer） | `src/lib/transcript/`，barrel 在 `index.ts`（公开面：`createTranscript` / `applySnapshot` / `applyPiEvent` / `answerIndexOf` / `addEcho` / `retireEcho`） |
 | ├ 未知值守卫 | `guards.ts` |
 | ├ content 块解析（文本/思考/图片/工具调用） | `blocks.ts` |
@@ -52,6 +53,7 @@
 | ├ 回合状态机（startMessage/endMessage/…） | `turns.ts` |
 | ├ 提示条（重试/延迟文案） | `notices.ts` |
 | ├ 回合折叠与汇总 | `fold.ts` |
+| ├ 工作步骤展示策略表（不经 barrel，消费方深引） | `presentation.ts` |
 | ├ 快照重建 | `snapshot.ts` |
 | ├ 事件分发（reduceEvent） | `events.ts` |
 | └ 用户回声（echo） | `echo.ts` |

@@ -1,13 +1,15 @@
 /**
- * 外观与侧栏的本地偏好：类型、`localStorage` 键、读取函数与侧栏几何常量。
+ * 外观与侧栏的本地偏好：类型、`localStorage` 键、读写函数与侧栏几何常量。
  *
  * 这些值只存在浏览器里，不进 pi 的 `settings.json` —— 与 `src/lib/storage.ts`
  * 的分工一致：那边记工作区，这边记外观。
  *
- * 所有 reader 都在函数体内访问 `window` / `localStorage`：App 这条模块图在模块级
- * 不碰 `window`（见 `scripts/check-task-panel.ts` 的说明），导入本文件不该把这一点
- * 变差。
+ * 所有 reader / writer 都在函数体内访问 `window` / `localStorage`：App 这条模块图
+ * 在模块级不碰 `window`（见 `scripts/check-task-panel.ts` 的说明），导入本文件不该
+ * 把这一点变差。
  */
+
+import { parseTranscriptViewMode, type TranscriptViewMode } from '../lib/transcript/presentation';
 
 /** The stored preference; `system` resolves against the OS at render time. */
 export type ThemePreference = 'light' | 'dark' | 'system';
@@ -18,6 +20,7 @@ export type RenderStyle = 'ours' | 'tokui';
 
 export const THEME_KEY = 'pi-webx-theme';
 export const RENDER_STYLE_KEY = 'pi-webx-render-style';
+export const TRANSCRIPT_VIEW_KEY = 'pi-webx-transcript-view';
 export const SIDEBAR_COLLAPSED_KEY = 'pi-webx-sidebar-collapsed';
 
 /** Expanded sidebar column width (px); the rail is 56. */
@@ -38,6 +41,15 @@ export function readTheme(): ThemePreference {
 
 export function readRenderStyle(): RenderStyle {
   return localStorage.getItem(RENDER_STYLE_KEY) === 'tokui' ? 'tokui' : 'ours';
+}
+
+/** 工作步骤展示的档位；脏值（旧格式、手改过的 localStorage）回落到默认档。 */
+export function readTranscriptView(): TranscriptViewMode {
+  return parseTranscriptViewMode(localStorage.getItem(TRANSCRIPT_VIEW_KEY));
+}
+
+export function writeTranscriptView(mode: TranscriptViewMode): void {
+  localStorage.setItem(TRANSCRIPT_VIEW_KEY, mode);
 }
 
 export function readSidebarCollapsed(): boolean {

@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './api.mjs'
 import { useWorkbenchPiChat } from './pi-webx/useWorkbenchPiChat.jsx'
-import { PiDialog } from './pi-webx/PiDialog.jsx'
+
 import {
   Card, ConfirmDialog, ToastHost,
 } from './ui.jsx'
@@ -27,6 +27,7 @@ import {
   IconRefresh, IconRequirements, IconSparkles, IconTasks, IconWorks,
 } from './icons.jsx'
 import { usePrefs } from './state/prefs.js'
+import { parseTranscriptViewMode } from '../lib/transcript/presentation'
 import TopBar from './shell/TopBar.jsx'
 import SideNav from './shell/SideNav.jsx'
 import AIPanel, { nextAskState } from './shell/AIPanel.jsx'
@@ -241,6 +242,9 @@ export default function App() {
   const active = byId.get(activeModule) ?? MODULES[0]
   const ModuleView = active.Component
   const theme = typeof document === 'undefined' ? 'light' : (document.documentElement.dataset.theme ?? 'light')
+  // AI 对话的工作步骤展示模式（设置里的四档）：库里存的可能是旧值或脏值，
+  // 统一过解析器，认不出就回落到「标准」。
+  const stepsMode = parseTranscriptViewMode(prefs.transcriptView)
 
   function openModule(id) {
     setActiveModule(id)
@@ -377,6 +381,9 @@ export default function App() {
           status={piStatus}
           modelName={modelName}
           themeMode={theme}
+          stepsMode={stepsMode}
+          dialog={dialog}
+          onRespondDialog={respondToDialog}
           onSend={send}
           onNew={() => setConfirmClear(true)}
           onRetry={retry}
@@ -481,8 +488,6 @@ export default function App() {
         onCancel={() => setConfirmClear(false)}
         onConfirm={clearChat}
       />
-
-      <PiDialog request={dialog} onRespond={respondToDialog} />
 
       <ToastHost toasts={toasts} />
     </div>

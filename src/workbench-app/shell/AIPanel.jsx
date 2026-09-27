@@ -5,6 +5,8 @@
  * deepseek-harness 的「工作步骤展示 · 简洁」）随它一并到位：过程（思考 + 工具 +
  * 中间回复）折叠成摘要行、最终答案永不折叠、单段过程手动展开。输出规范见
  * docs/workbench-ai-chat-compact-mode.md，两处共用同一实现，不会漂移。
+ * 「工作步骤展示」的四档模式由设置面板写进 prefs，App 解析后经 `stepsMode` 传进来，
+ * 面板只做透传（不解释枚举，折叠策略全在 TranscriptView 的 presentation policy 里）。
  *
  * 工作台本地兜底（「问小台」pending 气泡 / 软提示 / 错误条）钉在输入框上方的
  * 固定条里：不滚进正文、永远可见。`pending` 用户气泡（App 的「问小台」失败兜底）：
@@ -14,6 +16,7 @@
 
 import { useEffect, useState } from 'react'
 import { ThemeProvider } from '@lobehub/ui'
+import { QuestionComposer } from '../../components/QuestionComposer'
 import { TranscriptView } from '../../components/TranscriptView'
 import AssistantMarkdown from '../pi-webx/AssistantMarkdown.jsx'
 import { IconClose, IconPlus, IconRefresh, IconSparkles } from '../icons.jsx'
@@ -156,7 +159,7 @@ function Composer({ busy, onSend }) {
 }
 
 export default function AIPanel({
-  transcript, assistRows, busy, status, modelName, themeMode, onSend, onNew, onRetry, onRefreshData, onAction, onClose,
+  transcript, assistRows, busy, status, modelName, themeMode, stepsMode, dialog, onRespondDialog, onSend, onNew, onRetry, onRefreshData, onAction, onClose,
 }) {
   // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
@@ -204,7 +207,7 @@ export default function AIPanel({
         </header>
 
         <div className="chat-scroll" data-testid="chat-scroll">
-          {entries.length === 0
+          {entries.length === 0 && transcript?.running !== true
             ? (
               <div className="chat-empty">
                 <span className="empty-icon"><IconSparkles size={22} /></span>
@@ -221,7 +224,7 @@ export default function AIPanel({
                 </div>
               </div>
             )
-            : <TranscriptView transcript={transcript} onAction={onAction} />}
+            : <TranscriptView transcript={transcript} mode={stepsMode} onAction={onAction} />}
         </div>
 
         <div className="composer">
@@ -232,7 +235,18 @@ export default function AIPanel({
             </div>
           )}
           <FallbackRows rows={rows} onRetry={onRetry} />
-          <Composer busy={busy} onSend={onSend} />
+          {/* dsh 的提问形态：问题占据输入框的座位（同一 QuestionComposer，与 /chat 同源，
+              不弹窗）。Composer 保持挂载只是隐藏——草稿跨问题存活；问题作答完即还位。 */}
+          <div style={dialog ? { display: 'none' } : undefined}>
+            <Composer busy={busy} onSend={onSend} />
+          </div>
+          {dialog && (
+            <QuestionComposer
+              key={dialog.request.id}
+              dialog={dialog}
+              onRespond={(body) => { void onRespondDialog(dialog.request.id, body) }}
+            />
+          )}
         </div>
         </div>
       </div>

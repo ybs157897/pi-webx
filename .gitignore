@@ -9,3 +9,9 @@ dist
 
 # foreign reference dumps (deepseek-harness sources are NOT part of this app)
 src/dsh/
+
+# 会话运行状态与临时验证产物
+.mimosa/
+.zcode/
+run-tmp/
+analysis/

@@ -1,5 +1,5 @@
 /**
- * 设置面板：外观（主题 / 密度）、数据（导入导出 / 演示数据）、快捷键表。
+ * 设置面板：外观（主题 / 密度 / 工作步骤展示）、数据（导入导出 / 演示数据）、快捷键表。
  * 从各页面右上角收回来的「数据导入/导出」安放在此——运维操作不再占门面。
  * （AI 对话改为全屏浮层后不再有「默认开合」偏好，该项已移除。）
  * @module shell/SettingsSheet
@@ -18,6 +18,14 @@ const THEME_OPTIONS = [
 const DENSITY_OPTIONS = [
   { value: 'comfortable', label: '舒适' },
   { value: 'compact', label: '紧凑' },
+]
+
+/** AI 对话的工作步骤展示模式：四档（对齐 deepseek-harness 的「工作步骤展示」）。 */
+const STEPS_MODE_OPTIONS = [
+  { value: 'compact', label: '简洁' },
+  { value: 'standard', label: '标准' },
+  { value: 'detailed', label: '详细' },
+  { value: 'verbose', label: '完全展开' },
 ]
 
 const SHORTCUTS = [
@@ -45,6 +53,18 @@ export default function SettingsSheet({
           <div className="field">
             <span className="field-label">密度</span>
             <Segmented options={DENSITY_OPTIONS} value={prefs.density ?? 'comfortable'} onChange={value => setPref('density', value)} label="密度" />
+          </div>
+        </div>
+        {/* 四个选项放不进与主题/密度同一行（等宽 flex 会被挤到换行），单独一行。 */}
+        <div className="form-row">
+          <div className="field" data-testid="settings-steps-mode">
+            <span className="field-label">工作步骤展示</span>
+            <Segmented
+              options={STEPS_MODE_OPTIONS}
+              value={prefs.transcriptView ?? 'standard'}
+              onChange={value => setPref('transcriptView', value)}
+              label="工作步骤展示"
+            />
           </div>
         </div>
       </section>

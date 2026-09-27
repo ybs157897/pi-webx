@@ -11,7 +11,7 @@ import { EmptyState } from '../components/EmptyState';
 import { TranscriptView } from '../components/TranscriptView';
 import { SessionCwdProvider } from '../lib/session-cwd';
 import type { TranscriptState } from '../shared/transcript';
-import type { RenderStyle } from './preferences';
+import { readTranscriptView, type RenderStyle } from './preferences';
 
 export interface ConversationSurfaceProps {
   /** 转写为空：走欢迎面而不是正文。 */
@@ -55,6 +55,10 @@ export function ConversationSurface({
           transcript={transcript}
           onAction={onAction}
           renderStyle={renderStyle}
+          /* Read at render, like the appearance hook reads the theme: closing
+             settings re-renders the shell, so a freshly picked mode applies
+             without a reload. */
+          mode={readTranscriptView()}
         />
       </SessionCwdProvider>
     </Flexbox>

@@ -173,11 +173,12 @@ export interface QueuedMessages {
 /**
  * One completed turn whose process folds away — dsh's compact transcript
  * view, adapted: the steps between the turn's start and its final answer are
- * kept as ids the UI hides behind a summary row ("已思考 · N 次工具调用").
+ * kept as ids the UI hides behind an activity summary ("已完成分析", "执行了命令").
  *
- * Computed twice, from the same rule: live at `turn_end`, and from the
- * message list when a snapshot rebuilds history (so reopening a stored
- * session folds its turns too).
+ * Computed twice, from the same rule: live at `agent_settled` (the window is
+ * opened by the run's first `turn_start` and spans the whole prompt — pi emits
+ * a wire turn per assistant step), and from the message list when a snapshot
+ * rebuilds history (so reopening a stored session folds its turns too).
  */
 export interface TurnProcess {
   /** entries hidden while the turn is collapsed, in order */

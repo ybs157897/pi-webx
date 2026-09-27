@@ -82,3 +82,43 @@ button {
 .pi-transcript .pi-turn-process-collapsed {
   margin-block: -4px;
 }
+
+/*
+ * The live group's activity title, dsh's TextShimmer: the text rides an
+ * animated highlight that keeps drifting while the turn runs and freezes into
+ * plain colour the moment it settles. Clipped gradient text; falls back to the
+ * inherited colour when the reader asks for reduced motion.
+ */
+@keyframes pi-live-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.pi-live-shimmer {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, currentcolor 55%, transparent) 0%,
+    color-mix(in srgb, currentcolor 55%, transparent) 35%,
+    currentcolor 50%,
+    color-mix(in srgb, currentcolor 55%, transparent) 65%,
+    color-mix(in srgb, currentcolor 55%, transparent) 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: pi-live-shimmer 1.8s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .pi-live-shimmer {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentColor;
+  }
+}

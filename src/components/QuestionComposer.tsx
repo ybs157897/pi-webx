@@ -95,7 +95,7 @@ export function QuestionComposer({
   const isConfirm = request.method === 'confirm';
 
   return (
-    <div className={css.frame}>
+    <div className={css.frame} data-testid="question-composer">
       <div className={css.card}>
         <div className={css.header}>
           <h2 className={css.title}>

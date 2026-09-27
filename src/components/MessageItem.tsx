@@ -30,8 +30,19 @@ type RenderStyle = 'ours' | 'tokui';
  *
  * Flat, like dsh's `ReasoningRow`: no card, no fill — a 24px row whose glyph
  * carries the affordance and whose body, when open, indents under the title.
+ * While reasoning streams, the title previews its first line; once it settles
+ * the preview stays only under the policy's `settledReasoningPreview` (compact
+ * drops it, dsh's ReasoningRow rule).
  */
-function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: boolean }) {
+function ThinkingBlock({
+  thinking,
+  streaming,
+  preview = true,
+}: {
+  thinking: string;
+  streaming: boolean;
+  preview?: boolean;
+}) {
   const { token } = theme.useToken();
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -53,7 +64,7 @@ function ThinkingBlock({ thinking, streaming }: { thinking: string; streaming: b
         <Text fontSize={13} type="secondary" style={{ flexShrink: 0 }}>
           {streaming ? '思考中…' : '思考过程'}
         </Text>
-        {!open && (
+        {!open && (streaming || preview) && (
           <>
             <Text fontSize={13} type="secondary" style={{ flexShrink: 0, opacity: 0.45 }}>
               ·
@@ -153,12 +164,15 @@ export function AssistantMessageItem({
   entry,
   onAction,
   renderStyle = 'ours',
+  thinkingPreview = true,
   hideThinking = false,
   hideActions = false,
 }: {
   entry: AssistantEntry;
   onAction?: UiActionHandler | undefined;
   renderStyle?: RenderStyle;
+  /** settled reasoning keeps its first-line preview only under the policy's `settledReasoningPreview` */
+  thinkingPreview?: boolean;
   /** folded turn: the answer's own reasoning row is hidden with the process */
   hideThinking?: boolean;
   /**
@@ -226,7 +240,11 @@ export function AssistantMessageItem({
       }
       aboveMessage={
         !hideThinking && entry.thinking.trim().length > 0 ? (
-          <ThinkingBlock thinking={entry.thinking} streaming={entry.streaming} />
+          <ThinkingBlock
+            thinking={entry.thinking}
+            streaming={entry.streaming}
+            preview={thinkingPreview}
+          />
         ) : undefined
       }
       error={

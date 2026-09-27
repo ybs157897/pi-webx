@@ -139,6 +139,20 @@ try {
   assert.equal(stateWithKbPrefs.prefs.kbSelectedId, KB_PREF_ID, '选中的知识条目应落库');
   assert.equal(stateWithKbPrefs.prefs.kbView, 'preview', '编辑/预览视图偏好应落库');
 
+  // 工作步骤展示模式：transcriptView 必须过白名单（AI 对话的 简洁/标准/详细/完全展开
+  // 四档，漏在白名单外会被静默丢弃，用户刷新后必然回到「标准」），白名单外的键依旧丢弃。
+  const viewPrefsResponse = await fetch(`${base}/prefs`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ transcriptView: 'detailed', unknownKey: 3 }),
+  }).then((response) => response.json()) as { prefs: Record<string, unknown> };
+  assert.equal(viewPrefsResponse.prefs.transcriptView, 'detailed', 'transcriptView 应在白名单内');
+  assert.equal(viewPrefsResponse.prefs.unknownKey, undefined, '白名单外的键仍要丢弃');
+  assert.equal(store.readPrefs().transcriptView, 'detailed', 'readPrefs 应读回工作步骤展示模式');
+  const stateWithViewPrefs = await fetch(`${base}/state`).then((response) => response.json()) as {
+    prefs: { transcriptView?: string };
+  };
+  assert.equal(stateWithViewPrefs.prefs.transcriptView, 'detailed', '工作步骤展示模式应落库');
+
   // 前端 api.setPrefs 必须拆掉 {prefs:{…}} 信封返回裸 prefs 对象：曾把信封当偏好整份
   // 灌进 state，每写一个键都把 theme / density 等其余键冲掉（暗色主题切换不生效的根因）。
   const nodeFetch = globalThis.fetch;
@@ -152,6 +166,7 @@ try {
     assert.equal(saved.prefs, undefined, 'setPrefs 不许把 {prefs:{…}} 信封整体当偏好返回');
     assert.equal(saved.theme, 'dark', '写一个键不许冲掉已存的其他偏好键');
     assert.equal(saved.kbView, 'preview', '写一个键不许冲掉 kbView 这类模块偏好');
+    assert.equal(saved.transcriptView, 'detailed', '写一个键不许冲掉 transcriptView 这类模块偏好');
   } finally {
     globalThis.fetch = nodeFetch;
   }

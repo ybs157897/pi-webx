@@ -28,7 +28,10 @@ import { applyMessageUpdate, endMessage, finishStreaming, startMessage } from '.
 function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
   switch (event.type) {
     case 'agent_start':
-      return { ...state, running: true, lastError: null };
+      // A new run begins. If a window somehow survived the previous run
+      // (aborted without a settle), its prompt is over — close it before the
+      // new prompt's entries land, or they would fold into the wrong turn.
+      return finalizeTurn({ ...state, running: true, lastError: null });
 
     case 'agent_end': {
       // One low-level run finished. A retry (or queued continuation) may follow,
@@ -38,8 +41,8 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
     }
 
     case 'agent_settled':
-      // `turn_end` normally closes the fold window; settle is the backstop for
-      // any path that ends a run without one.
+      // The run is over — the normal moment the fold window closes and the
+      // whole prompt's process folds behind its answer (dsh's turn end).
       return finalizeTurn({
         ...finishStreaming(state),
         running: false,
@@ -48,16 +51,35 @@ function reduceEvent(state: TranscriptState, event: PiEvent): TranscriptState {
       });
 
     case 'turn_start': {
-      const last = state.entries[state.entries.length - 1];
+      // pi opens a wire turn per assistant step — the tool-call step and the
+      // answer step each get one. The fold window spans the whole prompt run
+      // (dsh's prompt-unit turn), so a window that is already open is a step
+      // boundary of the same run, not a new turn: keep it.
+      if (state.activeTurn !== null) return state;
+      // The optimistic echo of this very prompt may be the last entry. It is
+      // retired the moment the durable message lands, and a marker pointing at
+      // it would dangle — finalizeTurn refuses to fold a vanished marker. Point
+      // at the last durable entry instead. A still-streaming assistant entry is
+      // skipped for the same reason: when `message_start` lands before
+      // `turn_start`, that entry belongs INSIDE the window, and a marker
+      // pointing at it would start the window past the very step it must fold.
+      let startId: string | null = null;
+      for (let i = state.entries.length - 1; i >= 0; i -= 1) {
+        const entry = state.entries[i];
+        if (entry && entry.kind === 'user' && entry.echo) continue;
+        if (entry && entry.kind === 'assistant' && entry.streaming) continue;
+        startId = entry?.id ?? null;
+        break;
+      }
       const id = state.turnSeq + 1;
-      return { ...state, turnSeq: id, activeTurn: { id, startId: last?.id ?? null } };
+      return { ...state, turnSeq: id, activeTurn: { id, startId } };
     }
 
     case 'turn_end':
-      // Both structural: the message/tool events carry everything shown, and
-      // the turn boundary decides what folds (dsh folds at turn end, never
-      // while the turn is still running).
-      return finalizeTurn(state);
+      // Structural payload only: one step's message completed. The window stays
+      // open for the steps that follow — dsh folds at the end of the whole
+      // turn, never mid-answer — and `agent_settled` closes it.
+      return state;
 
     case 'message_start':
       return startMessage(state, event.message);

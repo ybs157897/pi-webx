@@ -101,7 +101,7 @@ export function Shell({
     return <BootErrorScreen error={bootError} onRetry={retryBoot} />;
   }
 
-  const empty = session.transcript.entries.length === 0;
+  const empty = session.transcript.entries.length === 0 && !session.transcript.running;
 
   return (
     <Flexbox

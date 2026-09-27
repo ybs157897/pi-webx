@@ -21,6 +21,7 @@ import {
   createTranscript,
   retireEcho,
 } from '../src/lib/transcript';
+import { completedProcessSpec, isLiveFoldMember, liveProcessSpec } from '../src/lib/transcript/presentation';
 import type {
   AssistantEntry,
   BashEntry,
@@ -269,6 +270,25 @@ check('thinking deltas do not pollute text', () => {
 });
 
 /* ------------------------------------------------------------ extra coverage */
+
+check('turn_start after an early message_start keeps the fold window behind the streaming step', () => {
+  // `message_start` can land before `turn_start`; the marker must then skip the
+  // still-streaming assistant entry, or the window starts PAST the very step it
+  // has to fold and the whole turn renders flat (expand-during-output bug).
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'hi' } }));
+  state = applyPiEvent(state, ev({ type: 'agent_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'assistant', content: [] } }));
+  state = applyPiEvent(
+    state,
+    ev({ type: 'message_update', assistantMessageEvent: { type: 'thinking_start', contentIndex: 0 } }),
+  );
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  const streaming = only(state, 'assistant') as AssistantEntry;
+  assert.ok(state.activeTurn, 'turn_start opens the fold window');
+  assert.notEqual(state.activeTurn!.startId, streaming.id, 'the marker must not point at the step that has to fold');
+  assert.equal(state.activeTurn!.startId, (only(state, 'user') as UserEntry).id, 'the marker points at the durable prompt');
+});
 
 check('agent_settled closes streaming entries and running tools', () => {
   let state = createTranscript();
@@ -796,18 +816,25 @@ function applyAnswer(state: TranscriptState, text: string): TranscriptState {
   );
 }
 
-check('turn fold: turn_end folds the process and keeps the answer visible', () => {
+check('turn fold: the window spans pi\'s wire turns; agent_settled folds the run', () => {
   let state = createTranscript();
   state = applyPiEvent(state, ev({ type: 'agent_start' }));
   state = applyPiEvent(state, ev({ type: 'turn_start' }));
   state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
   state = applyStep(state, 'call_1');
   state = applyStep(state, 'call_2');
-  state = applyAnswer(state, 'Done.');
+  // pi closes a wire turn after each step's message and opens the next one for
+  // the answer — the fold window must survive both, or nothing ever folds live.
   state = applyPiEvent(state, ev({ type: 'turn_end' }));
+  const windowAfterStep = state.activeTurn;
+  assert.ok(windowAfterStep, 'the window stays open across a wire turn boundary');
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  assert.deepEqual(state.activeTurn, windowAfterStep, 'a step-boundary turn_start keeps the run window');
+  state = applyAnswer(state, 'Done.');
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
 
   const process = state.turnProcesses[1];
-  assert.ok(process, 'turn 1 is folded at turn_end');
+  assert.ok(process, 'the run is folded at settle');
   assert.equal(process!.toolCalls, 2);
   assert.equal(process!.messages, 2);
   assert.equal(process!.thought, true);
@@ -827,7 +854,40 @@ check('turn fold: turn_end folds the process and keeps the answer visible', () =
   assert.equal(state.activeTurn, null, 'the window is closed');
 });
 
-check('turn fold: agent_settled is the backstop when turn_end never fires', () => {
+check('turn fold: agent_start closes a window a previous run left open', () => {
+  let state = createTranscript();
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'aborted run', timestamp: 1 } }));
+  state = applyStep(state, 'call_lost');
+  // No settle ever came (crash/abort path); the next run must close the
+  // leftover window before its own prompt lands, or both prompts fold as one.
+  state = applyPiEvent(state, ev({ type: 'agent_start' }));
+  assert.equal(state.activeTurn, null, 'the stale window is closed');
+  assert.deepStrictEqual(state.turnProcesses, {}, 'the aborted run had no answer, so nothing folds');
+});
+
+check('turn fold: the optimistic echo never dangles the window marker', () => {
+  // The real send path: the client appends the echo before the prompt's frames
+  // arrive, so turn_start sees the echo as the last entry. The echo is then
+  // retired in the same update that appends the durable user message — a
+  // marker pointing at it would dangle and the turn would never fold.
+  let state = addEcho(createTranscript(), { requestId: 'req-echo', text: 'go', imageCount: 0 });
+  state = applyPiEvent(state, ev({ type: 'agent_start' }));
+  state = applyPiEvent(state, ev({ type: 'turn_start' }));
+  assert.notEqual(state.activeTurn, null);
+  // The echo is the only entry, so the marker points at nothing — and must NOT
+  // point at the echo, which is about to be retired.
+  assert.equal(state.activeTurn!.startId, null, 'the marker skips the optimistic echo');
+  // Echo retires; the durable user message lands; the run completes.
+  state = retireEcho(state, 'req-echo');
+  state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
+  state = applyStep(state, 'call_echo');
+  state = applyAnswer(state, 'done');
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
+  assert.ok(state.turnProcesses[state.turnSeq], 'the echo-sent turn folds at settle');
+});
+
+check('turn fold: agent_settled folds even when no turn_end ever fired', () => {
   let state = createTranscript();
   state = applyPiEvent(state, ev({ type: 'turn_start' }));
   state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
@@ -842,8 +902,9 @@ check('turn fold: no textual answer means nothing folds', () => {
   state = applyPiEvent(state, ev({ type: 'turn_start' }));
   state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
   state = applyStep(state, 'call_only');
-  state = applyPiEvent(state, ev({ type: 'turn_end' }));
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
   assert.deepStrictEqual(state.turnProcesses, {}, 'process with no answer stays inline');
+  assert.equal(state.activeTurn, null, 'the window still closes');
 });
 
 check('turn fold: a history rebuild mid-turn skips folding instead of guessing', () => {
@@ -852,7 +913,7 @@ check('turn fold: a history rebuild mid-turn skips folding instead of guessing',
   state = applyPiEvent(state, ev({ type: 'message_start', message: { role: 'user', content: 'go', timestamp: 1 } }));
   // Reconnect rebuild replaces every id the window marker pointed at.
   state = applySnapshot(state, [{ role: 'assistant', content: [{ type: 'text', text: 'x' }], timestamp: 9 }]);
-  state = applyPiEvent(state, ev({ type: 'turn_end' }));
+  state = applyPiEvent(state, ev({ type: 'agent_settled' }));
   assert.deepStrictEqual(state.turnProcesses, {}, 'nothing folded after the marker vanished');
 });
 
@@ -967,6 +1028,33 @@ check('answers: tool steps and empty prose are never the answer', () => {
   assert.equal(answerIndexOf([stepEntry('a1', '', 1)]), -1, 'a tool-only step');
   assert.equal(answerIndexOf([stepEntry('a1', '   ')]), -1, 'whitespace is not prose');
   assert.equal(answerIndexOf([]), -1, 'an empty region');
+});
+
+check('answers: an earlier reply is not the answer after a trailing tool or aborted step', () => {
+  assert.equal(answerIndexOf([
+    stepEntry('a1', '中途说明。'),
+    stepEntry('a2', '', 1),
+  ]), -1);
+  assert.equal(answerIndexOf([
+    stepEntry('a1', '中途说明。'),
+    { ...stepEntry('a2', '未完成的回复'), stopReason: 'aborted' },
+  ]), -1);
+});
+
+check('presentation: analysis, running command, completed command and reply visibility', () => {
+  assert.equal(liveProcessSpec([], null).label, '正在分析请求');
+  const command = stepEntry('call', '', 1);
+  command.tools[0] = { ...command.tools[0]!, status: 'running', args: { command: 'npm run check' } };
+  const active = liveProcessSpec([command], null);
+  assert.equal(active.label, '正在运行命令');
+  assert.equal(active.detail, 'npm run check');
+  command.tools[0] = { ...command.tools[0]!, status: 'success' };
+  assert.equal(liveProcessSpec([command], null).label, '正在分析请求', 'settled tool must not remain running');
+  assert.equal(completedProcessSpec([command, resultEntry('call')]).label, '执行了命令');
+  assert.equal(completedProcessSpec([]).label, '已完成分析');
+  assert.equal(isLiveFoldMember(stepEntry('reply', '最终答案。')), false);
+  assert.equal(isLiveFoldMember({ ...stepEntry('reply', '最终答案。'), streaming: false }), false,
+    'message_end before agent_settled must not hide the answer');
 });
 
 /* ------------------------------------------------- inserted / custom messages */

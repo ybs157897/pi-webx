@@ -13,8 +13,8 @@ import type { TranscriptEntry, TranscriptState, TurnProcess } from '../../shared
 /* ---------------------------------------------------------------- turn fold */
 
 /**
- * The entry a turn's answer was written in: the last step that ended with text
- * and no tool calls (dsh's `latestAnswer`).
+ * The entry a turn's answer was written in: the closing assistant step, only
+ * if it ended with text and no tool calls (dsh's `latestAnswer`).
  *
  * Exported because more than the fold needs to know it. A turn is a *process* —
  * narration, tool calls, more narration — and only its last prose step is the
@@ -29,21 +29,20 @@ import type { TranscriptEntry, TranscriptState, TurnProcess } from '../../shared
 export function answerIndexOf(region: readonly TranscriptEntry[]): number {
   for (let index = region.length - 1; index >= 0; index -= 1) {
     const entry = region[index];
-    if (
-      entry &&
-      entry.kind === 'assistant' &&
-      entry.tools.length === 0 &&
-      entry.text.trim().length > 0
-    ) {
-      return index;
-    }
+    if (!entry || entry.kind !== 'assistant') continue;
+    return entry.tools.length === 0 &&
+      entry.text.trim().length > 0 &&
+      entry.stopReason !== 'error' &&
+      entry.stopReason !== 'aborted' &&
+      !entry.error ? index : -1;
   }
   return -1;
 }
 
 /**
- * Fold one turn's region into a summary — the single rule both live turns
- * (`turn_end`) and rebuilt history (a snapshot) go through.
+ * Fold one turn's region into a summary — the single rule both live runs
+ * (`agent_settled`, via the window that spans the whole prompt) and rebuilt
+ * history (a snapshot) go through.
  *
  * The anchor is the turn's answer (see `answerIndexOf`). Everything before it
  * that is step-shaped folds, and the answer's own reasoning folds with them

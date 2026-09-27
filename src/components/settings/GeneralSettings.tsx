@@ -1,7 +1,8 @@
 /**
  * The `通用设置` section — dsh's first settings entry, and where its surface
- * keeps preferences that are not about providers or plugins: appearance, and
- * (ours) which renderer draws agent UI.
+ * keeps preferences that are not about providers or plugins: appearance, the
+ * transcript's work-details mode (工作步骤展示), and (ours) which renderer draws
+ * agent UI.
  *
  * Both controls moved here from elsewhere in the shell: the theme used to be a
  * rail button in the sidebar footer and the renderer a segmented control in the
@@ -13,8 +14,11 @@
  * left, the control right-aligned, in the same row card.
  */
 
+import { useState } from 'react'
 import type { ReactNode } from 'react'
 import { theme } from 'antd'
+import { readTranscriptView, writeTranscriptView } from '../../app/preferences'
+import type { TranscriptViewMode } from '../../lib/transcript/presentation'
 import { t } from './copy.ts'
 import styles from './ModelsSection.module.css'
 
@@ -22,14 +26,17 @@ import styles from './ModelsSection.module.css'
 function SettingRow({
   title,
   description,
+  testid,
   children,
 }: {
   title: string
   description: string
+  /** DOM hook for the UI gate; rows that pass nothing render no attribute. */
+  testid?: string
   children: ReactNode
 }): ReactNode {
   return (
-    <li className={styles['rowCard']}>
+    <li className={styles['rowCard']} data-testid={testid}>
       <div className={styles['rowHead']}>
         <span className={styles['rowIdentity']}>
           <span className={styles['rowName']}>{title}</span>
@@ -88,6 +95,16 @@ export function GeneralSettings({
   renderStyle: RenderStylePreference
   onRenderStyleChange: (next: RenderStylePreference) => void
 }): ReactNode {
+  /* The transcript's work-details mode is browser-local like the theme, but no
+     shell state carries it: this row reads and writes the preference itself, so
+     a click repaints the choice without a round-trip through `App`. */
+  const [transcriptView, setTranscriptView] = useState<TranscriptViewMode>(readTranscriptView)
+
+  const changeTranscriptView = (next: TranscriptViewMode): void => {
+    setTranscriptView(next)
+    writeTranscriptView(next)
+  }
+
   return (
     <div className={styles['section']}>
       <p className={styles['intro']}>{t('generalIntro')}</p>
@@ -110,6 +127,22 @@ export function GeneralSettings({
             options={[
               { id: 'ours', label: t('rendererOurs') },
               { id: 'tokui', label: t('rendererTokui') },
+            ]}
+          />
+        </SettingRow>
+        <SettingRow
+          title={t('transcriptTitle')}
+          description={t('transcriptHint')}
+          testid="setting-transcript-view"
+        >
+          <Choice
+            value={transcriptView}
+            onChange={changeTranscriptView}
+            options={[
+              { id: 'compact', label: t('transcriptCompact') },
+              { id: 'standard', label: t('transcriptStandard') },
+              { id: 'detailed', label: t('transcriptDetailed') },
+              { id: 'verbose', label: t('transcriptVerbose') },
             ]}
           />
         </SettingRow>

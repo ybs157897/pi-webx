@@ -163,7 +163,9 @@ export function useWorkbenchPiChat() {
     send,
     newConversation,
     retry,
-    dialog: pi.dialogs[0]?.request ?? null,
+    // dsh 的提问形态：完整 PendingDialog（request + at）交给浮层，由它把
+    // QuestionComposer 放进输入框座位；id 在作答回调处绑定。
+    dialog: pi.dialogs[0] ?? null,
     respondToDialog: pi.respondToDialog,
   }
 }

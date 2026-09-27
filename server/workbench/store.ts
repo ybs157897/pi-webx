@@ -497,14 +497,15 @@ export class WorkbenchStore {
 
   /**
    * 合并写界面偏好（白名单键，防止把任意 JSON 塞进 meta 表）。
-   * 键清单与前端模块一一对齐：theme / density 全局外观，panelOpen AI 面板默认开合，
-   * worksView / tasksScope 两个模块的视图，kbSelectedId / kbView 知识库的选中条目与
-   * 编辑/预览视图——后两个漏在白名单外会被静默丢弃，用户刷新后必然丢状态。
+   * 键清单与前端模块一一对齐：theme / density 全局外观，transcriptView AI 对话的工作
+   * 步骤展示模式，panelOpen AI 面板默认开合，worksView / tasksScope 两个模块的视图，
+   * kbSelectedId / kbView 知识库的选中条目与编辑/预览视图——后两个漏在白名单外会被静默
+   * 丢弃，用户刷新后必然丢状态。
    */
   writePrefs(patch: unknown): Record<string, unknown> {
     if (!isObject(patch)) throw new WorkbenchInputError('偏好需要是对象');
     const allowed = new Set([
-      'theme', 'density', 'panelOpen', 'worksView', 'tasksScope', 'kbSelectedId', 'kbView', 'kbBaseId', 'kbStage',
+      'theme', 'density', 'transcriptView', 'panelOpen', 'worksView', 'tasksScope', 'kbSelectedId', 'kbView', 'kbBaseId', 'kbStage',
     ]);
     const merged = { ...this.readPrefs() };
     for (const [key, value] of Object.entries(patch)) {
