@@ -3,15 +3,10 @@ import { mkdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
-import {
-  ARRAY_MODULES, ATOM_MODULES, emptyState, demoState, validateAtomProfile,
-  validateAtomRecord, validateFields,
-} from './schema.mjs';
+import { ARRAY_MODULES, emptyState, demoState, validateFields } from './schema.mjs';
 
 type ArrayModule = typeof ARRAY_MODULES[number];
-type AtomModule = typeof ATOM_MODULES[number];
 type RecordRow = Record<string, unknown> & { id: string };
-type Atom = { profile: Record<string, unknown>; records: RecordRow[] };
 type SearchHit = { module: string; id: string; title: string; snippet: string };
 type LinkEntry = { module: string; id: string; title: string };
 type LinkGraph = { outgoing: LinkEntry[]; incoming: LinkEntry[] };
@@ -20,11 +15,10 @@ export type WorkbenchState = {
   version: number;
   profile: Record<string, unknown>;
   chatLog: unknown[];
-} & Record<ArrayModule, RecordRow[]> & Record<AtomModule, Atom>;
+} & Record<ArrayModule, RecordRow[]>;
 
 type PayloadRow = { payload: string };
 type RecordPayloadRow = { module: string; payload: string };
-type AtomProfileRow = { module: string; payload: string };
 
 const DEFAULT_PROFILE = { name: '我', motto: '把日子过成想要的样子' };
 const LEGACY_KB_ID = 'kb-legacy-default';
@@ -54,16 +48,6 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 function arrayModule(name: string): asserts name is ArrayModule {
   if (!ARRAY_MODULES.includes(name as ArrayModule)) throw new WorkbenchInputError(`未知模块：${name}`);
-}
-
-function atomModule(name: string): asserts name is AtomModule {
-  if (!ATOM_MODULES.includes(name as AtomModule)) throw new WorkbenchInputError(`未知资料模块：${name}`);
-}
-
-function anyModule(name: string): void {
-  if (!ARRAY_MODULES.includes(name as ArrayModule) && !ATOM_MODULES.includes(name as AtomModule)) {
-    throw new WorkbenchInputError(`未知模块：${name}`);
-  }
 }
 
 function parseRecord(payload: string): RecordRow {
@@ -101,24 +85,6 @@ function normalizeImport(raw: unknown): WorkbenchState {
     });
   }
 
-  for (const module of ATOM_MODULES) {
-    const atom = source[module];
-    if (!isObject(atom) || !Array.isArray(atom.records)) throw new WorkbenchInputError(`缺少 ${module} 资料模块`);
-    const profile = isObject(atom.profile) ? atom.profile : {};
-    input(() => validateAtomProfile(module, profile, { partial: true }));
-    const ids = new Set<string>();
-    state[module] = {
-      profile: structuredClone(profile),
-      records: atom.records.map((record: unknown) => {
-        if (!isObject(record) || typeof record.id !== 'string' || ids.has(record.id)) {
-          throw new WorkbenchInputError(`${module} 含有无效或重复的记录 ID`);
-        }
-        input(() => validateAtomRecord(record));
-        ids.add(record.id);
-        return structuredClone(record) as RecordRow;
-      }),
-    };
-  }
   const baseIds = new Set(state.knowledgeBases.map(base => base.id));
   const folders = new Map(state.knowledgeFolders.map(folder => [folder.id, folder]));
   for (const folder of state.knowledgeFolders) {
@@ -169,18 +135,6 @@ export class WorkbenchStore {
         UNIQUE (module, id)
       );
       CREATE INDEX IF NOT EXISTS workbench_records_module_seq ON workbench_records(module, seq);
-      CREATE TABLE IF NOT EXISTS workbench_atom_profiles (
-        module TEXT PRIMARY KEY,
-        payload TEXT NOT NULL CHECK (json_valid(payload))
-      );
-      CREATE TABLE IF NOT EXISTS workbench_atom_records (
-        seq INTEGER PRIMARY KEY AUTOINCREMENT,
-        module TEXT NOT NULL,
-        id TEXT NOT NULL,
-        payload TEXT NOT NULL CHECK (json_valid(payload)),
-        UNIQUE (module, id)
-      );
-      CREATE INDEX IF NOT EXISTS workbench_atom_records_module_seq ON workbench_atom_records(module, seq);
     `);
     this.migrateLegacyKnowledge();
   }
@@ -244,14 +198,6 @@ export class WorkbenchStore {
     const records = this.db.prepare('SELECT module, payload FROM workbench_records ORDER BY seq').all() as RecordPayloadRow[];
     for (const row of records) {
       if (ARRAY_MODULES.includes(row.module as ArrayModule)) state[row.module as ArrayModule].push(parseRecord(row.payload));
-    }
-    const profiles = this.db.prepare('SELECT module, payload FROM workbench_atom_profiles').all() as AtomProfileRow[];
-    for (const row of profiles) {
-      if (ATOM_MODULES.includes(row.module as AtomModule)) state[row.module as AtomModule].profile = JSON.parse(row.payload) as Record<string, unknown>;
-    }
-    const atomRecords = this.db.prepare('SELECT module, payload FROM workbench_atom_records ORDER BY seq').all() as RecordPayloadRow[];
-    for (const row of atomRecords) {
-      if (ATOM_MODULES.includes(row.module as AtomModule)) state[row.module as AtomModule].records.push(parseRecord(row.payload));
     }
     return state;
   }
@@ -353,59 +299,15 @@ export class WorkbenchStore {
     return result.changes > 0;
   }
 
-  putAtomProfile(module: string, patch: unknown): Record<string, unknown> {
-    atomModule(module);
-    const clean = input(() => validateAtomProfile(module, patch, { partial: true }));
-    const row = this.db.prepare('SELECT payload FROM workbench_atom_profiles WHERE module = ?').get(module) as PayloadRow | undefined;
-    const profile = { ...(row ? JSON.parse(row.payload) as Record<string, unknown> : {}), ...clean };
-    this.db.prepare('INSERT INTO workbench_atom_profiles (module, payload) VALUES (?, ?) ON CONFLICT(module) DO UPDATE SET payload = excluded.payload')
-      .run(module, JSON.stringify(profile));
-    return profile;
-  }
-
-  addAtomRecord(module: string, fields: unknown): RecordRow {
-    atomModule(module);
-    const clean = input(() => validateAtomRecord(fields));
-    const record: RecordRow = { id: randomUUID(), ...clean };
-    this.db.prepare('INSERT INTO workbench_atom_records (module, id, payload) VALUES (?, ?, ?)')
-      .run(module, record.id, JSON.stringify(record));
-    return record;
-  }
-
-  updateAtomRecord(module: string, id: string, patch: unknown): RecordRow {
-    atomModule(module);
-    const clean = input(() => validateAtomRecord(patch, { partial: true }));
-    const row = this.db.prepare('SELECT payload FROM workbench_atom_records WHERE module = ? AND id = ?').get(module, id) as PayloadRow | undefined;
-    if (!row) throw new WorkbenchInputError('记录不存在', 404);
-    const record = { ...parseRecord(row.payload), ...clean };
-    this.db.prepare('UPDATE workbench_atom_records SET payload = ? WHERE module = ? AND id = ?')
-      .run(JSON.stringify(record), module, id);
-    return record;
-  }
-
-  removeAtomRecord(module: string, id: string): boolean {
-    atomModule(module);
-    const result = this.db.prepare('DELETE FROM workbench_atom_records WHERE module = ? AND id = ?').run(module, id);
-    return result.changes > 0;
-  }
-
   import(raw: unknown): void {
     const state = normalizeImport(raw);
     const insertRecord = this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)');
-    const insertAtomRecord = this.db.prepare('INSERT INTO workbench_atom_records (module, id, payload) VALUES (?, ?, ?)');
-    const insertAtomProfile = this.db.prepare('INSERT INTO workbench_atom_profiles (module, payload) VALUES (?, ?)');
     this.db.transaction(() => {
       this.db.prepare('DELETE FROM workbench_records').run();
-      this.db.prepare('DELETE FROM workbench_atom_records').run();
-      this.db.prepare('DELETE FROM workbench_atom_profiles').run();
       this.db.prepare('INSERT INTO workbench_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value')
         .run('profile', JSON.stringify(state.profile));
       for (const module of ARRAY_MODULES) {
         for (const record of state[module]) insertRecord.run(module, record.id, JSON.stringify(record));
-      }
-      for (const module of ATOM_MODULES) {
-        insertAtomProfile.run(module, JSON.stringify(state[module].profile));
-        for (const record of state[module].records) insertAtomRecord.run(module, record.id, JSON.stringify(record));
       }
       this.migrateLegacyKnowledge();
     })();
@@ -430,12 +332,6 @@ export class WorkbenchStore {
       const record = parseRecord(row.payload);
       hits.push(hitOf(row.module, record));
     }
-    const atomRows = this.db.prepare(
-      "SELECT module, payload FROM workbench_atom_records WHERE payload LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?",
-    ).all(like, limit) as RecordPayloadRow[];
-    for (const row of atomRows) {
-      hits.push(hitOf(row.module, parseRecord(row.payload)));
-    }
     hits.sort((left, right) => rankOf(right) - rankOf(left) || right.snippet.length - left.snippet.length);
     function rankOf(hit: SearchHit): number {
       return hit.title.toLowerCase().includes(q.toLowerCase()) ? 1 : 0;
@@ -444,23 +340,18 @@ export class WorkbenchStore {
   }
 
   /**
-   * 双向链接查询：出链 = 本条记录 refs 指向的记录；反链 = 全部记录（含
-   * pets / relationships 时间轴）里 refs 指向本条记录的记录。
+   * 双向链接查询：出链 = 本条记录 refs 指向的记录；反链 = 全表里 refs 指向本条
+   * 记录的记录。
    * 元素统一为 { module, id, title }；指向不存在记录的引用视为已删除，不入列。
-   * @param module - 模块 key（数组模块或资料模块）。
+   * @param module - 模块 key。
    * @param id - 记录 id。
    * @returns `{ outgoing, incoming }`，记录不存在时两者都是空数组。
    */
   links(module: string, id: string): LinkGraph {
-    anyModule(module);
+    arrayModule(module);
     const all: Array<{ entry: LinkEntry; refs: Array<{ type: string; id: string }> }> = [];
     const arrayRows = this.db.prepare('SELECT module, payload FROM workbench_records').all() as RecordPayloadRow[];
     for (const row of arrayRows) {
-      const record = parseRecord(row.payload);
-      all.push({ entry: { module: row.module, id: record.id, title: hitOf(row.module, record).title }, refs: refsOf(record) });
-    }
-    const atomRows = this.db.prepare('SELECT module, payload FROM workbench_atom_records').all() as RecordPayloadRow[];
-    for (const row of atomRows) {
       const record = parseRecord(row.payload);
       all.push({ entry: { module: row.module, id: record.id, title: hitOf(row.module, record).title }, refs: refsOf(record) });
     }
@@ -542,7 +433,7 @@ function refsOf(record: RecordRow): Array<{ type: string; id: string }> {
 
 /** 从一条记录里提取标题与摘要：优先人读字段，兜底 JSON 原文截断。 */
 function hitOf(module: string, record: RecordRow): SearchHit {
-  const title = [record.title, record.text, record.type, record.food, record.category]
+  const title = [record.title, record.text]
     .find(value => typeof value === 'string' && value.trim() !== '') ?? module;
   const body = [record.note, record.text, record.title].find(value => typeof value === 'string' && value.trim() !== '');
   const flat = String(body ?? '').replace(/\s+/g, ' ').trim();

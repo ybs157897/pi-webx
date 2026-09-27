@@ -69,10 +69,8 @@ const ASK_IDLE = { pending: null, failed: false }
 
 /** 空数据兜底：`data` 归一化用（服务端字段缺失时不至于让模块崩）。 */
 const EMPTY_DATA = {
-  tasks: [], works: [], hotspots: [], exercises: [], meals: [], finance: [], reviews: [],
-  fixes: [], logs: [], requirements: [], codes: [], knowledge: [], knowledgeBases: [], knowledgeFolders: [],
-  pets: { profile: {}, records: [] },
-  relationships: { profile: {}, records: [] },
+  tasks: [], works: [], fixes: [], logs: [], requirements: [], codes: [],
+  knowledge: [], knowledgeBases: [], knowledgeFolders: [],
 }
 
 /**
@@ -83,18 +81,9 @@ const EMPTY_DATA = {
 export function normalizeData(raw) {
   if (raw === null || typeof raw !== 'object') return EMPTY_DATA
   const safeArray = key => (Array.isArray(raw[key]) ? raw[key] : [])
-  const safeAtom = key => ({
-    profile: typeof raw[key]?.profile === 'object' && raw[key]?.profile !== null ? raw[key].profile : {},
-    records: Array.isArray(raw[key]?.records) ? raw[key].records : [],
-  })
   return {
     tasks: safeArray('tasks'),
     works: safeArray('works'),
-    hotspots: safeArray('hotspots'),
-    exercises: safeArray('exercises'),
-    meals: safeArray('meals'),
-    finance: safeArray('finance'),
-    reviews: safeArray('reviews'),
     fixes: safeArray('fixes'),
     logs: safeArray('logs'),
     requirements: safeArray('requirements'),
@@ -102,8 +91,6 @@ export function normalizeData(raw) {
     knowledge: safeArray('knowledge'),
     knowledgeBases: safeArray('knowledgeBases'),
     knowledgeFolders: safeArray('knowledgeFolders'),
-    pets: safeAtom('pets'),
-    relationships: safeAtom('relationships'),
   }
 }
 

@@ -82,25 +82,17 @@ const TEXT = {
 const LINK_LABELS = {
   tasks: '今日规划',
   works: '工作助理',
-  hotspots: '行业热点',
-  exercises: '运动打卡',
-  meals: '饮食记录',
-  finance: '本月收支',
-  reviews: '每日复盘',
   fixes: '问题修复',
   logs: '日志查询',
   requirements: '需求管理',
   codes: '代码开发',
   knowledge: '知识库',
-  pets: '宠物日记',
-  relationships: '亲密关系',
 }
 
-/** 客户端反链扫描范围：全部数组模块 + 两个原子模块的 records（与 store.links() 对齐）。 */
+/** 客户端反链扫描范围：全部数组模块（与 store.links() 对齐）。 */
 const LINK_SCAN_MODULES = [
-  'tasks', 'works', 'hotspots', 'exercises', 'meals', 'finance', 'reviews', 'fixes', 'logs', 'requirements', 'codes', 'knowledge',
+  'tasks', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge',
 ]
-const LINK_SCAN_ATOMS = ['pets', 'relationships']
 const SOURCE_NONE = '__none__'
 
 /** 列表排序：最近碰过的浮到最上面（服务端每次写入都会刷新 updatedAt）。 */
@@ -236,7 +228,7 @@ function sourceEntries(data, selected) {
   return refsOf(selected)
     .filter(ref => typeof ref?.type === 'string' && ref.type !== '' && ref.type !== 'knowledge' && typeof ref.id === 'string' && ref.id !== '')
     .map(ref => {
-      const collection = LINK_SCAN_ATOMS.includes(ref.type) ? data?.[ref.type]?.records : data?.[ref.type]
+      const collection = data?.[ref.type]
       const target = Array.isArray(collection) ? collection.find(row => row?.id === ref.id) : null
       return { module: ref.type, id: ref.id, title: target === null || target === undefined ? ref.id : linkTitleOf(target) || ref.id }
     })
@@ -256,10 +248,6 @@ function computeLinks(data, selected) {
     const list = Array.isArray(data?.[key]) ? data[key] : []
     for (const row of list) titles.set(`${key}:${String(row?.id ?? '')}`, linkTitleOf(row))
   }
-  for (const key of LINK_SCAN_ATOMS) {
-    const list = Array.isArray(data?.[key]?.records) ? data[key].records : []
-    for (const row of list) titles.set(`${key}:${String(row?.id ?? '')}`, linkTitleOf(row))
-  }
   // 出链只留指向还存在记录的引用（与 store.links() 一致：指向已删记录的不入列）。
   const outgoing = []
   for (const ref of refsOf(selected)) {
@@ -276,12 +264,6 @@ function computeLinks(data, selected) {
     const list = Array.isArray(data?.[key]) ? data[key] : []
     for (const row of list) {
       if (row?.id === selected.id) continue
-      if (pointsHere(row)) incoming.push({ module: key, id: String(row.id), title: linkTitleOf(row) })
-    }
-  }
-  for (const key of LINK_SCAN_ATOMS) {
-    const list = Array.isArray(data?.[key]?.records) ? data[key].records : []
-    for (const row of list) {
       if (pointsHere(row)) incoming.push({ module: key, id: String(row.id), title: linkTitleOf(row) })
     }
   }

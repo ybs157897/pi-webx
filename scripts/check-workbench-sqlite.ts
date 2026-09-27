@@ -19,18 +19,12 @@ try {
   const task = store.addRecord('tasks', { title: '验证 SQLite 保存', due: '2026-09-23' });
   assert.equal(task.title, '验证 SQLite 保存');
   assert.equal(store.updateRecord('tasks', task.id, { done: true }).done, true);
-  const exercise = store.addRecord('exercises', { type: '跑步', minutes: 30 });
-  assert.equal(exercise.minutes, 30);
-  const profile = store.putAtomProfile('pets', { name: '小猫' });
-  assert.equal(profile.name, '小猫');
-  const diary = store.addAtomRecord('pets', { title: '学会握手' });
-  assert.equal(diary.title, '学会握手');
-  assert.throws(() => store.addRecord('exercises', { type: '跑步', minutes: 2000 }), /上限/);
+  assert.throws(() => store.addRecord('tasks', { title: 'x'.repeat(201) }), /上限/);
+  assert.throws(() => store.addRecord('meals', { meal: 'lunch', food: '米饭' }), /未知模块/);
   store.close();
 
   store = new WorkbenchStore(path);
   assert.equal(store.read().tasks[0]?.done, true);
-  assert.equal(store.read().pets.records[0]?.title, '学会握手');
 
   // 真实旧库启动迁移：旧 SQLite 只有 knowledge 记录，重开后生成默认库并补归属。
   const oldPath = join(dir, 'legacy-knowledge.sqlite');
@@ -202,7 +196,7 @@ try {
     '至少一条演示笔记应引用任务/需求',
   );
 
-  // 双向链接：出链 = refs 解析，反链 = 全表反查（含资料模块时间轴记录）。
+  // 双向链接：出链 = refs 解析，反链 = 全表反查。
   const noteA = demoKnowledge.find((record) => refsOfDemo(record).some((ref) => ref.type === 'knowledge'));
   assert.ok(noteA !== undefined, '演示应含引用其他笔记的条目');
   const graph = store.links('knowledge', noteA!.id);
