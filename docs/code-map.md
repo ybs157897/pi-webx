@@ -3,7 +3,7 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-28。工作台八个业务模块与现有后端领域字段/工具按业务目录归位，并新增左侧 Agent 配置页；原前端页面路径仅保留兼容 re-export。
+更新日期：2026-09-29。工作台八个业务模块与现有后端领域字段/工具按业务目录归位，并新增左侧 Agent 配置页；原前端页面路径仅保留兼容 re-export。
 
 ## 总体架构
 
@@ -151,7 +151,7 @@
 | 模块独立工作区（默认目录、自定义绑定、真实路径与重叠校验） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
-| 模块注册表（createTools 工厂，logs + codes） | `server/module-agents/registry.ts` |
+| 模块注册表（createTools 工厂，works + requirements + logs + codes） | `server/module-agents/registry.ts` |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
@@ -179,6 +179,34 @@
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
 | SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`；`schema.mjs` 保留 `ARRAY_MODULES`、公共校验和演示数据，`schema-fields.mjs` 放共享字段，`server/modules/<id>/schema.mjs` 放模块字段（`knowledgeBases` / `knowledgeFolders` 归 knowledge） |
 | 知识库接入协议（读/写口子） | `docs/workbench-knowledge-protocol.md`；pi 侧工具 `extensions/pi-webx-knowledge.ts` |
+
+### 需求对话与待办导入
+
+流程、接口和验收边界见 `docs/architecture/requirements-workflow.md`。
+
+| 功能 | 位置 |
+| --- | --- |
+| 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css` |
+| 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
+| 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
+| 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览需求与待办、编辑/勾选、键盘焦点和错误反馈 |
+| 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复 |
+| 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
+| 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
+| 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/幂等；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖真实 SSR DOM |
+
+### 工作助理 Agent 与时间安排
+
+流程、工具边界和验收方法见 `docs/architecture/works-agent-planning.md`。
+
+| 功能 | 位置 |
+| --- | --- |
+| 规划对话和时间表入口 | `src/workbench-app/modules/works/index.jsx`、`WorksChat.jsx`、`Agenda.jsx`、`Planning.css`；桌面并列，窄屏切换对话/安排 |
+| 原看板/列表与手动改期 | `modules/works/Records.jsx`、`RecordDialogs.jsx`、`ScheduleFields.jsx`、`model.jsx`；保留已有 `works-*` testid，`schedule.mjs` 负责排期投影 |
+| 独立身份与提示词 | `config/agents/works.yaml`、`config/agents/prompts/works.md`；Agent 配置页可独立编辑，独立会话/工作目录/知识库沿用公共装配机制 |
+| 待办读取与排期工具 | `server/modules/works/tools.ts`、`schedule.ts`；`works_context` 返回本地时间、时区、未完成待办与已有安排，`works_schedule` 原子保存日期和时段、关联待办但不修改待办 |
+| 排期字段与校验 | `server/modules/works/schema.mjs`、`validation.ts`；`scheduledDate` / `startTime` / `endTime` 同组维护；HTTP、导入和 Agent 共用有效日期/时段/冲突校验 |
+| 门禁与隔离浏览器服务 | `scripts/check-works-agent.ts`、`check-works-planning-ui.tsx`；`npm run dev:works-fixture` 运行离线模型流但真实 SDK 工具和 SQLite 的隔离验收服务 |
 
 ### 代码开发 IDE 与固定对话
 
