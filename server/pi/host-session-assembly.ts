@@ -30,7 +30,7 @@ import {
   hydrateTeams,
   refreshSubagentTool,
 } from './host-teams';
-import { broadcastError } from './host-events';
+import { skillsPrompt } from '../module-agents/resources';
 import {
   MAX_SESSIONS,
   errorText,
@@ -168,6 +168,9 @@ export async function createHostedSession(
       ) {
         throw new HostError(409, '会话身份与模块 Agent 不一致');
       }
+      if (moduleEntry.profileRevision !== moduleAgent.scope.profileRevision) {
+        throw new HostError(409, '必须使用原会话配置快照恢复，请从模块入口打开');
+      }
     }
     if (options.teamMode === true || options.sessionPath !== undefined) await hydrateTeams(host);
     const previousTeamId = options.sessionPath === undefined || moduleAgent !== undefined
@@ -188,9 +191,10 @@ export async function createHostedSession(
       noSkills: true,
       noPromptTemplates: true,
       noContextFiles: true,
-      additionalSkillPaths: moduleAgent.profile.skillPaths,
+      systemPromptOverride: () => moduleAgent.profile.promptText,
+      skillsOverride: () => ({ skills: [], diagnostics: [] }),
       appendSystemPromptOverride: () => [
-        moduleAgent.profile.promptText,
+        skillsPrompt(moduleAgent.profile.skills),
         ...moduleAgent.systemPromptAppend,
       ],
     });
@@ -266,6 +270,7 @@ export async function createHostedSession(
       ...(moduleAgent === undefined
         ? {}
         : {
+            moduleAgentMaxRunning: moduleAgent.profile.config.limits.maxRunningSessions,
             moduleAgent: {
               agentId: moduleAgent.scope.agentId,
               workspaceKey: moduleAgent.scope.workspaceKey,
@@ -299,22 +304,6 @@ export async function createHostedSession(
     }
     await host.bindExtensions(session, hosted);
     if (moduleAgent === undefined) await refreshSubagentTool(host, hosted);
-    // 恢复时配置版本已变：允许续跑，但显式告知会话按新配置继续。
-    if (
-      moduleAgent !== undefined
-      && moduleEntry !== undefined
-      && moduleEntry.profileRevision !== undefined
-      && moduleEntry.profileRevision !== moduleAgent.scope.profileRevision
-    ) {
-      broadcastError(host, hosted, '配置已更新，本会话按新配置继续');
-      // 新身份写回日志：下一次恢复按当前版本核对，不再重复提示。
-      sessionManager.appendCustomEntry(MODULE_AGENT_ENTRY_TYPE, {
-        version: 1,
-        agentId: moduleAgent.scope.agentId,
-        workspaceKey: moduleAgent.scope.workspaceKey,
-        profileRevision: moduleAgent.scope.profileRevision,
-      });
-    }
     if (host.closing) throw new HostError(503, 'host closed during session initialization');
     if (host.sessions.has(hosted.id)) throw new HostError(409, 'session is already hosted');
     host.sessions.set(hosted.id, hosted);

@@ -6,6 +6,10 @@
  * sessionId 定位磁盘会话文件，身份核对在 host 装配线里完成，客户端不能传
  * sessionPath、不能覆盖工具面。requestId 幂等：同一请求重试复用进行中的创建。
  */
+import { SessionManager } from '@earendil-works/pi-coding-agent';
+import { readModuleAgentEntry } from '../pi/host-session-assembly';
+import { ProfileSnapshots } from './snapshots';
+import type { DataSourceRegistry } from '../data-sources/registry';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import path from 'node:path';
@@ -13,7 +17,7 @@ import path from 'node:path';
 import type { PiHost } from '../pi/host';
 import { HostError } from '../pi/host';
 import { listStoredSessions } from '../stored-sessions';
-import type { SessionSummary } from '../../src/shared/protocol';
+import type { SessionSummary, ModuleAgentCapability } from '../../src/shared/protocol';
 import type { WorkbenchStore } from '../workbench/store';
 import {
   AGENT_IDS,
@@ -34,6 +38,9 @@ export interface ModuleAgentsRouterDeps {
   store: WorkbenchStore;
   profiles: Map<AgentId, ProfileLoadResult>;
   workspaceKey: string;
+  dataSourceRegistry?: DataSourceRegistry;
+  snapshots?: ProfileSnapshots;
+  storedSessions?: typeof listStoredSessions;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -46,11 +53,14 @@ function isAgentId(value: string): value is AgentId {
 
 export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
   const { host, store, profiles, workspaceKey } = deps;
+  const snapshots = deps.snapshots ?? new ProfileSnapshots(path.join(path.dirname(store.sqlite.name), 'module-agent-profiles'));
   const router = Router();
+  const restoring = new Map<string, Promise<SessionSummary>>();
+  const requestTargets = new Map<string, string>();
   const inFlight = new Map<string, Promise<SessionSummary>>();
 
   router.get('/', (_req: Request, res: Response) => {
-    const agents = AGENT_IDS.map((id) => {
+    const agents: ModuleAgentCapability[] = AGENT_IDS.map((id) => {
       const result = profiles.get(id);
       const binding = readBinding(store, workspaceKey, id);
       if (result === undefined) {
@@ -59,17 +69,15 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
       if (!result.ok) {
         return { id, enabled: false, ok: false, error: result.error };
       }
-      const { config, profileRevision, skillPaths } = result.profile;
+      const { config, profileRevision, skills } = result.profile;
       return {
         id,
         enabled: config.enabled,
         ok: true,
         profileRevision,
         tools: config.tools,
-        skills: skillPaths.map((skillPath) => ({
-          name: path.basename(path.dirname(skillPath)),
-          path: skillPath,
-        })),
+        skills: skills.map(({ name, description }) => ({ name, description })),
+        dataSources: Object.entries(config.dataSources).map(([kind, source]) => ({ kind: kind as 'logs' | 'issues', id: source.id, adapter: source.adapter })),
         mcp: config.mcp.map((entry) => ({
           id: entry.id,
           enabled: entry.enabled,
@@ -116,16 +124,12 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
     }
     const profile = result.profile;
 
-    /** 每模块一段运行中会话的软限制；多会话历史不受影响。 */
-    const running = host.list().filter(
-      (hosted) => hosted.moduleAgent?.agentId === agentId && hosted.alive && hosted.streaming,
-    ).length;
-    if (running >= profile.config.limits.maxRunningSessions) {
-      res.status(429).json({ error: `模块 Agent「${agentId}」已有 ${running} 段会话在运行，请稍后再试` });
+    const inFlightKey = `${agentId}:${requestId}`;
+    const target = sessionId ?? 'new';
+    if (requestTargets.has(inFlightKey) && requestTargets.get(inFlightKey) !== target) {
+      res.status(409).json({ error: 'requestId 已用于不同会话请求' });
       return;
     }
-
-    const inFlightKey = `${agentId}:${requestId}`;
     const pending = inFlight.get(inFlightKey);
     if (pending !== undefined) {
       try {
@@ -136,11 +140,17 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
       return;
     }
 
-    const creation = openOrCreate(agentId, profile, sessionId).then((hosted) => host.summary(hosted));
+    const restoreKey = sessionId ? `${agentId}:${workspaceKey}:${sessionId}` : undefined;
+    const creation = (restoreKey ? restoring.get(restoreKey) : undefined)
+      ?? openOrCreate(agentId, profile, sessionId).then((hosted) => host.summary(hosted));
+    requestTargets.set(inFlightKey, target);
     inFlight.set(inFlightKey, creation);
-    creation.finally(() => {
-      setTimeout(() => inFlight.delete(inFlightKey), REQUEST_ID_TTL_MS).unref?.();
-    });
+    if (restoreKey) restoring.set(restoreKey, creation);
+    const cleanup = () => {
+      if (restoreKey) restoring.delete(restoreKey);
+      setTimeout(() => { inFlight.delete(inFlightKey); requestTargets.delete(inFlightKey); }, REQUEST_ID_TTL_MS).unref?.();
+    };
+    void creation.then(cleanup, cleanup);
     try {
       res.json({ session: await creation });
     } catch (error) {
@@ -152,17 +162,22 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
     if (sessionId !== undefined) {
       const hosted = host.get(sessionId);
       if (hosted !== undefined) {
-        if (hosted.moduleAgent?.agentId !== agentId) {
+        if (hosted.moduleAgent?.agentId !== agentId || hosted.moduleAgent?.workspaceKey !== workspaceKey) {
           throw new HostError(409, '会话不属于该模块 Agent');
         }
         return hosted;
       }
-      const stored = (await listStoredSessions({ limit: STORED_LOOKUP_LIMIT }))
+      const stored = (await (deps.storedSessions ?? listStoredSessions)({ limit: STORED_LOOKUP_LIMIT }))
         .find((entry) => entry.id === sessionId);
       if (stored === undefined) {
         throw new HostError(404, `no stored session with id ${sessionId}`);
       }
-      const assembled = await assemble(agentId, profile);
+      const identity = readModuleAgentEntry(SessionManager.open(stored.path));
+      if (identity?.agentId !== agentId || identity?.workspaceKey !== workspaceKey || !identity.profileRevision) {
+        throw new HostError(409, '会话身份不匹配，不能恢复');
+      }
+      const original = await snapshots.read(identity.profileRevision);
+      const assembled = await assemble(agentId, original);
       try {
         return await host.create({
           sessionPath: stored.path,
@@ -175,6 +190,7 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
         throw error;
       }
     }
+    await snapshots.save(profile);
     const assembled = await assemble(agentId, profile);
     try {
       return await host.create({ moduleAgent: assembled });
@@ -186,7 +202,7 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
 
   /** 装配收敛到 assemble.ts：领域工具按配置 tools 过滤后才进会话。 */
   async function assemble(agentId: AgentId, profile: ResolvedAgentProfile) {
-    return assembleModuleAgent({ store, workspaceKey, agentId, profile });
+    return assembleModuleAgent({ store, workspaceKey, agentId, profile, dataSourceRegistry: deps.dataSourceRegistry });
   }
 
   return router;

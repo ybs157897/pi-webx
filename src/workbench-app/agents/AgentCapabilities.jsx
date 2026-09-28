@@ -52,6 +52,10 @@ export default function AgentCapabilities({ capability, error }) {
   return (
     <div className="agent-capabilities" data-testid="module-agent-capabilities">
       <dl className="agent-cap-list">
+        <div className="agent-cap-row" data-testid="module-agent-sources">
+          <dt>数据源</dt>
+          <dd>{(capability.dataSources ?? []).map(source => <span key={source.kind} className="agent-cap-chip">{source.kind} · {source.id}</span>)}</dd>
+        </div>
         {revision !== '' && (
           <div className="agent-cap-row">
             <dt>{TEXT.revision}</dt>

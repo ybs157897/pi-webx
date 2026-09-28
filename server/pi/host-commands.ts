@@ -111,6 +111,15 @@ async function dispatchCommand(
         // 空闲时忽略显式 steer：pi 的 steer 只在当前轮里有投递窗口，空闲会话上
         // 它会一直躺在队列里等一个永远不会到来的下一轮。
         const behavior = session.isStreaming ? command.streamingBehavior : undefined;
+        if (hosted.moduleAgent && !session.isStreaming) {
+          const running = [...host.sessions.values()].filter(other => other !== hosted && other.alive
+            && other.moduleAgent?.agentId === hosted.moduleAgent?.agentId
+            && other.moduleAgent?.workspaceKey === hosted.moduleAgent?.workspaceKey
+            && (other.preparing || other.streaming || other.session.isStreaming)).length;
+          if (running >= (hosted.moduleAgentMaxRunning ?? 1)) {
+            throw new Error('该模块已有会话正在运行，请等待完成或先停止它');
+          }
+        }
         hosted.preparing = true;
         // Before the request is built: an enabled/disabled edit made since the
         // last turn has to be visible to this turn's tool schema, and the tool

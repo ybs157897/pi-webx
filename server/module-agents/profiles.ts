@@ -5,10 +5,13 @@
  * 的 Agent id 且与内容 `id` 一致，未知文件名也按该文件单独报错。配置目录与
  * 相对资源路径的稳定根由调用方给的 `rootDir` 固定，不随进程 cwd 漂移。
  */
-import { createHash } from 'node:crypto';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { parseDataSources } from '../data-sources/config';
+import { snapshotSkills } from './resources';
+import { profileRevision } from './snapshots';
 
 import { LineCounter, isMap, isScalar, parseDocument } from 'yaml';
 
@@ -89,27 +92,25 @@ async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProf
     throw new ProfileError(`配置 id "${config.id}" 与文件名 "${stem}" 不一致`);
   }
 
+  for (const entry of config.mcp) {
+    if (entry.connection.transport === 'stdio') {
+      if (entry.connection.cwd) entry.connection.cwd = path.resolve(rootDir, entry.connection.cwd);
+      if (entry.connection.command.startsWith('.')) entry.connection.command = path.resolve(rootDir, entry.connection.command);
+    }
+  }
   const promptPath = path.resolve(rootDir, config.promptFile);
   const promptText = await readTextFile(promptPath, `promptFile ${config.promptFile}`);
 
   const skillPaths: string[] = [];
-  const skillBodies: string[] = [];
   for (const skill of config.skills) {
     const skillPath = path.resolve(rootDir, skill);
-    skillBodies.push(await readTextFile(skillPath, `skill ${skill}`));
+    await readTextFile(skillPath, `skill ${skill}`);
     skillPaths.push(skillPath);
   }
 
-  const hash = createHash('sha256');
-  hash.update(JSON.stringify(normalizeConfig(config)));
-  hash.update('\n');
-  hash.update(promptText);
-  for (const body of skillBodies) {
-    hash.update('\n');
-    hash.update(body);
-  }
-
-  return { config, configPath: file, promptText, skillPaths, profileRevision: hash.digest('hex') };
+  const skills = await snapshotSkills(skillPaths);
+  const profile = { config, configPath: file, promptText, skillPaths, skills };
+  return { ...profile, profileRevision: profileRevision(profile) };
 }
 
 async function readTextFile(file: string, label: string): Promise<string> {
@@ -196,7 +197,7 @@ function validateConfig(
   const pos = topLevelPos(doc, lineCounter);
   requireKeys(raw, [
     'schemaVersion', 'id', 'enabled', 'promptFile', 'model',
-    'skills', 'tools', 'mcp', 'knowledge', 'limits',
+    'skills', 'tools', 'mcp', 'knowledge', 'limits', 'dataSources',
   ], '顶层 ', pos);
 
   if (raw.schemaVersion !== 1) fail('schemaVersion 必须是 1');
@@ -222,6 +223,7 @@ function validateConfig(
 
   if (!Array.isArray(raw.mcp)) fail('mcp 必须是数组');
   const mcp = (raw.mcp as unknown[]).map((entry, index) => validateMcp(entry, index));
+  if (new Set(mcp.map(entry => entry.id)).size !== mcp.length) fail('MCP id 不得重复');
 
   if (!isObject(raw.knowledge)) fail('knowledge 必须是对象');
   requireKeys(raw.knowledge, ['homeBinding', 'sharedReadBindings'], 'knowledge ');
@@ -244,6 +246,7 @@ function validateConfig(
     promptFile,
     ...(model === undefined ? {} : { model }),
     skills,
+    dataSources: parseDataSources(raw.dataSources),
     tools,
     mcp,
     knowledge,
@@ -299,20 +302,4 @@ function needStringRecord(value: unknown, field: string): Record<string, string>
     out[key] = needString(item, `${field}.${key}`);
   }
   return out;
-}
-
-/** 规范化到固定形状，使 profileRevision 只随真实内容变化。 */
-function normalizeConfig(config: AgentProfileConfig): unknown {
-  return {
-    schemaVersion: config.schemaVersion,
-    id: config.id,
-    enabled: config.enabled,
-    promptFile: config.promptFile,
-    model: config.model ?? null,
-    skills: config.skills,
-    tools: config.tools,
-    mcp: config.mcp,
-    knowledge: config.knowledge,
-    limits: config.limits,
-  };
 }

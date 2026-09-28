@@ -1,196 +1,129 @@
-/**
- * 模块 Agent 会话生命周期：与 useWorkbenchPiChat 同形（chat/transcript/localRows/
- * busy/modelName/status/send/newConversation/retry/dialog/respondToDialog），
- * 但会话只经 `POST /api/module-agents/:id/sessions` 装配，工具面由服务端配置决定。
- *
- * 会话是懒创建：首次 send 才建；打开面板本身不产生会话。恢复指针双写
- * sessionStorage（本标签页）与 localStorage（最近会话默认值），恢复失败
- * （404/409）清指针 + 软提示，不 fatal——下次发送按需重建。
- * @module agents/useModuleAgentChat
- */
-
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api as piApi } from '../../lib/api'
 import { usePiSession } from '../../lib/usePiSession'
-import { toChatMessages } from '../pi-webx/useWorkbenchPiChat.jsx'
+import { agentStorageKey, readPointer, writePointer, clearPointer, readDraft, writeDraft } from './session-storage.mjs'
 
-const SESSION_KEY_PREFIX = 'ai-workbench.agent-session:default:'
-
-function errorText(error) {
-  return error instanceof Error ? error.message : String(error)
-}
-
-/** sessionStorage 优先（本标签页自己的会话），其次 localStorage（最近会话默认值）。 */
-function readPointer(key) {
-  if (typeof window === 'undefined') return null
-  try {
-    return window.sessionStorage.getItem(key) ?? window.localStorage.getItem(key)
-  } catch {
-    return null
-  }
-}
-
-function writePointer(key, id) {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.setItem(key, id)
-    window.localStorage.setItem(key, id)
-  } catch { /* 存储不可用时每次新开，不致命 */ }
-}
-
-function clearPointer(key) {
-  if (typeof window === 'undefined') return
-  try {
-    window.sessionStorage.removeItem(key)
-    window.localStorage.removeItem(key)
-  } catch { /* 同上 */ }
-}
-
-function newRequestId() {
-  return typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-    ? crypto.randomUUID()
-    : `req-${Date.now()}-${Math.random().toString(36).slice(2)}`
-}
+const errorText = error => error instanceof Error ? error.message : String(error)
+const requestId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random()}`
 
 export function useModuleAgentChat(agentId) {
+  const storageKey = agentStorageKey(agentId)
   const [sessionId, setSessionId] = useState(null)
   const [sending, setSending] = useState(false)
+  const [stopping, setStopping] = useState(false)
+  const [restoring, setRestoring] = useState(true)
   const [error, setError] = useState('')
-  const [notice, setNotice] = useState('')
-  const [fatal, setFatal] = useState(false)
   const [capability, setCapability] = useState(null)
   const [capabilityError, setCapabilityError] = useState('')
-  const creating = useRef(null)
+  const [draft, setDraftState] = useState('')
+  const [pendingText, setPendingText] = useState('')
+  const opening = useRef(null)
+  const targetId = useRef(null)
+  const generation = useRef(0)
+  const mounted = useRef(false)
+  const sendingRef = useRef(false)
+  const stopRequested = useRef(false)
   const pi = usePiSession(sessionId)
-  const storageKey = `${SESSION_KEY_PREFIX}${agentId}`
 
-  // 能力投影：只取本 agent 那一项；失败只进 capabilityError，不挡会话路径。
-  useEffect(() => {
-    let active = true
-    piApi.moduleAgents()
-      .then(({ agents }) => {
-        if (active) setCapability(agents.find(item => item.id === agentId) ?? null)
-      })
-      .catch((cause) => { if (active) setCapabilityError(errorText(cause)) })
-    return () => { active = false }
-  }, [agentId])
-
-  const startSession = useCallback(async () => {
-    if (creating.current) return creating.current
-    creating.current = piApi.createModuleAgentSession(agentId, { requestId: newRequestId() })
+  const setDraft = useCallback((text, expected) => {
+    if (expected !== undefined && readDraft(storageKey) !== expected) return
+    writeDraft(storageKey, text); setDraftState(text)
+  }, [storageKey])
+  const open = useCallback((stored = undefined) => {
+    if (opening.current) return opening.current
+    const version = generation.current
+    const work = piApi.createModuleAgentSession(agentId, { requestId: requestId(), ...(stored ? { sessionId: stored } : {}) })
       .then(({ session }) => {
+        if (version !== generation.current) throw new Error('会话已切换，请重新发送')
+        targetId.current = session.id
         writePointer(storageKey, session.id)
-        setSessionId(session.id)
-        setFatal(false)
-        setError('')
+        if (mounted.current) { setSessionId(session.id); setError('') }
         return session.id
       })
-      .finally(() => { creating.current = null })
-    return creating.current
+    opening.current = work
+    void work.then(() => { if (opening.current === work) opening.current = null }, () => { if (opening.current === work) opening.current = null })
+    return work
   }, [agentId, storageKey])
+
+  useEffect(() => {
+    mounted.current = true
+    setDraftState(readDraft(storageKey))
+    let active = true
+    piApi.moduleAgents().then(({ agents }) => { if (active) setCapability(agents.find(item => item.id === agentId) ?? null) })
+      .catch(cause => { if (active) setCapabilityError(errorText(cause)) })
+    const stored = readPointer(storageKey)
+    const work = stored ? open(stored) : Promise.resolve()
+    work.catch(cause => { if (active) setError(errorText(cause)) })
+      .finally(() => { if (active) setRestoring(false) })
+    return () => { active = false; mounted.current = false }
+  }, [agentId, storageKey, open])
 
   const ensureSession = useCallback(async () => {
-    if (sessionId) return sessionId
-    return startSession()
-  }, [sessionId, startSession])
-
-  // 恢复上次会话：服务端按已登记 sessionId 定位磁盘文件并核对身份。
-  // 404/409 = 会话没了或不属于本 agent → 清指针 + 软提示，保持懒创建不 fatal；
-  // 其他错误（含 503 配置不可用）留 error 由 retry 重试。
-  useEffect(() => {
+    if (opening.current) return opening.current
+    if (targetId.current) return targetId.current
     const stored = readPointer(storageKey)
-    if (!stored) return undefined
-    let active = true
-    piApi.createModuleAgentSession(agentId, { requestId: newRequestId(), sessionId: stored })
-      .then(({ session }) => {
-        if (!active) return
-        writePointer(storageKey, session.id)
-        setSessionId(session.id)
-      })
-      .catch((cause) => {
-        if (!active) return
-        if (cause?.status === 404 || cause?.status === 409) {
-          clearPointer(storageKey)
-          setNotice('上一段会话已失效，发送时会自动开始新对话')
-        } else {
-          setFatal(true)
-          setError(errorText(cause))
-        }
-      })
-    return () => { active = false }
-  }, [agentId, storageKey])
+    return open(stored ?? undefined)
+  }, [open, storageKey])
 
-  const send = useCallback(async (text) => {
+  const send = useCallback(async text => {
     const content = text.trim()
-    if (!content || sending) return
-    setSending(true)
-    setError('')
-    setNotice('')
+    if (!content || sendingRef.current || restoring) return false
+    sendingRef.current = true
+    stopRequested.current = false
+    setSending(true); setError(''); setPendingText(content)
     try {
       const id = await ensureSession()
-      const response = id === sessionId && pi.status === 'live'
-        ? await pi.prompt(content)
-        : await piApi.sendCommand(id, { type: 'prompt', message: content })
-      if (!response.success) throw new Error(response.error ?? 'Agent 未接受消息')
+      if (stopRequested.current) return false
+      const response = await piApi.sendCommand(id, { type: 'prompt', message: content, id: requestId() })
+      if (!response.success || response.data?.accepted === false) throw new Error(response.error ?? response.data?.reason ?? 'Agent 未接受消息')
+      if (stopRequested.current) await piApi.sendCommand(id, { type: 'abort' })
+      return true
     } catch (cause) {
-      setError(errorText(cause))
-      // 503 = 配置不可用/未注册：错误原样透出，retry 可重试。
-      if (cause?.status === 503) setFatal(true)
+      if (mounted.current) setError(errorText(cause))
+      return false
     } finally {
-      setSending(false)
+      sendingRef.current = false
+      if (mounted.current) { setSending(false); setPendingText('') }
     }
-  }, [ensureSession, pi, sending, sessionId])
+  }, [ensureSession, restoring])
 
-  // 只清指针与本地会话，不立刻新建（懒创建）——下次发送时再装配。
-  const newConversation = useCallback(async () => {
-    clearPointer(storageKey)
-    setSessionId(null)
-    setError('')
-    setNotice('')
-  }, [storageKey])
-
-  const retry = useCallback(async () => {
-    setFatal(false)
+  const stop = useCallback(async () => {
+    stopRequested.current = true
+    setStopping(true)
     try {
-      await ensureSession()
-    } catch (cause) {
-      setError(errorText(cause))
-      if (cause?.status === 503) setFatal(true)
-    }
-  }, [ensureSession])
+      const id = targetId.current
+      if (id) {
+        const response = await piApi.sendCommand(id, { type: 'abort' })
+        if (!response.success) throw new Error(response.error ?? '停止失败')
+      }
+    } catch (cause) { if (mounted.current) setError(errorText(cause)) }
+    finally { if (mounted.current) setStopping(false) }
+  }, [])
 
+  const newConversation = useCallback(async () => {
+    if (sendingRef.current || pi.transcript.running) return
+    generation.current += 1
+    opening.current = null; targetId.current = null
+    clearPointer(storageKey); setDraft(''); setSessionId(null); setError('')
+  }, [storageKey, setDraft, pi.transcript.running])
+  const retry = useCallback(async () => {
+    setRestoring(true)
+    try { await ensureSession(); setError('') } catch (cause) { setError(errorText(cause)) }
+    finally { setRestoring(false) }
+  }, [ensureSession])
   const localRows = useMemo(() => {
     const rows = []
-    const detail = error || pi.transcript.lastError || (fatal ? pi.error : '')
-    if (notice !== '') rows.push({ id: 'agent-notice', role: 'notice', text: notice, at: Date.now() })
-    if (detail !== '') rows.push({ id: 'agent-error', role: 'error', text: detail, at: Date.now(), retry: fatal })
-    for (const entry of pi.notifications.filter((item) => item.level === 'error')) {
-      rows.push({ id: entry.id, role: 'error', text: entry.detail ? `${entry.text}：${entry.detail}` : entry.text, at: entry.at })
-    }
+    if (pendingText) rows.push({ id: 'agent-pending', role: 'user', text: pendingText, at: Date.now() })
+    const detail = error || pi.transcript.lastError || pi.error
+    if (detail) rows.push({ id: 'agent-error', role: 'error', text: detail, at: Date.now(), retry: true })
     return rows
-  }, [error, fatal, notice, pi.error, pi.notifications, pi.transcript.lastError])
-
-  const chat = useMemo(() => {
-    const messages = toChatMessages(pi.transcript.entries)
-    messages.push(...localRows)
-    return messages
-  }, [localRows, pi.transcript.entries])
-
-  const status = fatal ? 'error' : sessionId === null ? 'idle' : pi.status
-
+  }, [error, pendingText, pi.error, pi.transcript.lastError])
   return {
-    chat,
-    transcript: pi.transcript,
-    localRows,
-    busy: sending || pi.transcript.running,
+    transcript: pi.transcript, localRows, busy: sending || restoring || pi.transcript.running,
+    canStop: sending || pi.transcript.running, stopping, stop, draft, setDraft,
     modelName: pi.piState?.model?.id ?? capability?.model?.id ?? 'pi-webx',
-    status,
-    send,
-    newConversation,
-    retry,
-    dialog: pi.dialogs[0] ?? null,
-    respondToDialog: pi.respondToDialog,
-    capability,
-    capabilityError,
+    status: error ? 'error' : restoring ? 'connecting' : sessionId === null ? 'idle' : pi.status,
+    send, newConversation, retry, dialog: pi.dialogs[0] ?? null, respondToDialog: pi.respondToDialog,
+    capability, capabilityError,
   }
 }

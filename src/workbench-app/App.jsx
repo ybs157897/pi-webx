@@ -366,6 +366,7 @@ export default function App() {
 
       {agentPanel !== null && (
         <ModuleAgentPanel
+          key={agentPanel}
           agentId={agentPanel}
           themeMode={theme}
           stepsMode={stepsMode}

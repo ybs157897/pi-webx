@@ -11,12 +11,15 @@ import type { AgentToolResult, ToolDefinition } from '@earendil-works/pi-coding-
 
 import type { WorkbenchStore } from '../../workbench/store';
 import type { KnowledgeAccess } from '../knowledge';
-import { createLogsQuery } from './service';
+import type { DataSource } from '../../data-sources/contracts';
+import { sourceTools } from '../../data-sources/tools';
 
 /** 配置名 → pi 工具名。装配与配置校验都以这张表为准。 */
 export const LOGS_TOOL_NAMES: Readonly<Record<string, string>> = {
   'logs.search': 'logs_search',
   'logs.read': 'logs_read',
+  'issues.search': 'issues_search',
+  'issues.read': 'issues_read',
   'knowledge.search': 'knowledge_search',
   'knowledge.read': 'knowledge_read',
   'knowledge.create': 'knowledge_create',
@@ -25,6 +28,7 @@ export const LOGS_TOOL_NAMES: Readonly<Record<string, string>> = {
 
 export interface LogsToolDeps {
   store: WorkbenchStore;
+  sources: Partial<Record<'logs' | 'issues', DataSource>>;
   knowledge: KnowledgeAccess;
   limits: { maxToolOutputChars: number };
 }
@@ -39,39 +43,11 @@ function result(data: unknown, maxChars: number): AgentToolResult<unknown> {
 
 export function createLogsTools(deps: LogsToolDeps): ToolDefinition[] {
   const { knowledge, limits } = deps;
-  const logs = createLogsQuery(deps.store);
   const max = limits.maxToolOutputChars;
 
   return [
-    {
-      name: LOGS_TOOL_NAMES['logs.search']!,
-      label: '日志检索',
-      description: '在工作台日志记录中做有界检索：可按关键词、级别、来源与日期闭区间过滤，返回 { items, total, query, range }。',
-      promptSnippet: 'logs_search: 有界检索工作台日志，返回带来源的命中与查询条件。',
-      parameters: Type.Object({
-        q: Type.Optional(Type.String({ description: '关键词，匹配正文/来源/级别' })),
-        level: Type.Optional(Type.String({ description: '日志级别，如 info/warn/error' })),
-        source: Type.Optional(Type.String({ description: '来源标识，如 server/workbench' })),
-        from: Type.Optional(Type.String({ description: '起始日期 YYYY-MM-DD（闭区间）' })),
-        to: Type.Optional(Type.String({ description: '截止日期 YYYY-MM-DD（闭区间）' })),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 50, description: '最多返回条数，上限 50' })),
-      }, { additionalProperties: false }),
-      async execute(_toolCallId, params) {
-        return result(logs.search(params as Parameters<typeof logs.search>[0]), max);
-      },
-    },
-    {
-      name: LOGS_TOOL_NAMES['logs.read']!,
-      label: '日志读取',
-      description: '按 id 读取一条日志记录的完整内容。',
-      promptSnippet: 'logs_read: 按 id 读取单条日志全文。',
-      parameters: Type.Object({
-        id: Type.String({ description: '日志记录 id（来自 logs_search 结果）' }),
-      }, { additionalProperties: false }),
-      async execute(_toolCallId, params) {
-        return result(logs.read((params as { id: string }).id), max);
-      },
-    },
+    ...(deps.sources.logs ? sourceTools('logs', deps.sources.logs, max) : []),
+    ...(deps.sources.issues ? sourceTools('issues', deps.sources.issues, max) : []),
     {
       name: LOGS_TOOL_NAMES['knowledge.search']!,
       label: '知识检索',

@@ -624,7 +624,8 @@ export interface ModuleAgentCapability {
   error?: string;
   profileRevision?: string;
   tools?: string[];
-  skills?: { name: string; path: string }[];
+  skills?: { name: string; description: string }[];
+  dataSources?: { kind: 'logs' | 'issues'; id: string; adapter: string }[];
   mcp?: {
     id: string;
     enabled: boolean;

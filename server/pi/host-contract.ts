@@ -66,6 +66,7 @@ export interface HostedSession {
   resumed: boolean;
   alive: boolean;
   streaming: boolean;
+  moduleAgentMaxRunning?: number;
   /** A prompt is mid-preflight; a second one would race the first. */
   preparing?: boolean;
   /** A queued row is being handed to pi right now; one flush at a time. */

@@ -6,6 +6,7 @@
  */
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 
+import type { DataSource } from '../data-sources/contracts';
 import type { WorkbenchStore } from '../workbench/store';
 import type { AgentId } from './contracts';
 import type { KnowledgeAccess } from './knowledge';
@@ -14,6 +15,7 @@ import { LOGS_TOOL_NAMES, createLogsTools } from './logs/tools';
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
   store: WorkbenchStore;
+  sources: Partial<Record<'logs' | 'issues', DataSource>>;
   limits: { maxRunningSessions: number; maxToolOutputChars: number };
 }
 
@@ -38,5 +40,5 @@ export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | unde
  */
 export function resolveToolNames(id: AgentId, configured: readonly string[]): string[] {
   const map = moduleAgentDefinition(id)?.toolNameMap ?? {};
-  return configured.map((name) => map[name] ?? name);
+  return configured.map((name) => name === 'skills.read' ? 'skills_read' : map[name] ?? name);
 }

@@ -7,7 +7,7 @@
  * set_tools/fork/reset/普通恢复路径全部收口、普通会话回归不受影响。
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -17,9 +17,8 @@ import { createAssistantMessageEventStream, type AssistantMessage } from '@earen
 import { PiHost, HostError } from '../server/pi/host';
 import { MAIN_IDENTITY_PROMPT } from '../server/prompts/loader';
 import { WorkbenchStore } from '../server/workbench/store';
-import { ensureBinding, createKnowledgeAccess } from '../server/module-agents/knowledge';
 import { assembleModuleAgent } from '../server/module-agents/assemble';
-import { createLogsTools, LOGS_TOOL_NAMES } from '../server/module-agents/logs/tools';
+import { LOGS_TOOL_NAMES } from '../server/module-agents/logs/tools';
 import { loadAgentProfiles, defaultAgentsConfigRoot } from '../server/module-agents/profiles';
 import type { ResolvedAgentProfile } from '../server/module-agents/contracts';
 import type { PiCommandEnvelope } from '../src/shared/protocol';
@@ -30,7 +29,7 @@ const sessionDir = join(root, 'sessions');
 const cwd = join(root, 'work');
 
 const SENTINEL = 'LOGS-AGENT-SENTINEL-7e2d';
-const MODULE_TOOL_NAMES = Object.values(LOGS_TOOL_NAMES).sort();
+const MODULE_TOOL_NAMES = [...Object.values(LOGS_TOOL_NAMES), 'skills_read'].sort();
 
 const profiles = await loadAgentProfiles(defaultAgentsConfigRoot());
 const realLogs = profiles.get('logs');
@@ -81,6 +80,7 @@ async function driveScriptedTurn(session: { agent: any }): Promise<void> {
 
 async function main(): Promise<void> {
   await mkdir(agentDir, { recursive: true });
+  await writeFile(join(agentDir, 'SYSTEM.md'), 'GLOBAL-PROMPT-MUST-NOT-LEAK');
   await mkdir(sessionDir, { recursive: true });
   await mkdir(cwd, { recursive: true });
 
@@ -106,21 +106,12 @@ async function main(): Promise<void> {
   });
 
   try {
-    const binding = ensureBinding(store, 'ws', 'logs', 'logs');
-    const knowledge = createKnowledgeAccess(store, binding);
-    const customTools = createLogsTools({ store, knowledge, limits: profile.config.limits });
-    const moduleOption = {
-      scope: { agentId: 'logs' as const, workspaceKey: 'ws', profileRevision: profile.profileRevision },
-      profile,
-      customTools,
-      allowedToolNames: [] as string[],
-      systemPromptAppend: [] as string[],
-    };
+    const moduleOption = await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile });
 
-    /* (a) 工具面恰为 6 个模块工具，无内置工具、无 subagent/render_ui */
+    /* (a) 工具面恰为 配置允许的模块工具，无内置工具、无 subagent/render_ui */
     const hosted = await host.create({ cwd, provider: probeModel.provider, model: probeModel.id, moduleAgent: moduleOption });
     const allNames = hosted.session.getAllTools().map((tool) => tool.name).sort();
-    assert.deepEqual(allNames, MODULE_TOOL_NAMES, '模块会话的工具目录必须恰为 6 个领域工具');
+    assert.deepEqual(allNames, MODULE_TOOL_NAMES, '模块会话的工具目录必须恰为 配置允许的领域工具');
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), MODULE_TOOL_NAMES, '全部模块工具应处于激活态');
     assert.equal(hosted.moduleAgent?.agentId, 'logs');
     assert.equal(hosted.moduleAgent?.sessionId, hosted.id);
@@ -139,7 +130,7 @@ async function main(): Promise<void> {
     });
     assert.deepEqual(
       trimmed.session.getAllTools().map((tool) => tool.name).sort(),
-      ['knowledge_read', 'knowledge_search', 'logs_read', 'logs_search'],
+      ['issues_read', 'issues_search', 'knowledge_read', 'knowledge_search', 'logs_read', 'logs_search', 'skills_read'],
       '配置删掉的名字不得出现在会话工具里',
     );
     assert.equal(trimmed.session.getToolDefinition('knowledge_create'), undefined);
@@ -155,9 +146,13 @@ async function main(): Promise<void> {
     );
 
     /* (b) Skills 只含 log-analysis */
-    const commands = hosted.extensionsResult.runtime.getCommands();
-    const skillCommands = commands.filter((entry) => JSON.stringify(entry).includes('log-analysis'));
-    assert.ok(skillCommands.length >= 1, '应只加载 log-analysis Skill');
+    assert.ok(hosted.session.systemPrompt.includes('log-analysis'), '模型必须能发现 Skill');
+    const skill = hosted.session.getToolDefinition('skills_read')!;
+    const content = await skill.execute('probe', { name: 'log-analysis' }, undefined, undefined, {} as never);
+    assert.ok(JSON.stringify(content).includes('先收窄范围'), '模型可通过受限工具读取 Skill 正文');
+    const refusedSkill = await skill.execute('probe', { name: 'log-analysis', resource: '../../SYSTEM.md' }, undefined, undefined, {} as never);
+    assert.equal((refusedSkill.details as any).found, false);
+    assert.ok(!hosted.session.systemPrompt.includes('GLOBAL-PROMPT-MUST-NOT-LEAK'));
 
     /* (c) 系统提示词是 profile 正文，不含主会话身份段 */
     assert.ok(hosted.session.systemPrompt.includes(SENTINEL), '系统提示词应含模块提示词');

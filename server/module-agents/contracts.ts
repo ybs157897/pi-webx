@@ -1,3 +1,5 @@
+import type { DataSourceConfigs } from '../data-sources/contracts';
+import type { SkillSnapshot } from './resources';
 /**
  * 模块 Agent 的公共契约：身份、配置与装配产物的类型。
  *
@@ -47,6 +49,7 @@ export interface AgentProfileConfig {
   promptFile: string;
   model?: { provider: string; id: string };
   skills: string[];
+  dataSources: DataSourceConfigs;
   tools: string[];
   mcp: McpConnectionConfig[];
   knowledge: { homeBinding: string; sharedReadBindings: string[] };
@@ -59,6 +62,7 @@ export interface ResolvedAgentProfile {
   promptText: string;
   /** 绝对路径，已 stat 存在。 */
   skillPaths: string[];
+  skills: SkillSnapshot[];
   /** 含 config 规范化 JSON + prompt 正文 + 每个 SKILL.md 正文；不含任何 env 值。 */
   profileRevision: string;
 }

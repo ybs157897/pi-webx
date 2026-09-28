@@ -1,6 +1,7 @@
 /* 模块 Agent 面板与能力卡：令牌只取 styles.css。 */
 
-.agent-panel { display: contents; }
+/* ThemeProvider creates an isolated stacking context; raise its outer owner above navigation. */
+.agent-panel { position: fixed; inset: 0; z-index: var(--z-modal); }
 
 .agent-capabilities {
   margin-top: var(--sp-3);

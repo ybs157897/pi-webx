@@ -821,3 +821,17 @@ console.log('workbench UI: transcript work-details modes (compact/standard/detai
 }
 
 console.log('workbench UI: module agent panel (capabilities redaction, AIPanel optional props, App wiring) passed');
+
+{
+  const stopped = renderToStaticMarkup(h(AIPanel, {
+    transcript: { entries: [] }, assistRows: [], busy: true, status: 'live', modelName: 'fixture',
+    onStop: () => {}, stopping: false, draft: '尚未发送的草稿', onDraftChange: () => {},
+    title: '日志 Agent', welcomeText: '查询已接入的日志和问题清单', suggestions: ['查询错误'], inputPlaceholder: '查询日志',
+  }));
+  assert.ok(stopped.includes('data-testid="module-agent-stop"'));
+  assert.ok(stopped.includes('aria-label="停止当前回答"'));
+  assert.ok(stopped.includes('尚未发送的草稿'));
+  assert.ok(stopped.includes('查询已接入的日志和问题清单'));
+  assert.ok(!stopped.includes('如何安排一周运动'));
+  assert.ok(stopped.includes('placeholder="查询日志"'));
+}

@@ -13,7 +13,7 @@ import { join } from 'node:path';
 
 import { WorkbenchStore } from '../server/workbench/store';
 import { ensureBinding, createKnowledgeAccess } from '../server/module-agents/knowledge';
-import { createLogsQuery } from '../server/module-agents/logs/service';
+import { createDataSourceRegistry } from '../server/data-sources/registry';
 
 const dir = await mkdtemp(join(tmpdir(), 'module-agent-knowledge-'));
 const store = new WorkbenchStore(join(dir, 'workbench.sqlite'));
@@ -98,23 +98,24 @@ try {
     { text: '前端渲染闪烁 timeout-AAA', level: 'warn', source: 'web', date: '2026-09-22' },
   ];
   for (const row of seed) store.addRecord('logs', row);
-  const logs = createLogsQuery(store);
-  const errors = logs.search({ level: 'error' });
+  const logs = createDataSourceRegistry(store).create('logs', { id: 'workbench-logs', adapter: 'workbench', options: {} });
+  const errors = await logs.search({ level: 'error' });
   assert.equal(errors.total, 1, 'level 过滤应只留 error');
-  assert.equal(errors.items[0]?.text, '网关超时 timeout-AAA');
-  const ranged = logs.search({ from: '2026-09-21', to: '2026-09-22' });
+  assert.equal((errors.items[0] as any)?.message, '网关超时 timeout-AAA');
+  const ranged = await logs.search({ from: '2026-09-21', to: '2026-09-22' });
   assert.equal(ranged.total, 2, '日期闭区间过滤');
-  const bySource = logs.search({ source: 'web' });
+  const bySource = await logs.search({ service: 'web' });
   assert.equal(bySource.total, 1);
-  const byQ = logs.search({ q: '恢复' });
+  const byQ = await logs.search({ q: '恢复' });
   assert.equal(byQ.total, 1, '关键词过滤');
   for (let index = 0; index < 60; index += 1) store.addRecord('logs', { text: `bulk-${index}`, level: 'info', source: 's', date: '2026-09-23' });
-  const capped = logs.search({ q: 'bulk', limit: 500 });
+  await assert.rejects(logs.search({ q: 'bulk', limit: 500 }));
+  const capped = await logs.search({ q: 'bulk', limit: 50 });
   assert.equal(capped.items.length, 50, 'limit 上限 50 必须生效');
-  assert.equal(capped.source, 'workbench.logs', '结果必须带来源标识');
-  const readBack = logs.read(errors.items[0]!.id as string);
-  assert.ok(readBack.ok === true);
-  assert.ok(logs.read('nope').ok === false);
+  assert.equal(capped.source.id, 'workbench-logs', '结果必须带来源标识');
+  const readBack = await logs.read(errors.items[0]!.id as string);
+  assert.ok(readBack !== null);
+  assert.equal(await logs.read('nope'), null);
 
   console.log('PASS 模块 Agent 知识访问：三库绑定幂等、search/read/update/create 作用域隔离不泄露，日志查询过滤与上限正确');
 } finally {

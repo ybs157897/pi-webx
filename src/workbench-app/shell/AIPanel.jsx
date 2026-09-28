@@ -14,7 +14,7 @@
  * @module shell/AIPanel
  */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ThemeProvider } from '@lobehub/ui'
 import { QuestionComposer } from '../../components/QuestionComposer'
 import { TranscriptView } from '../../components/TranscriptView'
@@ -117,14 +117,22 @@ function FallbackRows({ rows, onRetry }) {
 }
 
 /** 输入框：Enter 发送、Shift+Enter 换行，高度随内容自增到上限。 */
-function Composer({ busy, onSend }) {
-  const [value, setValue] = useState('')
+function Composer({ busy, onSend, onStop, stopping, draft, onDraftChange, placeholder }) {
+  const [localValue, setLocalValue] = useState('')
+  const value = draft ?? localValue
+  const setValue = onDraftChange ?? setLocalValue
+  const latest = useRef(value)
+  latest.current = value
 
-  function submit() {
+  async function submit() {
+    const original = value
     const text = value.trim()
     if (text === '' || busy) return
-    setValue('')
-    onSend(text)
+    const accepted = await onSend(text)
+    if (accepted !== false && latest.current === original) {
+      if (onDraftChange) onDraftChange('', original)
+      else setLocalValue('')
+    }
   }
 
   return (
@@ -133,8 +141,8 @@ function Composer({ busy, onSend }) {
         className="composer-input"
         rows={1}
         value={value}
-        placeholder={TEXT.sendPlaceholder}
-        aria-label={TEXT.sendPlaceholder}
+        placeholder={placeholder ?? TEXT.sendPlaceholder}
+        aria-label={placeholder ?? TEXT.sendPlaceholder}
         onChange={event => {
           setValue(event.target.value)
           const node = event.target
@@ -148,12 +156,14 @@ function Composer({ busy, onSend }) {
           }
         }}
       />
-      <button type="button" className="send-btn" aria-label={TEXT.send} title={TEXT.send} disabled={busy || value.trim() === ''} onClick={submit}>
+      {onStop ? <button type="button" className="send-btn" data-testid="module-agent-stop" aria-label="停止当前回答" title="停止当前回答" disabled={stopping} onClick={onStop}>
+        <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" /></svg>
+      </button> : <button type="button" className="send-btn" aria-label={TEXT.send} title={TEXT.send} disabled={busy || value.trim() === ''} onClick={submit}>
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M20 4.4 4.6 11.3l6.1 2.3 2.3 6.1Z" />
           <path d="M20 4.4 10.7 13.6" />
         </svg>
-      </button>
+      </button>}
     </div>
   )
 }
@@ -163,7 +173,7 @@ export default function AIPanel({
   // 模块 Agent 复用本外壳时的三个可选项：title 换掉「小台」名，subtitle 换掉
   // live 状态行的「Pi Agent」前缀（如「日志 Agent · gpt-…」），emptyExtra
   // 渲染在空态欢迎语下方（能力卡）。不传则与旧行为完全一致。
-  title, subtitle, emptyExtra,
+  title, subtitle, emptyExtra, onStop, stopping, draft, onDraftChange, welcomeText, suggestions, inputPlaceholder,
 }) {
   // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
@@ -177,7 +187,7 @@ export default function AIPanel({
 
   const statusText = status === 'live'
     ? `${subtitle ?? 'Pi Agent'} · ${modelName}`
-    : status === 'connecting' ? TEXT.connecting : status === 'idle' ? TEXT.idle : TEXT.retryHint
+    : status === 'connecting' ? `${title ?? TEXT.assistant}连接中…` : status === 'idle' ? `${title ?? TEXT.assistant}待命` : TEXT.retryHint
 
   const entries = Array.isArray(transcript?.entries) ? transcript.entries : []
   const rows = Array.isArray(assistRows) ? assistRows : []
@@ -194,14 +204,14 @@ export default function AIPanel({
             <p className="aside-title">{title ?? TEXT.assistant}</p>
             <p className="aside-sub">
               <span className={`status-dot ${status === 'live' ? '' : status === 'connecting' ? 'connecting' : 'off'}`} />
-              {busy ? TEXT.thinking : statusText}
+              {busy ? `${title ?? TEXT.assistant}正在处理…` : statusText}
             </p>
           </div>
           <div className="aside-actions">
             <button type="button" className="icon-btn" aria-label={TEXT.refresh} title={TEXT.refresh} onClick={onRefreshData}>
               <IconRefresh size={17} />
             </button>
-            <button type="button" className="icon-btn" aria-label={TEXT.clearChat} title={TEXT.clearChat} onClick={onNew}>
+            <button type="button" className="icon-btn" aria-label={TEXT.clearChat} title={TEXT.clearChat} disabled={busy} onClick={onNew}>
               <IconPlus size={17} />
             </button>
             <button type="button" className="icon-btn" aria-label={TEXT.close} title={TEXT.close} onClick={onClose}>
@@ -216,13 +226,13 @@ export default function AIPanel({
               <div className="chat-empty">
                 <span className="empty-icon"><IconSparkles size={22} /></span>
                 <div>
-                  <p className="chat-empty-title">{TEXT.welcome}</p>
-                  <p className="chat-empty-text">{TEXT.welcomeText}</p>
+                  <p className="chat-empty-title">{title ? `${title}已就位` : TEXT.welcome}</p>
+                  <p className="chat-empty-text">{welcomeText ?? TEXT.welcomeText}</p>
                 </div>
                 {emptyExtra}
                 <div className="suggest">
-                  {TEXT.suggestions.map(question => (
-                    <button type="button" className="suggest-item" key={question} onClick={() => onSend(question)}>
+                  {(suggestions ?? TEXT.suggestions).map(question => (
+                    <button type="button" className="suggest-item" key={question} disabled={busy} onClick={() => onSend(question)}>
                       {question}
                     </button>
                   ))}
@@ -243,7 +253,7 @@ export default function AIPanel({
           {/* dsh 的提问形态：问题占据输入框的座位（同一 QuestionComposer，与 /chat 同源，
               不弹窗）。Composer 保持挂载只是隐藏——草稿跨问题存活；问题作答完即还位。 */}
           <div style={dialog ? { display: 'none' } : undefined}>
-            <Composer busy={busy} onSend={onSend} />
+            <Composer busy={busy} onSend={onSend} onStop={onStop} stopping={stopping} draft={draft} onDraftChange={onDraftChange} placeholder={inputPlaceholder} />
           </div>
           {dialog && (
             <QuestionComposer

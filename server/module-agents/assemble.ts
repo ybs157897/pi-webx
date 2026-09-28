@@ -12,6 +12,9 @@
  */
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 
+import { createDataSourceRegistry, type DataSourceRegistry } from '../data-sources/registry';
+import type { DataSource, SourceKind } from '../data-sources/contracts';
+import { skillTool } from './resources';
 import { BUILTIN_TOOL_NAMES } from '../../src/shared/tool-presets';
 import { HostError } from '../pi/host-contract';
 import type { WorkbenchStore } from '../workbench/store';
@@ -25,6 +28,7 @@ export interface AssembleModuleAgentInput {
   workspaceKey: string;
   agentId: AgentId;
   profile: ResolvedAgentProfile;
+  dataSourceRegistry?: DataSourceRegistry;
 }
 
 export interface AssembledModuleAgent {
@@ -57,13 +61,38 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
   }
   const knowledge = createKnowledgeAccess(store, { ...binding, sharedReadBaseIds: [...sharedReadBaseIds] });
 
-  const produced = definition.createTools({ knowledge, store, limits: profile.config.limits });
-  const producedNames = new Set(produced.map((tool) => tool.name));
-  const resolved = resolveToolNames(agentId, profile.config.tools);
-  for (const name of resolved) {
-    if (!producedNames.has(name) && !BUILTIN_TOOL_NAMES.has(name)) {
-      throw new HostError(503, `模块 Agent「${agentId}」配置了未知工具：${name}`);
+  const registry = input.dataSourceRegistry ?? createDataSourceRegistry(store);
+  const sources: Partial<Record<SourceKind, DataSource>> = {};
+  const disposeSources = async () => {
+    const owned = Object.values(sources);
+    for (const kind of Object.keys(sources) as SourceKind[]) delete sources[kind];
+    await Promise.allSettled(owned.map(async source => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([source.dispose?.(), new Promise<void>(resolve => { timer = setTimeout(resolve, 5000); timer.unref(); })]);
+      } finally { if (timer) clearTimeout(timer); }
+    }));
+  };
+  let produced: ToolDefinition[];
+  let resolved: string[];
+  try {
+    for (const kind of ['logs', 'issues'] as const) {
+      const cfg = profile.config.dataSources[kind];
+      if (cfg && profile.config.tools.some(name => name.startsWith(`${kind}.`))) sources[kind] = registry.create(kind, cfg);
     }
+    produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits });
+    if (profile.skills.length) produced.push(skillTool(profile.skills));
+    if (profile.skills.length && !profile.config.tools.includes('skills.read')) throw new HostError(503, '配置了 Skills 时必须允许 skills.read');
+    const producedNames = new Set(produced.map((tool) => tool.name));
+    resolved = resolveToolNames(agentId, profile.config.tools);
+    for (const name of resolved) {
+      if (!producedNames.has(name) && !BUILTIN_TOOL_NAMES.has(name)) {
+        throw new HostError(503, `模块 Agent「${agentId}」配置了未知工具：${name}`);
+      }
+    }
+  } catch (error) {
+    await disposeSources();
+    throw new HostError(503, error instanceof Error ? error.message : '数据源装配失败');
   }
   const resolvedSet = new Set(resolved);
   const customTools = produced.filter((tool) => resolvedSet.has(tool.name));
@@ -73,6 +102,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
   const degraded: { id: string; error: string }[] = [];
   const systemPromptAppend: string[] = [];
   const disposeAll = async () => {
+    await disposeSources();
     for (const conn of connected.splice(0)) {
       try { await conn.dispose(); } catch { /* best-effort */ }
     }

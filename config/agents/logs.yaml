@@ -7,6 +7,9 @@ skills:
 tools:
   - logs.search
   - logs.read
+  - issues.search
+  - issues.read
+  - skills.read
   - knowledge.search
   - knowledge.read
   - knowledge.create
@@ -29,3 +32,12 @@ knowledge:
 limits:
   maxRunningSessions: 1
   maxToolOutputChars: 24000
+dataSources:
+  logs:
+    id: workbench-logs
+    adapter: workbench
+    options: {}
+  issues:
+    id: workbench-issues
+    adapter: workbench
+    options: {}
