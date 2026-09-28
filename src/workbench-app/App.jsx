@@ -51,10 +51,10 @@ export const APP_NAME = 'AI 指挥台'
 export const MODULES = [
   { id: 'dashboard', label: '我的主页', desc: '今天的全局一屏', icon: IconHome, Component: Dashboard },
   { id: 'tasks', label: '今日规划', desc: '待办、优先级与截止日', icon: IconTasks, Component: Tasks },
-  { id: 'works', label: '工作助理', desc: '待办 / 进行中 / 已完成看板', icon: IconWorks, Component: Works },
+  { id: 'works', label: '工作助理', desc: '和专属助手规划工作，安排什么时候做什么', icon: IconWorks, Component: Works },
   { id: 'fixes', label: '问题修复', desc: '问题清单、优先级与状态流转', icon: IconBug, Component: Fixes },
   { id: 'logs', label: '日志查询', desc: '对话框式检索与记录开发日志', icon: IconLogs, Component: Logs },
-  { id: 'requirements', label: '需求管理', desc: '需求知识库：搜索、列表与阅读视图', icon: IconRequirements, Component: Requirements },
+  { id: 'requirements', label: '需求管理', desc: '通过对话梳理需求，确认后导入待办', icon: IconRequirements, Component: Requirements },
   { id: 'codes', label: '代码开发', desc: '文件树 + 编辑器工作区', icon: IconCode, Component: Codes },
   { id: 'knowledge', label: '知识库', desc: '检索、阅读与关联沉淀的知识', icon: IconBook, Component: Knowledge },
   { id: 'agent-settings', label: 'Agent 配置', desc: '分别配置模块 Agent 的提示词、模型和 Skill', icon: IconSettings, Component: AgentSettingsPage },
@@ -103,6 +103,7 @@ export default function App() {
   const [profile, setProfile] = useState({ name: '我', motto: '' })
   const [empty, setEmpty] = useState(false)
   const [activeModule, setActiveModule] = useState('dashboard')
+  const [navigationTarget, setNavigationTarget] = useState(null)
   const [ready, setReady] = useState(false)
   const [bootError, setBootError] = useState('')
   const [drawerOpen, setDrawerOpen] = useState(false)
@@ -128,21 +129,25 @@ export default function App() {
     return () => { if (navigationGuard.current === guard) navigationGuard.current = null }
   }, [])
 
-  const activateModule = useCallback(id => {
+  const activateModule = useCallback((id, target = null) => {
     setActiveModule(id)
+    setNavigationTarget(target ?? {})
     setDrawerOpen(false)
     setPanelOpen(false)
     setAgentPanel(null)
   }, [])
 
-  const openModule = useCallback(id => {
+  const openModule = useCallback((id, target = null) => {
     if (!MODULES.some(module => module.id === id)) return
     setDrawerOpen(false)
-    if (id === activeModule) return
+    if (id === activeModule) {
+      setNavigationTarget(target ?? {})
+      return
+    }
     // 移动端抽屉或全屏 AI 面板不能盖住未保存确认。
     setPanelOpen(false)
     if (navigationGuard.current?.(id) === false) return
-    activateModule(id)
+    activateModule(id, target)
   }, [activeModule, activateModule])
 
   const notify = useCallback((text, tone = 'ok') => {
@@ -352,7 +357,7 @@ export default function App() {
       <SideNav modules={MODULES} active={activeModule} data={data} piStatus={piStatus} onNavigate={openModule} />
 
       <main className="main">
-        <div className={`main-inner ${activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : ''}`}>
+        <div className={`main-inner ${activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : activeModule === 'requirements' ? 'req-main-inner' : activeModule === 'works' ? 'works-main-inner' : ''}`}>
           <div className="page-head">
             <div>
               <h1 className="page-title">{active.label}</h1>
@@ -372,6 +377,7 @@ export default function App() {
             refresh={refresh}
             notify={notify}
             navigate={openModule}
+            navigationTarget={navigationTarget}
             prefs={prefs}
             themeMode={theme}
             setPref={setPref}
@@ -418,7 +424,7 @@ export default function App() {
       )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
-      {panelOpen === false && agentPanel === null && activeModule !== 'codes' && (
+      {panelOpen === false && agentPanel === null && !['codes', 'requirements', 'works'].includes(activeModule) && (
         <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>

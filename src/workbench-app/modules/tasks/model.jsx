@@ -227,9 +227,19 @@ function createdDay(task) {
 
 /** 第一条关联指向的模块（认得出才给跳转入口）。 */
 function firstRefModule(task, modules) {
-  const first = Array.isArray(task.refs) ? task.refs[0] : undefined
-  if (first === null || first === undefined || typeof first !== 'object') return null
-  return (modules ?? []).find(module => module.id === first.type) ?? null
+  return firstNavigableRef(task, modules)?.module ?? null
+}
+
+/** 需求来源优先：角标应带记录 id 跳到对应需求，而非只进入模块首页。 */
+function firstNavigableRef(task, modules) {
+  const refs = Array.isArray(task.refs) ? task.refs : []
+  const ordered = [...refs.filter(ref => ref?.type === 'requirements'), ...refs.filter(ref => ref?.type !== 'requirements')]
+  for (const ref of ordered) {
+    if (typeof ref?.id !== 'string' || ref.id === '') continue
+    const module = (modules ?? []).find(item => item.id === ref.type)
+    if (module) return { module, ref }
+  }
+  return null
 }
 
 /* ------------------------------------------------------------------ 行组件 */
@@ -244,7 +254,7 @@ function TaskRow({
   const due = dueLabel(task, today)
   const tag = typeof task.tag === 'string' ? task.tag.trim() : ''
   const refCount = Array.isArray(task.refs) ? task.refs.length : 0
-  const linked = firstRefModule(task, modules)
+  const linked = firstNavigableRef(task, modules)
   const isEditing = editing !== null && editing.id === task.id
   const busy = pending === task.id
 
@@ -312,8 +322,9 @@ function TaskRow({
               <button
                 type="button"
                 className="task-refs is-link"
-                title={`${TEXT.refs} ${refCount} 条 · 去${linked.label}`}
-                onClick={() => onNavigate(linked.id)}
+                title={`${TEXT.refs} ${refCount} 条 · 去${linked.module.label}`}
+                data-testid={linked.ref.type === 'requirements' ? 'task-requirement-ref' : undefined}
+                onClick={() => onNavigate(linked.module.id, linked.ref.type === 'requirements' ? { selectedId: linked.ref.id } : undefined)}
               >
                 <IconLink size={12} />
                 {refCount}
@@ -349,5 +360,5 @@ export {
   GROUPS, SCOPE_OPTIONS, TAG_TONES, parseDueWord, hasMarks,
   dueWord, captureToast, urgencyOf, inScope, compareOpen,
   compareDone, dueLabel, tagTone, createdDay, firstRefModule,
-  TaskRow,
+  firstNavigableRef, TaskRow,
 }

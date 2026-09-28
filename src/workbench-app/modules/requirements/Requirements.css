@@ -162,7 +162,7 @@
   overflow-wrap: anywhere;
 }
 
-.req-reader-tools { display: flex; align-items: center; gap: var(--sp-1); flex: none; }
+.req-reader-tools { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); flex: none; }
 
 /* 星标按钮的定位槽：只做水平对齐，测试也认这个槽位。 */
 .req-star-slot { display: inline-flex; }

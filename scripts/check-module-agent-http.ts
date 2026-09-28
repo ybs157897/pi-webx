@@ -39,6 +39,14 @@ const base = `http://127.0.0.1:${(server.address() as any).port}/api/module-agen
 const post = async (body: object, id = 'logs') => { const response = await fetch(`${base}/${id}/sessions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }); return { status: response.status, body: await response.json() as any }; };
 const unhandled: unknown[] = []; const capture = (error: unknown) => unhandled.push(error); process.on('unhandledRejection', capture);
 try {
+  const capabilitiesResponse = await fetch(base);
+  assert.equal(capabilitiesResponse.status, 200);
+  const capabilities = await capabilitiesResponse.json() as { agents: Array<{ id: string; ok: boolean; enabled: boolean; tools?: string[] }> };
+  assert.deepEqual(capabilities.agents.map(agent => agent.id), ['requirements', 'codes', 'logs', 'works']);
+  const worksCapability = capabilities.agents.find(agent => agent.id === 'works');
+  assert.equal(worksCapability?.ok, true);
+  assert.equal(worksCapability?.enabled, true);
+  assert.deepEqual(worksCapability?.tools, ['works.context', 'works.schedule']);
   const concurrent = await Promise.all(Array.from({ length: 8 }, () => post({ requestId: 'same-create' })));
   assert.ok(concurrent.every(result => result.status === 200));
   const id = concurrent[0]!.body.session.id;
@@ -134,6 +142,16 @@ try {
   assert.equal(normalizeProjectCwd(`${codesA}/./`), codesA);
   assert.notEqual(agentStorageKey('codes', codesA), agentStorageKey('codes', codesB));
   assert.equal(agentStorageKey('logs'), 'ai-workbench.agent-session:default:logs');
+  assert.equal((await post({ requestId: 'works-with-cwd', cwd: codesA }, 'works')).status, 400);
+  const worksSession = await post({ requestId: 'works-create' }, 'works');
+  assert.equal(worksSession.status, 200, JSON.stringify(worksSession));
+  const worksHosted = host.get(worksSession.body.session.id)!;
+  assert.equal(worksHosted.moduleAgent?.agentId, 'works');
+  assert.ok(worksHosted.session.systemPrompt.includes('工作助理 Agent'));
+  assert.ok(worksHosted.session.getToolDefinition('works_context'));
+  assert.ok(worksHosted.session.getToolDefinition('works_schedule'));
+  assert.equal(worksHosted.session.getToolDefinition('requirements_save_draft'), undefined);
+  await host.kill(worksHosted.id);
   console.log('PASS 模块 HTTP：创建幂等、运行中恢复、并发恢复、SDK 工具回合与快照；代码 Agent 真实目录、工具白名单、按项目恢复隔离');
 } finally {
   process.removeListener('unhandledRejection', capture); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));

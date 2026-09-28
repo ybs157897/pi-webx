@@ -48,6 +48,7 @@ export const api = {
   exportData: () => request('/export'),
   importData: (data) => request('/import', { method: 'POST', body: data }),
   addRecord: (module, fields) => request(`/${module}`, { method: 'POST', body: fields }),
+  importRequirement: (id, body) => request(`/requirements/${encodeURIComponent(id)}/import-tasks`, { method: 'POST', body }),
   patchRecord: (module, id, patch) => request(`/${module}/${encodeURIComponent(id)}`, { method: 'PATCH', body: patch }),
   removeRecord: (module, id) => request(`/${module}/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   search: (query) => request(`/search?q=${encodeURIComponent(query)}`),

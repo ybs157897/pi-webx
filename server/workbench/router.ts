@@ -1,10 +1,17 @@
 import { Router } from 'express';
 import type { Request } from 'express';
-import { WorkbenchStore } from './store';
+import { WorkbenchInputError, WorkbenchStore } from './store';
+import { importRequirementTasks } from '../modules/requirements/import-tasks';
 
 function param(request: Request, key: string): string {
   const value = request.params[key];
   return Array.isArray(value) ? value[0] ?? '' : value ?? '';
+}
+
+function assertNoSessionClaim(module: string, fields: unknown): void {
+  if (module === 'requirements' && fields !== null && typeof fields === 'object' && Object.hasOwn(fields, 'sourceSessionId')) {
+    throw new WorkbenchInputError('来源会话只能由需求 Agent 记录');
+  }
 }
 
 export function createWorkbenchRouter(store: WorkbenchStore): Router {
@@ -57,12 +64,20 @@ export function createWorkbenchRouter(store: WorkbenchStore): Router {
     response.json({ ok: true });
   });
 
+  router.post('/requirements/:id/import-tasks', (request, response) => {
+    response.json(importRequirementTasks(store, param(request, 'id'), request.body));
+  });
+
   router.post('/:module', (request, response) => {
-    response.json({ record: store.addRecord(param(request, 'module'), request.body) });
+    const module = param(request, 'module');
+    assertNoSessionClaim(module, request.body);
+    response.json({ record: store.addRecord(module, request.body) });
   });
 
   router.patch('/:module/:id', (request, response) => {
-    response.json({ record: store.updateRecord(param(request, 'module'), param(request, 'id'), request.body) });
+    const module = param(request, 'module');
+    assertNoSessionClaim(module, request.body);
+    response.json({ record: store.updateRecord(module, param(request, 'id'), request.body) });
   });
 
   router.delete('/:module/:id', (request, response) => {

@@ -56,7 +56,7 @@ const TEXT = {
   metaUpdated: '更新',
   relatedTasks: '关联任务',
   noTasks: '还没有关联任务',
-  noTasksHint: '任务记录把 refs 指向这条需求后，会出现在这里',
+  noTasksHint: '选择「拆分并导入待办」，确认后即可在这里跟进',
   goTasks: '去今日规划',
   taskDone: '已完成',
   taskTodo: '待办',

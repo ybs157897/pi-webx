@@ -1,13 +1,14 @@
 schemaVersion: 1
-id: requirements
+id: works
 enabled: true
-promptFile: ./prompts/requirements.md
+promptFile: ./prompts/works.md
 skills: []
 tools:
-  - requirements.saveDraft
+  - works.context
+  - works.schedule
 mcp: []
 knowledge:
-  homeBinding: requirements
+  homeBinding: works
   sharedReadBindings: []
 limits:
   maxRunningSessions: 1

@@ -1,7 +1,7 @@
 /**
  * 模块 Agent 受限知识访问 + 日志领域服务门禁（A05 的服务端部分）。
  *
- * 钉死的行为：三个 Agent 各绑一个知识库，放同关键词不同哨兵后 search 只见
+ * 钉死的行为：四个 Agent 各绑一个知识库，放同关键词不同哨兵后 search 只见
  * 自己库；read 越界只回拒绝不泄露标题；update 借 knowledgeBaseId 挪库被拒且
  * 记录不变；create 固定落 home 库；ensureBinding 幂等返回同一 id。日志服务
  * 校验 level/日期过滤与 limit 上限。
@@ -23,9 +23,10 @@ try {
     requirements: ensureBinding(store, 'default', 'requirements', 'requirements'),
     codes: ensureBinding(store, 'default', 'codes', 'codes'),
     logs: ensureBinding(store, 'default', 'logs', 'logs'),
+    works: ensureBinding(store, 'default', 'works', 'works'),
   };
   const baseIds = new Set(Object.values(bindings).map((binding) => binding.homeBaseId));
-  assert.equal(baseIds.size, 3, '三个 Agent 应绑定三个不同知识库');
+  assert.equal(baseIds.size, 4, '四个 Agent 应绑定四个不同知识库');
 
   /* ensureBinding 幂等：重复调用返回同一 home id，不重复建库 */
   const again = ensureBinding(store, 'default', 'logs', 'logs');
@@ -34,11 +35,12 @@ try {
   ensureBinding(store, 'default', 'logs', 'logs');
   assert.equal(store.read().knowledgeBases.length, baseCount, '重复绑定不得再建库');
 
-  /* 三库放同关键词不同哨兵 */
+  /* 四库放同关键词不同哨兵 */
   const access = {
     requirements: createKnowledgeAccess(store, bindings.requirements),
     codes: createKnowledgeAccess(store, bindings.codes),
     logs: createKnowledgeAccess(store, bindings.logs),
+    works: createKnowledgeAccess(store, bindings.works),
   };
   const sentinelDocs: Record<string, { id: string }> = {};
   for (const [agent, api] of Object.entries(access)) {
@@ -117,7 +119,7 @@ try {
   assert.ok(readBack !== null);
   assert.equal(await logs.read('nope'), null);
 
-  console.log('PASS 模块 Agent 知识访问：三库绑定幂等、search/read/update/create 作用域隔离不泄露，日志查询过滤与上限正确');
+  console.log('PASS 模块 Agent 知识访问：四库绑定幂等、search/read/update/create 作用域隔离不泄露，日志查询过滤与上限正确');
 } finally {
   store.close();
   await rm(dir, { recursive: true, force: true });

@@ -58,12 +58,12 @@ for (const testid of [
 assert.ok(markup.includes('readOnly=""') && markup.includes('选择文件夹'), '工作区路径仅供读取，必须使用系统文件夹选择器');
 assert.ok(markup.indexOf('data-testid="agent-settings-workspace-section"') < markup.indexOf('data-testid="agent-settings-prompt-section"'), '工作区应在提示词之前');
 assert.ok(markup.includes('/tmp/agent-workspaces/logs') && markup.includes('工作区变更仅对新对话生效'));
-assert.ok(markup.includes('role="tablist"') && (markup.match(/role="tab"/g) ?? []).length === 3,
-  '模块应呈现三个可访问的卡片 Tab');
-assert.equal((markup.match(/data-testid="agent-settings-tab"/g) ?? []).length, 3, '每个模块切换按钮应有 DOM 门禁标识');
+assert.ok(markup.includes('role="tablist"') && (markup.match(/role="tab"/g) ?? []).length === 4,
+  '模块应呈现四个可访问的卡片 Tab');
+assert.equal((markup.match(/data-testid="agent-settings-tab"/g) ?? []).length, 4, '每个模块切换按钮应有 DOM 门禁标识');
 assert.ok(markup.includes('role="tabpanel"') && markup.includes('aria-selected="true"'));
 for (const copy of [
-  '日志', '需求', '代码', '已禁用', '已实现', '系统提示词', '日志 Agent 提示词',
+  '工作助理', '日志', '需求', '代码', '已禁用', '已实现', '系统提示词', '日志 Agent 提示词',
   '跟随默认模型', 'Fixture Provider', 'Model A', own.name, own.description,
   shared.name, shared.description, '已选用', '未选用', '保存后用于新对话，已有对话保持原配置。',
 ]) assert.ok(markup.includes(copy), `真实编辑器缺少「${copy}」`);
@@ -92,6 +92,11 @@ assert.ok(missing.includes('role="alertdialog"'), '确认区应有语义角色')
 assert.ok(missing.includes('data-testid="agent-settings-keep-editing"'), '确认区应可回到编辑');
 assert.ok(missing.includes('data-testid="agent-settings-discard"'), '确认区应可明确放弃');
 assert.ok(render({ dirty: true, pending: { kind: 'switch', id: 'codes' } }).includes('切换 Agent'), '切换 Agent 应显示草稿确认');
+const worksView = { ...view, id: 'works', enabled: true, prompt: '工作助理独立提示词',
+  workspacePath: '/tmp/agent-workspaces/works', workspaceDefaultPath: '/tmp/agent-workspaces/works', skills: [] };
+const worksMarkup = render({ id: 'works', view: worksView, draft: copyDraft(worksView) });
+assert.ok(worksMarkup.includes('agent-settings-tab-works') && worksMarkup.includes('工作助理独立提示词'));
+assert.ok(worksMarkup.includes('/tmp/agent-workspaces/works') && worksMarkup.includes('已启用'));
 const invalid = render({ errors: { prompt: '提示词不能为空。' }, dirty: true });
 assert.ok(invalid.includes('aria-invalid="true"') && invalid.includes('提示词不能为空。'));
 const customWorkspace = render({ view: { ...view, workspace: '/tmp/custom-agent', workspacePath: '/tmp/custom-agent' },

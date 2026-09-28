@@ -11,6 +11,8 @@ import type { WorkbenchStore } from '../workbench/store';
 import type { AgentId } from './contracts';
 import type { KnowledgeAccess } from './knowledge';
 import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
+import { REQUIREMENTS_TOOL_NAMES, createRequirementsTools } from '../modules/requirements';
+import { WORKS_TOOL_NAMES, createWorksTools } from '../modules/works';
 
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
@@ -29,6 +31,8 @@ export interface ModuleAgentDefinition {
 const definitions = new Map<AgentId, ModuleAgentDefinition>([
   ['codes', { id: 'codes', toolNameMap: {}, createTools: () => [] }],
   ['logs', { id: 'logs', toolNameMap: LOGS_TOOL_NAMES, createTools: createLogsTools }],
+  ['requirements', { id: 'requirements', toolNameMap: REQUIREMENTS_TOOL_NAMES, createTools: createRequirementsTools }],
+  ['works', { id: 'works', toolNameMap: WORKS_TOOL_NAMES, createTools: createWorksTools }],
 ]);
 
 export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | undefined {

@@ -10,7 +10,7 @@ import { TEXT, STATUS_STEPS, priorityOf, statusOf, tagsOf } from './model.jsx'
 
 export default function Reader({
   row, linkedTasks, stepBack, stepNext, onStatus,
-  onStar, onEdit, onDelete, onMove, onNavigate,
+  onStar, onEdit, onDelete, onMove, onNavigate, onImport,
 }) {
   const priority = priorityOf(row.priority)
   const step = statusOf(row.status)
@@ -23,7 +23,7 @@ export default function Reader({
   const updated = typeof row.updatedAt === 'string' ? row.updatedAt : created
 
   function goTasks() {
-    if (typeof onNavigate === 'function') onNavigate('tasks')
+    if (typeof onNavigate === 'function') onNavigate('tasks', { scope: 'all', requirementId: row.id })
   }
 
   return (
@@ -31,6 +31,17 @@ export default function Reader({
       <header className="req-reader-head">
         <h2 className="req-reader-title" data-testid="req-reader-title">{title}</h2>
         <div className="req-reader-tools">
+          {typeof onImport === 'function' && (
+            <button
+              type="button"
+              className="btn btn-sm btn-primary"
+              data-testid="req-import-open"
+              onClick={row.importedAt ? goTasks : onImport}
+            >
+              <IconTasks size={15} />
+              {row.importedAt ? '查看已导入待办' : '拆分并导入待办'}
+            </button>
+          )}
           <span className="req-star-slot" data-testid="req-star">
             <IconButton
               label={starred ? TEXT.unstar : TEXT.star}

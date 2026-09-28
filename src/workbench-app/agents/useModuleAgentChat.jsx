@@ -122,6 +122,7 @@ export function useModuleAgentChat(agentId, { cwd } = {}) {
     return rows
   }, [error, pendingText, pi.error, pi.transcript.lastError])
   return {
+    sessionId,
     transcript: pi.transcript, localRows, busy: sending || restoring || pi.transcript.running,
     canStop: sending || pi.transcript.running, stopping, stop, draft, setDraft,
     modelName: pi.piState?.model?.id ?? capability?.model?.id ?? 'pi-webx',

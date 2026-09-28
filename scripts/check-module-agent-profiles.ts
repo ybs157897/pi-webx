@@ -2,7 +2,7 @@
  * 模块 Agent 配置加载器门禁（A15）：统一 YAML 目录、逐文件隔离、版本稳定。
  *
  * 钉死的行为：文件名必须等于注册 id；重复键、未知字段、id 不一致、未知文件名
- * 各自落到该文件的报错上；一个文件语法错误不影响另外两个；profileRevision 对
+ * 各自落到该文件的报错上；一个文件语法错误不影响其他 Agent；profileRevision 对
  * 相同内容稳定、对一字节改动敏感；进程 chdir 不改变结果（根目录与相对路径都
  * 由 rootDir 固定）。
  */
@@ -52,14 +52,15 @@ function errors(results: Map<string, { ok: boolean }>): string[] {
 }
 
 try {
-  /* 三份合法配置全部加载成功，逐文件隔离 */
+  /* 四份合法配置全部加载成功，逐文件隔离 */
   const good = await fixture({
     'requirements.yaml': yaml('requirements'),
     'codes.yaml': yaml('codes'),
     'logs.yaml': yaml('logs'),
+    'works.yaml': yaml('works'),
   });
   const first = await loadAgentProfiles(good);
-  assert.deepEqual(errors(first), [], '三份合法 YAML 都应加载成功');
+  assert.deepEqual(errors(first), [], '四份合法 YAML 都应加载成功');
   for (const id of AGENT_IDS) {
     const result = first.get(id);
     assert.ok(result?.ok === true, `${id} 应加载成功`);
@@ -166,8 +167,15 @@ try {
     process.chdir(previous);
   }
 
-  /* 仓库内真实配置：config/agents 三份文件可加载 */
+  /* 仓库内真实配置：config/agents 四份文件可加载 */
   const real = await loadAgentProfiles(defaultAgentsConfigRoot());
+  for (const id of AGENT_IDS) assert.equal(real.get(id)?.ok, true, `config/agents/${id}.yaml 应可加载`);
+  const realWorks = real.get('works');
+  if (realWorks?.ok) {
+    assert.equal(realWorks.profile.config.knowledge.homeBinding, 'works');
+    assert.equal(realWorks.profile.config.model?.provider, 'cmdc');
+    assert.ok(realWorks.profile.promptText.includes('工作助理 Agent'));
+  }
   const realLogs = real.get('logs');
   assert.ok(realLogs?.ok === true, 'config/agents/logs.yaml 应可加载');
   if (realLogs!.ok) {

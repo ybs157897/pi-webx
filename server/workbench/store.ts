@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ARRAY_MODULES, emptyState, demoState, validateFields } from './schema.mjs';
+import { assertWorkScheduleRecord } from '../modules/works/validation';
 
 type ArrayModule = typeof ARRAY_MODULES[number];
 type RecordRow = Record<string, unknown> & { id: string };
@@ -84,6 +85,8 @@ function normalizeImport(raw: unknown): WorkbenchState {
       return row;
     });
   }
+
+  for (const work of state.works) assertWorkScheduleRecord(work, state.works);
 
   const baseIds = new Set(state.knowledgeBases.map(base => base.id));
   const folders = new Map(state.knowledgeFolders.map(folder => [folder.id, folder]));
@@ -300,6 +303,7 @@ export class WorkbenchStore {
     if (module === 'knowledge' && isObject(fields) && typeof fields.body === 'string') {
       record.refs = this.knowledgeRefs(fields.body, record.id, String(record.knowledgeBaseId), refsOf(record));
     }
+    if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
     this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
       .run(module, record.id, JSON.stringify(record));
     return record;
@@ -311,13 +315,20 @@ export class WorkbenchStore {
     const row = this.db.prepare('SELECT payload FROM workbench_records WHERE module = ? AND id = ?').get(module, id) as PayloadRow | undefined;
     if (!row) throw new WorkbenchInputError('记录不存在', 404);
     const record = { ...parseRecord(row.payload), ...clean };
+    if (module === 'requirements' && record.importedAt && Object.hasOwn(clean, 'taskDrafts')) {
+      throw new WorkbenchInputError('已导入需求的待办草稿不能再修改', 409);
+    }
     if (module === 'knowledge') this.validateKnowledgeLocation(record);
     if (module === 'knowledgeFolders') this.validateFolder(record);
     if (module === 'knowledge' && (typeof clean.body === 'string' || typeof clean.knowledgeBaseId === 'string')) {
       record.refs = this.knowledgeRefs(String(record.body ?? ''), id, String(record.knowledgeBaseId), refsOf(record));
     }
+    if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
     if (module === 'tasks' && clean.done !== undefined) record.doneAt = clean.done ? new Date().toISOString() : null;
-    if (STAMPED_MODULES.has(module)) record.updatedAt = new Date().toISOString();
+    if (STAMPED_MODULES.has(module)) {
+      const previous = Date.parse(String(record.updatedAt ?? ''));
+      record.updatedAt = new Date(Math.max(Date.now(), Number.isFinite(previous) ? previous + 1 : 0)).toISOString();
+    }
     this.db.prepare('UPDATE workbench_records SET payload = ? WHERE module = ? AND id = ?')
       .run(JSON.stringify(record), module, id);
     return record;

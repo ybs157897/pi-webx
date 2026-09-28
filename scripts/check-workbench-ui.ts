@@ -9,10 +9,10 @@
  * 覆盖（对应 docs/workbench-redesign.md 第 4 节逐模块规格）：
  *   1. 我的主页是指挥台 widget 板：`data-widget` 六件套 + 空库引导只走 `welcome`；
  *   2. 今日规划：快速捕获条 + 今天/全部两档 + 逾期优先分组；
- *   3. 工作助理：看板（三列 + 可拖卡）与列表双视图，视图偏好来自 prefs；
+ *   3. 工作助理：独立规划对话和排期；原看板与列表保留为工作清单；
  *   4. 问题修复是列表（用户定调）：密集表格 + 行内状态 + 关联回链；
  *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
- *   6. 需求管理是知识列表（用户定调）：左右两栏 + 右栏 markdown 阅读区；
+ *   6. 需求管理默认中央对话，历史记录保留两栏列表和 markdown 阅读区；
  *   7. 代码开发是编辑器工作区（用户定调）：文件树 + tab + 行号编辑区 + 状态栏；
  *   8. AI 对话兜底正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
  *   9. 知识库两态（首页搜索卡片 / 目录+阅读）：首页 / 选中 / 预览 / 旧数据 / 空库都有 DOM 证据；
@@ -34,9 +34,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import Dashboard from '../src/workbench-app/modules/Dashboard.jsx';
 import Tasks from '../src/workbench-app/modules/Tasks.jsx';
 import Works from '../src/workbench-app/modules/Works.jsx';
+import WorkRecords from '../src/workbench-app/modules/works/Records.jsx';
 import Fixes from '../src/workbench-app/modules/Fixes.jsx';
 import Logs from '../src/workbench-app/modules/Logs.jsx';
 import Requirements from '../src/workbench-app/modules/Requirements.jsx';
+import RequirementRecords from '../src/workbench-app/modules/requirements/Records.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
 import CodeRecords from '../src/workbench-app/modules/codes/Records.jsx';
 import CodeChat from '../src/workbench-app/modules/codes/CodeChat.jsx';
@@ -52,6 +54,8 @@ import { TranscriptView } from '../src/components/TranscriptView';
 import { todayISO } from '../src/workbench-app/util.mjs';
 import './check-capability-tools';
 import './check-module-agent-settings-ui';
+import './check-requirements-ui';
+import './check-works-planning-ui';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
@@ -198,7 +202,11 @@ const data = fakeData();
 /* ================================================== 3. 工作助理：看板 / 列表双视图 */
 
 {
-  const kanban = render(Works, data);
+  const planner = render(Works, data);
+  assert.ok(planner.includes('data-testid="works-agent-chat"') && planner.includes('data-agent-id="works"'), '工作助理应直接打开独立规划 Agent');
+  assert.ok(planner.includes('data-testid="works-agenda"'), '规划对话应显示真实工作安排');
+  assert.ok(planner.includes('data-testid="works-records-tab"'), '应保留旧工作清单入口');
+  const kanban = render(WorkRecords, data);
   assert.ok(kanban.includes('data-module="works"'), '助理缺 data-module');
   assert.ok(kanban.includes('data-testid="works-board"'), '默认应是看板');
   assert.equal(occurrences(kanban, 'data-testid="works-col"'), 3, '看板应三列');
@@ -206,17 +214,17 @@ const data = fakeData();
   assert.ok(kanban.includes('draggable="true"'), '卡片应可拖动改状态');
   assertNoLeaks(kanban, '助理看板');
 
-  const list = render(Works, data, { prefs: { worksView: 'list' } });
+  const list = render(WorkRecords, data, { prefs: { worksView: 'list' } });
   assert.ok(list.includes('data-testid="works-table"'), 'list 偏好应是表格视图');
   assert.ok(!list.includes('data-testid="works-board"'), 'list 视图不该渲染看板');
   assert.equal(occurrences(list, 'data-testid="work-row"'), 3, '列表行数应等于记录数');
 
-  const worksSource = sourceOf('../src/workbench-app/modules/works/index.jsx')
+  const worksSource = sourceOf('../src/workbench-app/modules/works/Records.jsx')
     + sourceOf('../src/workbench-app/modules/works/model.jsx');
   assert.ok(worksSource.includes('onDragStart') && worksSource.includes('onDrop'), '看板缺拖拽接线');
   assert.ok(worksSource.includes("api.patchRecord('works'"), '拖拽落库未接线');
 
-  const emptyWorks = render(Works, { ...fakeData(), works: [] }, { empty: true });
+  const emptyWorks = render(WorkRecords, { ...fakeData(), works: [] }, { empty: true });
   assert.ok(emptyWorks.includes('data-testid="works-load-demo"'), '空库缺演示数据入口');
 }
 
@@ -264,7 +272,12 @@ const data = fakeData();
 /* ================================================== 6. 需求管理：知识列表（用户定调） */
 
 {
-  const markup = render(Requirements, data);
+  const conversation = render(Requirements, data);
+  assert.ok(conversation.includes('data-testid="req-conversation"'), '需求菜单应直接显示中央对话');
+  assert.ok(conversation.includes('data-agent-id="requirements"'), '需求对话必须使用独立 Agent');
+  assert.ok(conversation.includes('data-testid="req-records-tab"'), '历史记录入口应保留');
+  assert.ok(!conversation.includes('data-testid="req-split"'), '默认入口应为对话');
+  const markup = render(RequirementRecords, data);
   assert.ok(markup.includes('data-module="requirements"'), '需求缺 data-module');
   assert.ok(markup.includes('data-testid="req-split"'), '需求应是左右两栏');
   assert.equal(occurrences(markup, 'data-testid="req-item"'), 3, '左栏条目数应等于记录数');
@@ -280,7 +293,7 @@ const data = fakeData();
   (withBlank.requirements as Array<Record<string, unknown>>).unshift({
     id: '', title: '占位选中', priority: 'normal', status: 'done', note: '**加粗**与`代码`', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z`,
   });
-  const selected = render(Requirements, withBlank);
+  const selected = render(RequirementRecords, withBlank);
   assert.ok(selected.includes('data-testid="req-reader-title"'), '选中态缺标题');
   assert.ok(selected.includes('data-testid="req-reader-body"'), '选中态缺正文');
   assert.ok(selected.includes('<strong>'), '阅读区应渲染 markdown 加粗');
@@ -290,7 +303,7 @@ const data = fakeData();
   const advanceIndex = selected.indexOf('data-testid="req-advance"');
   assert.ok(advanceIndex >= 0 && selected.slice(advanceIndex, advanceIndex + 200).includes('disabled'), '终态需求的推进按钮应禁用');
 
-  const emptyReq = render(Requirements, { ...fakeData(), requirements: [] }, { empty: true });
+  const emptyReq = render(RequirementRecords, { ...fakeData(), requirements: [] }, { empty: true });
   assert.ok(emptyReq.includes('data-testid="req-load-demo"'), '空库缺演示数据入口');
 }
 

@@ -103,6 +103,18 @@ try {
   assert.equal((await request('codes', 'PUT', codesEdit)).status, 200);
   assert.equal((await request('codes')).body.enabled, codes.body.enabled, 'settings save must preserve Agent enablement');
   assert.equal((await request('codes')).body.implemented, codes.body.implemented);
+  const works = await request('works'); assert.equal(works.status, 200);
+  assert.equal(works.body.enabled, true);
+  assert.equal(works.body.implemented, true);
+  assert.equal(works.body.model?.provider, 'cmdc');
+  assert.match(works.body.prompt, /工作助理 Agent/);
+  const worksEdit = update(works.body);
+  worksEdit.prompt += '\nWORKS-SETTINGS-FIXTURE';
+  worksEdit.model = modelA;
+  const worksSaved = await request('works', 'PUT', worksEdit);
+  assert.equal(worksSaved.status, 200);
+  assert.equal(worksSaved.body.prompt, worksEdit.prompt);
+  assert.equal((await request('logs')).body.revision, initial.revision, 'works settings must not rewrite logs');
   assert.equal((await request('unknown')).status, 404);
 
   const beforeConfig = await readFile(join(root, 'logs.yaml'), 'utf8');

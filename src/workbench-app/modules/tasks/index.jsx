@@ -40,22 +40,30 @@ import {
 export { parseQuickAdd } from './model.jsx'
 
 export default function Tasks({
-  data, mutate, notify, modules, navigate, prefs, setPref, empty, onLoadDemo,
+  data, mutate, notify, modules, navigate, navigationTarget, prefs, setPref, empty, onLoadDemo,
 }) {
   const today = todayISO()
   const tasks = Array.isArray(data?.tasks) ? data.tasks : []
+  const requirements = Array.isArray(data?.requirements) ? data.requirements : []
   const [capture, setCapture] = useState('')
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
   const [pending, setPending] = useState('')
   const [localScope, setLocalScope] = useState('today')
+  const [scopeOverride, setScopeOverride] = useState(navigationTarget?.scope === 'all' ? 'all' : null)
+  const [sourceRequirementId, setSourceRequirementId] = useState(typeof navigationTarget?.requirementId === 'string' ? navigationTarget.requirementId : '')
+  const handledNavigation = useRef(null)
   const editRef = useRef(null)
   /** 行内编辑的提交闸门：回车/失焦只算一次，Esc 之后不再提交。 */
   const locked = useRef(false)
 
-  const scope = prefs?.tasksScope === 'all' || prefs?.tasksScope === 'today' ? prefs.tasksScope : localScope
+  const scope = scopeOverride ?? (prefs?.tasksScope === 'all' || prefs?.tasksScope === 'today' ? prefs.tasksScope : localScope)
   const parsedCapture = useMemo(() => parseQuickAdd(capture, today), [capture, today])
   const editingId = editing === null ? '' : editing.id
+  const sourceRequirement = requirements.find(row => row.id === sourceRequirementId)
+  const sourceTasks = useMemo(() => sourceRequirementId === '' ? tasks : tasks.filter(task =>
+    Array.isArray(task.refs) && task.refs.some(ref => ref?.type === 'requirements' && ref.id === sourceRequirementId)
+  ), [tasks, sourceRequirementId])
 
   const counts = useMemo(() => ({
     total: tasks.length,
@@ -74,7 +82,7 @@ export default function Tasks({
 
   const groups = useMemo(() => {
     const buckets = new Map(GROUPS.map(group => [group.key, []]))
-    for (const task of tasks) {
+    for (const task of sourceTasks) {
       if (inScope(task, scope, today)) buckets.get(urgencyOf(task, today)).push(task)
     }
     return GROUPS
@@ -83,7 +91,7 @@ export default function Tasks({
         tasks: buckets.get(group.key).sort(group.key === 'done' ? compareDone : compareOpen),
       }))
       .filter(group => group.tasks.length > 0)
-  }, [tasks, scope, today])
+  }, [sourceTasks, scope, today])
 
   // 进编辑就聚焦并全选，重打标题最快；SSR 下没有 window，直接跳过。
   // 依赖只取被编辑行的 id：跟着标题每敲一个字重跑的话会把选择区重置掉。
@@ -95,8 +103,20 @@ export default function Tasks({
     input.select()
   }, [editingId])
 
+  // 需求导入后进入全量视图，并只显示这条需求关联的待办；普通菜单入口清除来源。
+  useEffect(() => {
+    if (handledNavigation.current === navigationTarget) return
+    handledNavigation.current = navigationTarget
+    setSourceRequirementId(typeof navigationTarget?.requirementId === 'string' ? navigationTarget.requirementId : '')
+    if (navigationTarget?.scope !== 'all') return
+    setScopeOverride('all')
+    setLocalScope('all')
+    if (typeof setPref === 'function' && prefs?.tasksScope !== 'all') setPref('tasksScope', 'all')
+  }, [navigationTarget, prefs?.tasksScope, setPref])
+
   /** 切换范围：本地先动，再落库（setPref 缺席时纯本地，模块可独立渲染）。 */
   function changeScope(next) {
+    setScopeOverride(next)
     setLocalScope(next)
     if (typeof setPref === 'function') setPref('tasksScope', next)
   }
@@ -117,7 +137,10 @@ export default function Tasks({
       captureToast(parsed, today),
     )
     setPending('')
-    if (ok) setCapture('')
+    if (ok) {
+      setCapture('')
+      setSourceRequirementId('')
+    }
   }
 
   async function toggleDone(task) {
@@ -180,6 +203,15 @@ export default function Tasks({
   }
 
   const canLoadDemo = empty === true && typeof onLoadDemo === 'function'
+  const sourceFiltered = sourceRequirementId !== ''
+  const sourceTitle = String(sourceRequirement?.title ?? '这条需求')
+  const sourceEmpty = sourceFiltered && sourceTasks.length === 0
+  const emptyTitle = sourceEmpty ? '这条需求还没有关联待办'
+    : sourceFiltered && scope === 'today' ? '今天没有这条需求的待办'
+      : counts.total === 0 ? TEXT.emptyAll : TEXT.emptyToday
+  const emptyHint = sourceEmpty ? '确认导入后会显示在这里，也可以清除筛选查看全部待办'
+    : sourceFiltered && scope === 'today' ? '切到「全部」查看这条需求未来到期的待办'
+      : counts.total === 0 ? TEXT.emptyAllHint : TEXT.emptyTodayHint
 
   return (
     <div className="tasks" data-module="tasks">
@@ -225,9 +257,16 @@ export default function Tasks({
         </Card>
       </div>
 
+      {sourceFiltered && (
+        <div className="tasks-source-filter" data-testid="tasks-source-filter">
+          <span>来自需求「{sourceTitle}」 · {sourceTasks.length} 条待办</span>
+          <button type="button" className="btn btn-sm" data-testid="tasks-source-clear" onClick={() => setSourceRequirementId('')}>清除筛选</button>
+        </div>
+      )}
+
       <div className="tasks-bar">
         <Segmented options={SCOPE_OPTIONS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
-        <p className="tasks-bar-count xs">共 {counts.total} 条 · 待办 {counts.open}</p>
+        <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 条 · 待办 {counts.open}</p>
       </div>
 
       {groups.length === 0
@@ -235,9 +274,11 @@ export default function Tasks({
           <Card>
             <Empty
               icon={<IconTasks size={22} />}
-              title={counts.total === 0 ? TEXT.emptyAll : TEXT.emptyToday}
-              hint={counts.total === 0 ? TEXT.emptyAllHint : TEXT.emptyTodayHint}
-              action={canLoadDemo
+              title={emptyTitle}
+              hint={emptyHint}
+              action={sourceFiltered
+                ? <button type="button" className="btn" onClick={sourceEmpty ? () => setSourceRequirementId('') : () => changeScope('all')}>{sourceEmpty ? '查看全部待办' : '查看这条需求的全部待办'}</button>
+                : canLoadDemo
                 ? <button type="button" className="btn btn-primary" onClick={onLoadDemo}>{TEXT.loadDemo}</button>
                 : (counts.total > 0 && scope === 'today'
                   ? <button type="button" className="btn" onClick={() => changeScope('all')}>{TEXT.showAll}</button>
@@ -270,7 +311,7 @@ export default function Tasks({
                       onCommitEdit={commitEdit}
                       onCancelEdit={cancelEdit}
                       onDelete={setDeleting}
-                      onNavigate={id => { if (typeof navigate === 'function') navigate(id) }}
+                      onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
                     />
                   ))}
                 </ul>

@@ -3,6 +3,7 @@ import { useState } from 'react'
 import { Chip, IconButton, Segmented } from '../../ui.jsx'
 import { IconEdit, IconLink, IconPlus } from '../../icons.jsx'
 import { addDays, formatDay, formatTime, todayISO } from '../../util.mjs'
+import { scheduleLabel } from './schedule.mjs'
 
 const TEXT = {
   todo: '待办',
@@ -124,6 +125,7 @@ function WorkCard({ work, dragging, onMove, onEdit, onDragStart, onDragEnd }) {
         <IconEdit size={15} />
       </IconButton>
       <p className="work-card-title">{work.title}</p>
+      <p className="works-record-schedule" data-testid="work-schedule">{scheduleLabel(work)}</p>
       {note !== '' && <p className="work-card-note">{note}</p>}
       <TagChips tags={work.tags} />
       <div className="work-card-foot">

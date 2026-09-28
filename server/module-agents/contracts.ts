@@ -7,9 +7,9 @@ import type { SkillSnapshot } from './resources';
  * `ResolvedAgentProfile`，装配路径与 HTTP 路由只面对这组契约。
  */
 
-export type AgentId = 'requirements' | 'codes' | 'logs';
+export type AgentId = 'requirements' | 'codes' | 'logs' | 'works';
 
-export const AGENT_IDS: readonly AgentId[] = ['requirements', 'codes', 'logs'];
+export const AGENT_IDS: readonly AgentId[] = ['requirements', 'codes', 'logs', 'works'];
 
 /** 一段模块会话的服务端身份；写进会话日志的自定义条目，先于首次模型调用落地。 */
 export interface AgentScope {

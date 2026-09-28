@@ -1,0 +1,46 @@
+.req-import-dialog {
+  display: flex;
+  flex-direction: column;
+  width: min(100%, 760px);
+  max-height: min(88dvh, 900px);
+  min-width: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-lg);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-3);
+  color: var(--text-1);
+  overflow: hidden;
+}
+
+.req-import-head,
+.req-import-foot { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-4); }
+.req-import-head { border-bottom: 1px solid var(--line-1); align-items: flex-start; }
+.req-import-head h2 { font-size: var(--fs-xl); line-height: 1.3; }
+.req-import-kicker { color: var(--accent); font-size: var(--fs-xs); font-weight: 650; }
+.req-import-source { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.req-import-help { color: var(--text-2); font-size: var(--fs-sm); }
+.req-import-context { margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line-1); border-radius: var(--radius-md); }
+.req-import-context summary { color: var(--accent); font-size: var(--fs-sm); cursor: pointer; }
+.req-import-context-body { max-height: 260px; overflow: auto; margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.req-import-context-body pre { max-width: 100%; overflow-x: auto; }
+.req-import-notice { padding: var(--sp-4); color: var(--text-2); }
+.req-import-dialog form { min-height: 0; overflow-y: auto; padding: var(--sp-4); }
+.req-import-list { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
+.req-import-item { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius-md); }
+.req-import-item legend { padding: 0 var(--sp-1); color: var(--text-2); font-size: var(--fs-sm); font-weight: 650; }
+.req-import-item-top { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
+.req-import-check { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.req-import-remove { padding: 0; border: 0; background: transparent; color: var(--danger); font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.req-import-field { display: grid; gap: var(--sp-1); min-width: 0; color: var(--text-2); font-size: var(--fs-xs); }
+.req-import-field .input { width: 100%; min-width: 0; color: var(--text-1); }
+.req-import-fields { display: grid; grid-template-columns: minmax(90px, .65fr) minmax(140px, 1fr) minmax(110px, 1fr); gap: var(--sp-2); margin-top: var(--sp-2); }
+.req-import-add { margin-top: var(--sp-3); }
+.req-import-error { margin-top: var(--sp-2); color: var(--danger); font-size: var(--fs-sm); }
+.req-import-foot { flex: none; justify-content: flex-end; border-top: 1px solid var(--line-1); }
+
+@media (max-width: 600px) {
+  .req-import-backdrop { padding: var(--sp-2); }
+  .req-import-dialog { max-height: 96dvh; }
+  .req-import-fields { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .req-import-fields .req-import-field:last-child { grid-column: 1 / -1; }
+}

@@ -1,0 +1,47 @@
+/* Requirement conversation owns its layout; the navigation stays available. */
+.main-inner.req-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-bottom: var(--sp-5); max-width: 1180px; }
+.req-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
+.req-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-4); }
+.req-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; }
+.req-workspace-toolbar .segmented-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
+.req-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; max-width: 920px; margin-inline: auto; }
+.req-conversation-host[hidden] { display: none; }
+.req-conversation { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; border: 1px solid var(--line-1); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface-0); }
+.req-chat-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.req-chat-panel > div { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.req-chat-panel .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
+.req-chat-panel .ai-overlay-surface { background: var(--surface-0); }
+.req-chat-panel .aside-head { background: var(--surface-0); }
+.req-chat-panel .chat-empty { padding: var(--sp-5); width: min(100%, 560px); }
+.req-chat-panel .chat-empty-text { line-height: 1.75; }
+.req-chat-panel .composer { padding: var(--sp-3) var(--sp-4); }
+.req-chat-panel .ai-fallback { max-height: 160px; overflow-y: auto; }
+.req-chat-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-4); padding: 0; list-style-position: inside; color: var(--text-3); font-size: var(--fs-xs); }
+.req-chat-error { color: var(--danger); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.req-chat-error button { margin-left: var(--sp-2); }
+.req-drafts { flex: none; max-height: 180px; overflow-y: auto; border-top: 1px solid var(--line-1); background: var(--surface-1); }
+.req-draft { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
+.req-draft + .req-draft { border-top: 1px solid var(--line-1); }
+.req-draft > div { display: flex; flex-direction: column; min-width: 0; gap: var(--sp-1); }
+.req-draft strong { font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.req-draft-label { font-size: var(--fs-xs); color: var(--accent); }
+.req-draft-count { font-size: var(--fs-xs); color: var(--text-3); }
+.req-draft button { flex: none; }
+.req-records-host { flex: 1; min-height: 0; overflow-y: auto; }
+@media (max-width: 639px) {
+  .main-inner.req-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
+  .req-main-inner .page-title { font-size: var(--fs-lg); }
+  .req-main-inner > .page-head { flex-direction: row; align-items: center; }
+  .req-main-inner .page-desc { font-size: var(--fs-xs); }
+  .req-workspace { gap: var(--sp-2); }
+  .req-workspace-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .req-workspace-toolbar button { min-height: 44px; }
+  .req-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
+  .req-chat-panel .aside-head .grow { min-width: 0; }
+  .req-chat-panel .aside-sub { overflow-wrap: anywhere; }
+  .req-chat-panel .chat-empty { padding: var(--sp-3); }
+  .req-chat-panel .composer { padding: var(--sp-2); }
+  .req-draft { flex-wrap: wrap; padding: var(--sp-2); }
+  .req-drafts { max-height: 150px; }
+  .req-draft button { min-height: 44px; }
+}

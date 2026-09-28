@@ -81,6 +81,22 @@
 
 /* ================================================================ 范围条 */
 
+.tasks-source-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-2);
+  min-width: 0;
+  padding: var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  overflow-wrap: anywhere;
+}
+
 .tasks-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
 
 .tasks-bar-count {
