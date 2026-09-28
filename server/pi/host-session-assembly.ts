@@ -28,6 +28,7 @@ import {
   hydrateTeams,
   refreshSubagentTool,
 } from './host-teams';
+import { broadcastError } from './host-events';
 import {
   MAX_SESSIONS,
   errorText,
@@ -36,6 +37,41 @@ import {
   type HostInternals,
 } from './host-contract';
 import { HostError } from './host-contract';
+
+/** 模块 Agent 身份在会话日志里的自定义条目类型（版本化，恢复时按它核对）。 */
+export const MODULE_AGENT_ENTRY_TYPE = 'pi-webx:module-agent';
+
+interface ModuleAgentEntryData {
+  agentId?: string;
+  workspaceKey?: string;
+  profileRevision?: string;
+}
+
+/** 会话日志里最新一条模块 Agent 身份条目；没有则该日志属于普通会话。 */
+export function readModuleAgentEntry(
+  sessionManager: Pick<SessionManager, 'getEntries'>,
+): ModuleAgentEntryData | undefined {
+  let entries: readonly unknown[] = [];
+  try {
+    entries = sessionManager.getEntries() as unknown as readonly unknown[];
+  } catch {
+    return undefined;
+  }
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index] as { type?: unknown; customType?: unknown; data?: unknown } | undefined;
+    if (entry === undefined || entry.type !== 'custom' || entry.customType !== MODULE_AGENT_ENTRY_TYPE) {
+      continue;
+    }
+    const data = entry.data as Record<string, unknown> | undefined;
+    if (data === undefined || data.version !== 1) continue;
+    return {
+      agentId: typeof data.agentId === 'string' ? data.agentId : undefined,
+      workspaceKey: typeof data.workspaceKey === 'string' ? data.workspaceKey : undefined,
+      profileRevision: typeof data.profileRevision === 'string' ? data.profileRevision : undefined,
+    };
+  }
+  return undefined;
+}
 
 /**
  * 一对资源加载器：team 会话用隔离加载器（无扩展），普通会话的加载器把内置身份段
@@ -82,15 +118,23 @@ export async function createHostedSession(
   let createdTeamId: string | null = null;
   try {
     const cwd = options.cwd ?? process.cwd();
+    const moduleAgent = options.moduleAgent;
+    if (moduleAgent !== undefined && options.teamMode === true) {
+      throw new HostError(400, '模块 Agent 会话不支持团队模式');
+    }
     // Before the model is resolved, so a config edited since the last session is
     // what this one is built from.
     await host.syncModelConfig();
     const runtime = await host.runtime();
 
     let model: Model<any> | undefined;
-    if (options.provider && options.model) {
+    const moduleModel = moduleAgent?.profile.config.model;
+    const modelSpec = options.provider !== undefined && options.model !== undefined
+      ? { provider: options.provider, id: options.model }
+      : moduleModel;
+    if (modelSpec !== undefined) {
       const resolved = resolveCliModel({
-        cliModel: `${options.provider}/${options.model}`,
+        cliModel: `${modelSpec.provider}/${modelSpec.id}`,
         modelRuntime: runtime,
       });
       if (resolved.error) throw new HostError(400, resolved.error);
@@ -104,22 +148,64 @@ export async function createHostedSession(
         : SessionManager.create(cwd, host.sessionDir);
 
     const hostedId = sessionManager.getSessionId();
+    /**
+     * 恢复路径的身份核对在会话创建之前：普通入口不许接管模块会话，模块入口
+     * 也不许接管身份不符的会话——两个方向都靠日志里的条目说话。
+     */
+    const moduleEntry = options.sessionPath === undefined
+      ? undefined
+      : readModuleAgentEntry(sessionManager);
+    if (moduleEntry !== undefined && moduleAgent === undefined) {
+      throw new HostError(409, '该会话属于模块 Agent，请从模块入口恢复');
+    }
+    if (moduleAgent !== undefined && options.sessionPath !== undefined) {
+      if (moduleEntry === undefined) throw new HostError(409, '该会话不是模块 Agent 会话');
+      if (
+        moduleEntry.agentId !== moduleAgent.scope.agentId
+        || moduleEntry.workspaceKey !== moduleAgent.scope.workspaceKey
+      ) {
+        throw new HostError(409, '会话身份与模块 Agent 不一致');
+      }
+    }
     if (options.teamMode === true || options.sessionPath !== undefined) await hydrateTeams(host);
-    const previousTeamId = options.sessionPath === undefined
+    const previousTeamId = options.sessionPath === undefined || moduleAgent !== undefined
       ? undefined
       : host.teams.findTeamByParentSession(hostedId);
-    const teamMode = options.teamMode === true || previousTeamId !== undefined;
+    const teamMode = moduleAgent === undefined
+      && (options.teamMode === true || previousTeamId !== undefined);
     const agentDir = getAgentDir();
     const settings = host.settingsOption(cwd);
-    const { teamSettings, teamLoader, mainLoader } = buildSessionLoaders(cwd, agentDir, settings, teamMode);
+    /**
+     * 模块会话用收口加载器：关闭全部默认资源发现，提示词只取 profile 正文
+     * （不追加 MAIN_IDENTITY/WORKBENCH），Skills 只加载清单里的绝对路径。
+     */
+    const moduleLoader = moduleAgent === undefined ? undefined : new DefaultResourceLoader({
+      cwd, agentDir,
+      ...(settings.settingsManager !== undefined ? { settingsManager: settings.settingsManager } : {}),
+      noExtensions: true,
+      noSkills: true,
+      noPromptTemplates: true,
+      noContextFiles: true,
+      additionalSkillPaths: moduleAgent.profile.skillPaths,
+      appendSystemPromptOverride: () => [
+        moduleAgent.profile.promptText,
+        ...moduleAgent.systemPromptAppend,
+      ],
+    });
+    const { teamSettings, teamLoader, mainLoader } = moduleAgent === undefined
+      ? buildSessionLoaders(cwd, agentDir, settings, teamMode)
+      : { teamSettings: undefined, teamLoader: undefined, mainLoader: undefined };
     await teamLoader?.reload();
     await mainLoader?.reload();
+    await moduleLoader?.reload();
     if (teamMode && process.platform === 'win32') await ensureWindowsAppContainerVerified(cwd, agentDir);
 
     // The SDK keeps this exact array, so the dispatch tool is added and removed
     // by splicing its contents — never by replacing the array (see
     // `refreshSubagentTool`).
-    const customTools: ToolDefinition[] = teamMode ? createIsolatedToolDefinitions(cwd, agentDir) : [];
+    const customTools: ToolDefinition[] = moduleAgent !== undefined
+      ? moduleAgent.customTools
+      : teamMode ? createIsolatedToolDefinitions(cwd, agentDir) : [];
     const { session, extensionsResult } = await createAgentSession({
       cwd,
       agentDir,
@@ -128,10 +214,28 @@ export async function createHostedSession(
       modelRuntime: runtime,
       sessionManager,
       customTools,
-      ...(teamLoader === undefined
-        ? { ...settings, ...(mainLoader !== undefined ? { resourceLoader: mainLoader } : {}) }
-        : { settingsManager: teamSettings, resourceLoader: teamLoader }),
+      /**
+       * `tools` 是 SDK 的全量白名单（customTools 也受其过滤），所以模块会话必须
+       * 把自己的领域工具名一并列入，allowedToolNames 只决定内置工具子集。
+       */
+      ...(moduleAgent !== undefined
+        ? { tools: [...new Set([...moduleAgent.customTools.map((tool) => tool.name), ...moduleAgent.allowedToolNames])] }
+        : {}),
+      ...(moduleLoader !== undefined
+        ? { ...settings, resourceLoader: moduleLoader }
+        : teamLoader === undefined
+          ? { ...settings, ...(mainLoader !== undefined ? { resourceLoader: mainLoader } : {}) }
+          : { settingsManager: teamSettings, resourceLoader: teamLoader }),
     });
+    // 身份先于首次模型调用落地：会话日志是模块归属的事实源。
+    if (moduleAgent !== undefined && moduleEntry === undefined) {
+      sessionManager.appendCustomEntry(MODULE_AGENT_ENTRY_TYPE, {
+        version: 1,
+        agentId: moduleAgent.scope.agentId,
+        workspaceKey: moduleAgent.scope.workspaceKey,
+        profileRevision: moduleAgent.scope.profileRevision,
+      });
+    }
 
     createdSession = session;
     if (options.name) session.setSessionName(options.name);
@@ -157,6 +261,16 @@ export async function createHostedSession(
       session,
       extensionsResult,
       customTools,
+      ...(moduleAgent === undefined
+        ? {}
+        : {
+            moduleAgent: {
+              agentId: moduleAgent.scope.agentId,
+              workspaceKey: moduleAgent.scope.workspaceKey,
+              sessionId: hostedId,
+              profileRevision: moduleAgent.scope.profileRevision,
+            },
+          }),
       teamId: null,
       teamMode,
       pendingDialogs: new Map(),
@@ -177,9 +291,27 @@ export async function createHostedSession(
       if (previousTeamId === undefined) createdTeamId = hosted.teamId;
     }
     hosted.unsubscribe = session.subscribe((event) => host.onEvent(hosted, event));
-    host.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
+    if (moduleAgent === undefined) {
+      host.applyInitialToolSelection(hosted, sessionManager, options.toolNames);
+    }
     await host.bindExtensions(session, hosted);
-    await refreshSubagentTool(host, hosted);
+    if (moduleAgent === undefined) await refreshSubagentTool(host, hosted);
+    // 恢复时配置版本已变：允许续跑，但显式告知会话按新配置继续。
+    if (
+      moduleAgent !== undefined
+      && moduleEntry !== undefined
+      && moduleEntry.profileRevision !== undefined
+      && moduleEntry.profileRevision !== moduleAgent.scope.profileRevision
+    ) {
+      broadcastError(host, hosted, '配置已更新，本会话按新配置继续');
+      // 新身份写回日志：下一次恢复按当前版本核对，不再重复提示。
+      sessionManager.appendCustomEntry(MODULE_AGENT_ENTRY_TYPE, {
+        version: 1,
+        agentId: moduleAgent.scope.agentId,
+        workspaceKey: moduleAgent.scope.workspaceKey,
+        profileRevision: moduleAgent.scope.profileRevision,
+      });
+    }
     if (host.closing) throw new HostError(503, 'host closed during session initialization');
     if (host.sessions.has(hosted.id)) throw new HostError(409, 'session is already hosted');
     host.sessions.set(hosted.id, hosted);
@@ -234,6 +366,9 @@ export async function forkHostedSession(
       sessionManager = SessionManager.forkFrom(options.source, cwd, host.sessionDir);
     } catch (error) {
       throw new HostError(400, `无法分叉该会话：${errorText(error)}`);
+    }
+    if (readModuleAgentEntry(sessionManager) !== undefined) {
+      throw new HostError(400, '模块 Agent 会话暂不支持分叉');
     }
 
     const customTools: ToolDefinition[] = [];
@@ -311,6 +446,9 @@ export async function forkHostedSession(
  * 模式本身并铸一个全新空团队。等待队列清空——旧行引用的是旧对话的消息。
  */
 export async function resetInPlace(host: HostInternals, hosted: HostedSession): Promise<void> {
+  if (hosted.moduleAgent !== undefined) {
+    throw new HostError(400, '模块 Agent 会话请从模块入口新建');
+  }
   hosted.alive = false;
   void hosted.session.abort().catch(() => undefined);
   hosted.queue = [];

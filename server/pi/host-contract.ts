@@ -17,6 +17,7 @@ import type {
 } from '@earendil-works/pi-coding-agent';
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent';
 import type { PiExtensionUiRequest, PiExtensionUiResponse, PiModel, PiRpcResponse } from '../../src/shared/protocol';
+import type { AgentScope, ResolvedAgentProfile } from '../module-agents/contracts';
 import type { PendingExtensionDialog } from './extension-ui';
 import type { SessionCapacity, SessionReservation } from './session-capacity';
 import type { PromptRequests, SessionJournal } from './session-journal';
@@ -122,6 +123,12 @@ export interface HostedSession {
   teamId: string | null;
   /** Whether this session was created in Team mode (survives an in-place reset). */
   teamMode: boolean;
+  /**
+   * 模块 Agent 身份：装配时写入并落到会话日志（`pi-webx:module-agent` 条目）。
+   * 存在时工具面由装配路径固定——`setToolSelection`/`set_tools`/`refreshSubagentTool`
+   * 一律短路，fork 与 resetInPlace 拒绝。
+   */
+  moduleAgent?: AgentScope;
   /** Ordered in-memory log every subscriber's stream is cut from. */
   journal: SessionJournal;
   /** requestId ledger: duplicate-submit guard + echo-retire annotation. */
@@ -148,6 +155,18 @@ export interface CreateHostedSessionOptions {
   toolNames?: string[];
   /** Create a Team, or reattach the stored Team when resuming its conversation. */
   teamMode?: boolean;
+  /**
+   * 模块 Agent 装配包：profile 提供提示词与 Skill 清单，customTools 是已绑定
+   * 作用域的领域工具，allowedToolNames 是配置允许的内置工具名子集。
+   * 传入后跳过普通会话的工具选择与派工工具注入。
+   */
+  moduleAgent?: {
+    scope: Omit<AgentScope, 'sessionId'>;
+    profile: ResolvedAgentProfile;
+    customTools: ToolDefinition[];
+    allowedToolNames: string[];
+    systemPromptAppend: string[];
+  };
 }
 
 export interface PiHostOptions {

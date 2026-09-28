@@ -564,6 +564,12 @@ export interface SessionSummary {
   pendingDialogs: number;
   /** subscribers currently attached to this session's event stream */
   clients: number;
+  /** 模块 Agent 会话的服务端身份；普通会话不带此字段。 */
+  moduleAgent?: {
+    agentId: string;
+    workspaceKey: string;
+    profileRevision: string;
+  };
 }
 
 /**

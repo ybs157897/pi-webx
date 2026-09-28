@@ -136,6 +136,24 @@
 | 附件 | `server/attachment/store.ts` |
 | 内置提示词 | `server/prompts/`（`subagent/*.md` 逐字节冻结，规则见该目录 README；设计说明 `docs/system-prompt-design.md`） |
 
+### 模块 Agent（module-agents）
+
+设计文档：`docs/architecture/workbench-independent-agents.md`（P0+P1 实施中）。
+
+| 功能 | 位置 |
+| --- | --- |
+| 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id |
+| 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
+| 统一加载器（逐文件隔离、profileRevision 摘要） | `server/module-agents/profiles.ts` |
+| 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
+| 模块注册表（createTools 工厂，目前仅 logs） | `server/module-agents/registry.ts` |
+| HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
+| 日志领域服务 / 领域工具（`logs_*`、`knowledge_*`） | `server/module-agents/logs/service.ts`、`logs/tools.ts` |
+| 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
+| 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
+| Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |
+| 门禁 | `scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用） |
+
 ### 工作台（/，8 模块）
 
 | 功能 | 位置 |

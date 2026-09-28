@@ -92,6 +92,8 @@ export function subagentToolDeps(host: HostInternals, hosted: HostedSession): Su
  */
 export async function refreshSubagentTool(host: HostInternals, hosted: HostedSession): Promise<void> {
   if (!hosted.alive) return;
+  // 模块会话的工具面由装配路径固定：本函数会整体改写 customTools，必须短路。
+  if (hosted.moduleAgent !== undefined) return;
   // Team mode has its own tool面, and it is not additive to `subagent`: the
   // orchestrator dispatches through `dispatch_agent` only, so the single-shot
   // tool is never registered there (two dispatch mechanisms in one session

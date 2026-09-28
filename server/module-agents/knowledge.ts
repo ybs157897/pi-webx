@@ -29,6 +29,38 @@ export interface KnowledgeAccess {
 const OUT_OF_SCOPE = '知识条目不在本 Agent 可访问范围';
 const NOT_FOUND = '找不到该知识条目';
 
+function ensureTable(db: WorkbenchStore['sqlite']): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS module_agent_knowledge_bindings (
+      workspace_key TEXT NOT NULL,
+      agent_id TEXT NOT NULL,
+      home_base_id TEXT NOT NULL,
+      shared_read_base_ids_json TEXT NOT NULL,
+      PRIMARY KEY (workspace_key, agent_id)
+    )
+  `);
+}
+
+/** 只读查找绑定：能力展示用，不为查询而创建知识库。 */
+export function readBinding(
+  store: WorkbenchStore,
+  workspaceKey: string,
+  agentId: AgentId,
+): KnowledgeBinding | null {
+  const db = store.sqlite;
+  ensureTable(db);
+  const row = db.prepare(
+    'SELECT home_base_id, shared_read_base_ids_json FROM module_agent_knowledge_bindings WHERE workspace_key = ? AND agent_id = ?',
+  ).get(workspaceKey, agentId) as { home_base_id: string; shared_read_base_ids_json: string } | undefined;
+  if (row === undefined) return null;
+  return {
+    workspaceKey,
+    agentId,
+    homeBaseId: row.home_base_id,
+    sharedReadBaseIds: JSON.parse(row.shared_read_base_ids_json) as string[],
+  };
+}
+
 /**
  * 幂等建立或读回绑定。已有绑定原样返回——homeBinding 是逻辑名，重绑语义不在
  * 这里；没有时在同一事务里先建知识库再落绑定，并发首轮也只会有一个结果。
@@ -40,15 +72,7 @@ export function ensureBinding(
   homeBinding: string,
 ): KnowledgeBinding {
   const db = store.sqlite;
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS module_agent_knowledge_bindings (
-      workspace_key TEXT NOT NULL,
-      agent_id TEXT NOT NULL,
-      home_base_id TEXT NOT NULL,
-      shared_read_base_ids_json TEXT NOT NULL,
-      PRIMARY KEY (workspace_key, agent_id)
-    )
-  `);
+  ensureTable(db);
   const select = db.prepare(
     'SELECT home_base_id, shared_read_base_ids_json FROM module_agent_knowledge_bindings WHERE workspace_key = ? AND agent_id = ?',
   );

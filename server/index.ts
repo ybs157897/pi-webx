@@ -10,6 +10,8 @@ import { attachWebSocketGateway } from './ws';
 import { serveProductionAssets } from './static';
 import { createWorkbenchRouter } from './workbench/router';
 import { WorkbenchStore } from './workbench/store';
+import { defaultAgentsConfigRoot, loadAgentProfiles } from './module-agents/profiles';
+import { createModuleAgentsRouter } from './module-agents/router';
 
 /** Default port; override with PI_WEBX_PORT. */
 const DEFAULT_PORT = 8787;
@@ -31,6 +33,16 @@ async function main(): Promise<void> {
   app.disable('x-powered-by');
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use('/api/workbench', createWorkbenchRouter(workbench));
+  const agentProfiles = await loadAgentProfiles(defaultAgentsConfigRoot());
+  for (const [id, result] of agentProfiles) {
+    if (!result.ok) console.warn(`[pi-webx] 模块 Agent 配置不可用 ${id}: ${result.error}`);
+  }
+  app.use('/api/module-agents', createModuleAgentsRouter({
+    host: manager,
+    store: workbench,
+    profiles: agentProfiles,
+    workspaceKey: 'default',
+  }));
   app.use('/api', createApiRouter(manager));
   app.use('/api', (_req: Request, res: Response) => {
     res.status(404).json({ error: 'unknown API endpoint' });

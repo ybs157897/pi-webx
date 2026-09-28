@@ -325,6 +325,8 @@ export class PiHost implements HostInternals {
     toolNames: readonly string[],
     options: { persist: boolean },
   ): void {
+    // 模块 Agent 会话的工具面由配置装配决定，预设与扩展合并路径一律不适用。
+    if (hosted.moduleAgent !== undefined) return;
     const defaultTools = hosted.teamMode && process.platform === 'win32'
       ? ['powershell']
       : hosted.session.settingsManager?.getDefaultTools?.();
@@ -475,6 +477,15 @@ export class PiHost implements HostInternals {
       streaming: session.streaming,
       pendingDialogs: session.pendingDialogs.size,
       clients: session.subscribers.size,
+      ...(session.moduleAgent === undefined
+        ? {}
+        : {
+            moduleAgent: {
+              agentId: session.moduleAgent.agentId,
+              workspaceKey: session.moduleAgent.workspaceKey,
+              profileRevision: session.moduleAgent.profileRevision,
+            },
+          }),
     };
   }
 

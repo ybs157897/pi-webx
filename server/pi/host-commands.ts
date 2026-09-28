@@ -289,6 +289,9 @@ async function dispatchCommand(
         };
       }
       case 'set_tools': {
+        if (hosted.moduleAgent !== undefined) {
+          return fail(command.type, '模块 Agent 的工具由配置决定');
+        }
         const requested = validateToolSelection((command as unknown as { toolNames?: unknown }).toolNames);
         if (requested === undefined) {
           return fail(command.type, 'toolNames 必须是内置工具名数组');
