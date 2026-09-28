@@ -129,6 +129,11 @@ export interface HostedSession {
    * 一律短路，fork 与 resetInPlace 拒绝。
    */
   moduleAgent?: AgentScope;
+  /**
+   * 会话独占的外部资源（如 MCP 连接）的回收钩子：模块装配包带来，
+   * kill/创建失败路径统一调用，失败只记警告。
+   */
+  dispose?: () => Promise<void>;
   /** Ordered in-memory log every subscriber's stream is cut from. */
   journal: SessionJournal;
   /** requestId ledger: duplicate-submit guard + echo-retire annotation. */
@@ -166,6 +171,8 @@ export interface CreateHostedSessionOptions {
     customTools: ToolDefinition[];
     allowedToolNames: string[];
     systemPromptAppend: string[];
+    /** 装配期建立的外部资源回收钩子（MCP 连接等）。 */
+    dispose?: () => Promise<void>;
   };
 }
 

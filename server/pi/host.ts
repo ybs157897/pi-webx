@@ -518,6 +518,11 @@ export class PiHost implements HostInternals {
     } catch {
       // Disposal is best-effort; the session is gone either way.
     }
+    // 会话独占的外部资源（模块 Agent 的 MCP 连接）随销毁回收。
+    if (session.dispose !== undefined) {
+      try { await session.dispose(); }
+      catch (error) { console.warn('session resource dispose failed:', errorText(error)); }
+    }
     session.reservation.release();
     broadcastFrame(this, session, { t: 'exit', code: 0, signal: null });
     for (const subscriber of session.subscribers) subscriber.close();

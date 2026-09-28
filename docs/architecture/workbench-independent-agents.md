@@ -274,6 +274,8 @@ type AgentScope = Readonly<{
 
 首个验收必须通过可控 MCP fixture 完成协议调用、取消与故障测试；外部服务地址、认证和真实工具 schema 未选定前，不能声称生产日志源已经接通。实现中使用了哪种传输就提供对应验收，不把未实现传输伪装成可用配置。
 
+已用 stdio fixture（`scripts/mcp-fixture-server.ts` + `scripts/check-module-agent-mcp.ts`）完成 A03/A04 服务端验收；streamable-http 仅实现未验收。
+
 <a id="knowledge"></a>
 ## 10. 每个 Agent 自己的知识库
 

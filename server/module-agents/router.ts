@@ -74,6 +74,7 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
           id: entry.id,
           enabled: entry.enabled,
           transport: entry.connection.transport,
+          configuredTools: entry.tools,
           ...(entry.connection.transport === 'stdio'
             ? { command: entry.connection.command }
             : { url: entry.connection.url }),
@@ -161,17 +162,30 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
       if (stored === undefined) {
         throw new HostError(404, `no stored session with id ${sessionId}`);
       }
-      return host.create({
-        sessionPath: stored.path,
-        cwd: stored.cwd,
-        moduleAgent: assemble(agentId, profile),
-      });
+      const assembled = await assemble(agentId, profile);
+      try {
+        return await host.create({
+          sessionPath: stored.path,
+          cwd: stored.cwd,
+          moduleAgent: assembled,
+        });
+      } catch (error) {
+        // 装配已建立 MCP 连接但 create 失败：连接不能被遗弃。
+        await assembled.dispose().catch(() => undefined);
+        throw error;
+      }
     }
-    return host.create({ moduleAgent: assemble(agentId, profile) });
+    const assembled = await assemble(agentId, profile);
+    try {
+      return await host.create({ moduleAgent: assembled });
+    } catch (error) {
+      await assembled.dispose().catch(() => undefined);
+      throw error;
+    }
   }
 
   /** 装配收敛到 assemble.ts：领域工具按配置 tools 过滤后才进会话。 */
-  function assemble(agentId: AgentId, profile: ResolvedAgentProfile) {
+  async function assemble(agentId: AgentId, profile: ResolvedAgentProfile) {
     return assembleModuleAgent({ store, workspaceKey, agentId, profile });
   }
 

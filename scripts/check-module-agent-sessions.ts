@@ -135,7 +135,7 @@ async function main(): Promise<void> {
     };
     const trimmed = await host.create({
       cwd, provider: probeModel.provider, model: probeModel.id,
-      moduleAgent: assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile: trimmedProfile }),
+      moduleAgent: await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile: trimmedProfile }),
     });
     assert.deepEqual(
       trimmed.session.getAllTools().map((tool) => tool.name).sort(),
@@ -145,8 +145,8 @@ async function main(): Promise<void> {
     assert.equal(trimmed.session.getToolDefinition('knowledge_create'), undefined);
     await host.kill(trimmed.id);
     // 未知工具名报装配错误，不默默放行。
-    assert.throws(
-      () => assembleModuleAgent({
+    await assert.rejects(
+      assembleModuleAgent({
         store, workspaceKey: 'ws', agentId: 'logs',
         profile: { ...profile, config: { ...profile.config, tools: ['logs.bogus'] } },
       }),

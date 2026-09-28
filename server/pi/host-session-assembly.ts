@@ -275,6 +275,7 @@ export async function createHostedSession(
           }),
       teamId: null,
       teamMode,
+      ...(moduleAgent?.dispose === undefined ? {} : { dispose: moduleAgent.dispose }),
       pendingDialogs: new Map(),
       toolSelection: options.toolNames ?? null,
       journal: new SessionJournal(),
@@ -331,6 +332,8 @@ export async function createHostedSession(
         dialog.respond({ type: 'extension_ui_response', id: dialog.request.id, cancelled: true });
       }
     }
+    // 装配期建立的外部资源（MCP 连接）随创建失败一并回收。
+    try { await options.moduleAgent?.dispose?.(); } catch { /* best-effort */ }
     try { createdSession?.dispose(); }
     finally { reservation.release(); }
     if (error instanceof TeamSandboxUnavailableError) {
