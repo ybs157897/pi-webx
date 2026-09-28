@@ -1,7 +1,11 @@
 # 工作台三个独立 Agent：设计与实施交接
 
-> 日期：2026-09-28。状态：**已评审，P0+P1 实施中**（分支 `devin/module-agents-p1`）。
+> 日期：2026-09-28。状态：**P1 修复与可替换数据源接入层已实现，P2/P3 未完成**（分支 `devin/module-agents-p1`）。
 > 本文依据当前 pi-webx 源码和本机 DeepSeek Harness 源码核对。用户明确要求与设计建议分开标记；不把建议当成已经确认的业务决策。
+
+## 框架接入修订（2026-09-28）
+
+用户进一步明确：框架使用方自行接入非标准日志、问题清单接口，数据源可能整体替换。增加统一领域契约及可插拔转接层，接入规范与当前验收见 [数据源适配器](data-source-adapters.md)。日志 Agent 已通过稳定工具访问本地/HTTP/代码适配器；需求及代码 Agent 仍为禁用占位。
 
 ## 实施评审修订（2026-09-28）
 
@@ -10,7 +14,7 @@
 1. **依赖**：仓库当前没有 YAML 解析器和 MCP 客户端 SDK。新增 `yaml`（用 `uniqueKeys` 拒绝重复键）与 `@modelcontextprotocol/sdk`；均选发布满 7 天的版本。
 2. **`refreshSubagentTool` 会整体替换 `hosted.customTools`**（`splice(0, length, ...tools)`），不只是追加派工工具。模块会话的领域工具若放在 `customTools`，在 create/reset/fork 后会被清空。因此 `HostedSession` 增加 `moduleAgent?: AgentScope`，`refreshSubagentTool`、`applyInitialToolSelection`、`setToolSelection`（`withExtensionTools` 合并）以及 `set_tools` 命令对模块会话一律短路/拒绝；模块会话的工具面只由装配路径决定。
 3. **去掉 `modelRef`**：宿主已有 `syncModelConfig` + `resolveCliModel`，不传即部署默认模型。YAML 改为可选 `model: { provider, id }`，缺省即默认；不引入别名解析。
-4. **容量预留推迟到 P3**：`SessionCapacity` 是全局计数器，按模块预留名额要改容量模型。首版仅做“每模块同时一段运行中会话”的软限制（`limits.maxRunningSessions`），全局上限沿用 `MAX_SESSIONS`。
+4. **容量预留推迟到 P3**：`SessionCapacity` 是全局计数器，按模块预留名额要改容量模型。首版在 prompt 发送入口限制每模块同时运行会话数（`limits.maxRunningSessions`），恢复不会占用执行名额，全局上限沿用 `MAX_SESSIONS`。
 5. **知识受限检索需新 Store 入口**：`store.search` 是跨全部模块的全局 LIKE 搜索，无按库过滤。在 `WorkbenchStore` 增加 `searchKnowledge(baseIds, query, limit)` 与 `readKnowledge(id)`（返回含 `knowledgeBaseId` 的记录，由调用方核对归属），不改现有搜索；`knowledgeRefs` 已按库解析双链，可复用。
 
 ## 阅读结论
@@ -411,4 +415,4 @@ DeepSeek Harness 固定版本参考：
 - [Skill 注册、来源和按需加载](https://github.com/deepseek-ai/deepseek-harness/blob/477b4f420553e8a52c2fbccc464d7561b239c443/packages/skill/README.zh.md)
 - [MCP 客户端：命名空间、连接与 dispose](https://github.com/deepseek-ai/deepseek-harness/blob/477b4f420553e8a52c2fbccc464d7561b239c443/packages/mcp/mcp-client/src/index.ts)
 
-本轮交付范围：设计文档。未修改业务代码，未运行三个独立 Agent，也未执行上述实施验收。
+初始交付仅为设计文档。当前已实现日志 Agent、独立资源快照和数据源转接层；实际验证范围见 data-source-adapters.md。尚未完成三个 Agent 的全部验收。
