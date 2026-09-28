@@ -173,17 +173,17 @@ export default function AIPanel({
   // 模块 Agent 复用本外壳时的三个可选项：title 换掉「小台」名，subtitle 换掉
   // live 状态行的「Pi Agent」前缀（如「日志 Agent · gpt-…」），emptyExtra
   // 渲染在空态欢迎语下方（能力卡）。不传则与旧行为完全一致。
-  title, subtitle, emptyExtra, onStop, stopping, draft, onDraftChange, welcomeText, suggestions, inputPlaceholder,
+  title, subtitle, emptyExtra, onStop, stopping, draft, onDraftChange, welcomeText, suggestions, inputPlaceholder, embedded = false,
 }) {
   // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+    if (embedded || typeof onClose !== 'function' || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
     const onKeyDown = event => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [onClose])
+  }, [onClose, embedded])
 
   const statusText = status === 'live'
     ? `${subtitle ?? 'Pi Agent'} · ${modelName}`
@@ -196,7 +196,7 @@ export default function AIPanel({
   // 暗色模式下不会出现浅色气泡。
   return (
     <ThemeProvider themeMode={themeMode === 'dark' ? 'dark' : 'light'}>
-      <div className="ai-overlay" role="dialog" aria-modal="true" aria-label="AI 对话" data-testid="ai-overlay">
+      <div className={`ai-overlay${embedded ? ' ai-overlay-embedded' : ''}`} role={embedded ? 'region' : 'dialog'} aria-modal={embedded ? undefined : 'true'} aria-label={embedded ? `${title ?? TEXT.assistant}对话` : 'AI 对话'} data-testid="ai-overlay">
         <div className="ai-overlay-surface">
         <header className="aside-head">
           <span className="aside-avatar"><IconSparkles size={17} /></span>
@@ -214,9 +214,9 @@ export default function AIPanel({
             <button type="button" className="icon-btn" aria-label={TEXT.clearChat} title={TEXT.clearChat} disabled={busy} onClick={onNew}>
               <IconPlus size={17} />
             </button>
-            <button type="button" className="icon-btn" aria-label={TEXT.close} title={TEXT.close} onClick={onClose}>
+            {!embedded && <button type="button" className="icon-btn" aria-label={TEXT.close} title={TEXT.close} onClick={onClose}>
               <IconClose size={18} />
-            </button>
+            </button>}
           </div>
         </header>
 

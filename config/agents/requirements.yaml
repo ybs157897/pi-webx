@@ -11,3 +11,6 @@ knowledge:
 limits:
   maxRunningSessions: 1
   maxToolOutputChars: 24000
+model:
+  provider: cmdc
+  id: deepseek/deepseek-v4.1-flash

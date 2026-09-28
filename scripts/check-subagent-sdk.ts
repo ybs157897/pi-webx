@@ -119,7 +119,7 @@ async function driveScriptedToolCall(
 
   const savedStream = agent.streamFunction;
   const savedApiKey = agent.getApiKey;
-  const savedStop = agent.shouldStopAfterTurn;
+  const savedFinishTurn = agent.finishTurn;
   const savedTools = [...agent.state.tools];
 
   const ends: ScriptedToolEnd[] = [];
@@ -145,7 +145,12 @@ async function driveScriptedToolCall(
     return stream;
   }) as unknown as typeof agent.streamFunction;
   agent.getApiKey = () => 'scripted-stream-no-provider';
-  agent.shouldStopAfterTurn = () => true;
+  // `finishTurn` replaces the removed `shouldStopAfterTurn`: end the run after
+  // this one normal turn; error/aborted responses stay hard exits (undefined).
+  agent.finishTurn = (turn) =>
+    turn.message.stopReason === 'error' || turn.message.stopReason === 'aborted'
+      ? undefined
+      : { action: 'end' };
   agent.state.tools = [tool as unknown as (typeof agent.state.tools)[number]];
 
   try {
@@ -153,7 +158,7 @@ async function driveScriptedToolCall(
   } finally {
     agent.streamFunction = savedStream;
     agent.getApiKey = savedApiKey;
-    agent.shouldStopAfterTurn = savedStop;
+    agent.finishTurn = savedFinishTurn;
     agent.state.tools = savedTools;
     unsubscribe();
   }

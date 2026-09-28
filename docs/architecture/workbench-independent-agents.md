@@ -1,7 +1,19 @@
 # 工作台三个独立 Agent：设计与实施交接
 
+## 模块 Agent 设置服务（2026-09-28 增量）
+
+左侧导航的 **Agent 配置**页面分别选择 logs、requirements、codes，编辑提示词、模型并勾选 Skill。`GET/PUT /api/module-agents/:agentId/settings` 在原会话路由之前挂载。Skill 候选只取 `config/agents/<id>.yaml` 的 `skills` 声明：字符串路径默认启用，也可写 `{path: ./skills/.../SKILL.md, enabled: false}`。GET 读取显式声明的 SKILL.md 元数据并返回 key、name、description、selected，不扫描模块目录、不返回正文或 editable 字段。PUT 必须逐一提交全部已声明 key 的选择状态，只写提示词、模型、enabled 标记及必要的 `skills.read` 工具声明；不创建或修改 Skill 文件。取消勾选保留 YAML 候选，重新进入可再次启用。更新按模块串行、检查 revision，暂存后原子替换，验证失败回滚。
+
+保存成功后将新 profile 发布到会话路由共用的 map：**新对话采用新配置，已有对话按原快照恢复**。加载器只快照选中 Skill 及其补充资源；未选项不进入自动 Skill 清单和 `skills_read`。全部禁用时不注册 `skills_read`，包括手写 YAML 遗留 `skills.read` 的情况，其他未知工具仍报错。其余工具、MCP、知识范围和 `enabled` 保持 YAML 原设置。未注册实现的 requirements/codes 仍禁用，但可编辑配置。模型选择以本机运行时目录校验，不改全局默认模型。`PI_WEBX_AGENT_CONFIG_DIR` 若设置，必须是绝对路径；服务启动时加载、编辑和后续会话共用同一个根，便于用临时克隆进行验收。
+
 > 日期：2026-09-28。状态：**P1 修复与可替换数据源接入层已实现，P2/P3 未完成**（分支 `devin/module-agents-p1`）。
 > 本文依据当前 pi-webx 源码和本机 DeepSeek Harness 源码核对。用户明确要求与设计建议分开标记；不把建议当成已经确认的业务决策。
+
+## 当前代码目录（2026-09-28 结构整理）
+
+工作台八个前端模块已各自归入 `src/workbench-app/modules/<id>/`，由 `index.jsx` 公开页面；原 `modules/X.jsx` 只保留无业务逻辑的兼容 re-export。日志 Agent 的欢迎语、建议和输入占位位于 `modules/logs/agent-ui.js`，通用面板从 `agents/definitions.js` 接收模块定义。模块会话标识和配置装配语义不变。
+
+后端已有领域字段归入 `server/modules/{tasks,works,fixes,logs,requirements,codes,knowledge}/schema.mjs`；`knowledgeBases` 与 `knowledgeFolders` 归 knowledge。`server/workbench/schema.mjs` 聚合模块字段，`schema-fields.mjs` 维护公共字段校验，`store.ts` 继续负责 SQLite。日志工具从 `server/modules/logs/index.ts` 暴露；通用受限 `knowledge_*` 工具位于 `server/modules/knowledge/tools.ts`，继续通过 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 在服务端检查作用域并截断输出。旧 `server/module-agents/logs/tools.ts` 仅为兼容 re-export。`server/module-agents/` 保留配置加载、会话装配、MCP 与知识作用域等公共机制；`server/pi/` 和 `server/data-sources/` 保留共享能力。没有后端业务的 dashboard 不建立空目录，未实现的需求/代码 Agent 也不建立占位服务。`config/agents/` 仍是配置、提示词和 Skills 的唯一集中维护根。
 
 ## 框架接入修订（2026-09-28）
 
@@ -90,7 +102,7 @@
 | Agent preset 声明子插件，Host 共享 loop | 共享执行机制，按 Agent 装配能力 | 三份配置 + 三个领域模块工厂 + 同一个 PiHost |
 | Scope 管理可见性和资源释放 | 谁创建资源，谁拥有并负责销毁 | 每个会话持有自己的工具注册、连接和清理函数 |
 | Preset 使用代际，活动 Agent 保持已选组合 | 更新配置不能在一轮执行中换工具/提示词 | 会话固定配置版本；更新仅作用于新会话 |
-| Skill 注册表、文件来源、加载工具分离 | 目录发现与使用解耦 | 显式 Skill 清单 + 按需读取；首版只需要文件来源 |
+| Skill 注册表、文件来源、加载工具分离 | YAML 候选声明与使用解耦 | 显式 Skill 清单 + 按需读取；首版只需要文件来源 |
 | MCP 客户端拥有连接，工具带服务器命名空间 | 外部能力有明确身份和生命周期 | 模块/会话专属客户端，受限工具映射和确定性释放 |
 
 Harness 的 capability-seams 设计还明确强调：只有一个可预见实现和一个使用方时，不要预先拆包。这里借鉴的是边界和生命周期，**不复制其全部插件包、HMR、配置语言与产品组织方式**。其 Service Definition 是 Cordis Service；本项目采用 TypeScript 接口是有意做的简化，不是逐字移植。
@@ -138,7 +150,7 @@ flowchart TB
 
 边界约定：需求 Agent 不自动调用开发 Agent；日志 Agent 不自动修代码、重启服务或更改原始日志；代码 Agent 不自动改写其他模块的业务记录。现有 UI 手工管理日志的功能可以保留，但它不等于给日志 Agent 开放日志修改工具。
 
-代码 Agent 的 cwd 必须是服务端核验后的实际仓库目录，不能直接使用 `codes.project` 这个自由文本分组字段。第一版通过明确的仓库选择完成绑定；开发事项备注与磁盘文件使用不同的数据类型和工具。
+每个模块 Agent 的 cwd 绑定到服务端核验后的独立工作区目录，不能直接使用 `codes.project` 这个自由文本分组字段。Agent 配置页可选择独立默认目录或绑定已有目录，YAML 使用可选 `workspace` 字段；默认目录为 `~/.pi-webx/workspaces/agents/<id>`。新绑定对新对话生效，已有会话及恢复继续使用原始目录。不同 Agent 不可绑定同一目录或父子目录，符号链接按真实路径比较。代码页切换项目时同步保存代码 Agent 的绑定，随后让 IDE 和新会话使用同一目录；开发事项备注与磁盘文件使用不同的数据类型和工具。
 
 将来确有跨模块协作需要时，先支持用户显式传递一份带来源的结果副本或引用。目标 Agent 创建自己的上下文，不共享活跃会话，不直接写对方数据库；无需预建消息总线。
 
@@ -147,9 +159,9 @@ flowchart TB
 
 ### 6.1 最小配置
 
-按用户明确要求，三个 Agent 配置统一维护在仓库根目录的 `config/agents/`：`requirements.yaml`、`codes.yaml`、`logs.yaml`，每个 Agent 一份文件。提示词和 Skills 放在该目录的 `prompts/`、`skills/` 子目录；业务实现仍留在 `server/module-agents/`。集中维护不改变三个 Agent 各自的资源边界。
+按用户明确要求，三个 Agent 配置统一维护在仓库根目录的 `config/agents/`：`requirements.yaml`、`codes.yaml`、`logs.yaml`，每个 Agent 一份文件。提示词和 Skills 放在该目录的 `prompts/`、`skills/` 子目录；业务实现位于 `server/modules/<id>/`，公共 Agent 装配位于 `server/module-agents/`。集中维护不改变三个 Agent 各自的资源边界。
 
-以下为 `config/agents/logs.yaml` 示例，是**拟新增的产品配置结构**，不是 pi SDK 原生字段，也不是当前可直接运行的配置。
+以下为 `config/agents/logs.yaml` 示例；这些字段由本项目加载器解释，不是 pi SDK 原生字段。`skills` 的字符串项默认启用，需要保留候选但关闭时可改为 `{path, enabled: false}`。
 
 ```yaml
 schemaVersion: 1
@@ -195,7 +207,7 @@ limits:
 
 ### 6.2 配置真相源及版本
 
-首版以 `config/agents/*.yaml` 为 Agent 配置的唯一真相源，不再从业务代码目录寻找配置，也不保留同名 JSON 配置回退。界面提供只读的“当前 Agent 能力”展示；以后加入编辑器时，通过同一个服务校验并原子写回对应 YAML，尽量保留注释，不另存一套 SQLite 配置。
+首版以 `config/agents/*.yaml` 为 Agent 配置的唯一真相源，不再从业务代码目录寻找配置，也不保留同名 JSON 配置回退。左侧 Agent 配置页面经设置服务校验并原子写回对应 YAML，尽量保留注释，不另存一套 SQLite 配置。
 
 统一加载规则：
 
@@ -311,7 +323,7 @@ type AgentScope = Readonly<{
 <a id="implementation"></a>
 ## 11. 最小代码组织与接口
 
-### 11.1 建议目录
+### 11.1 当前目录与后续实施边界
 
 ```text
 config/agents/            # 配置及配套指令的统一维护入口
@@ -320,23 +332,34 @@ config/agents/            # 配置及配套指令的统一维护入口
   logs.yaml              # 日志 Agent 的完整配置
   prompts/               # requirements.md、codes.md、logs.md
   skills/                # requirements/、codes/、logs/；shared/ 按需显式引用
+server/modules/
+  tasks/ works/ fixes/ requirements/ codes/  # 各自现有业务字段 schema.mjs
+  logs/                   # schema.mjs、领域 tools.ts、index.ts
+  knowledge/              # 文档/库/目录 schema.mjs、受限知识 tools.ts
 server/module-agents/
-  contracts.ts            # AgentId、配置、scope、领域端口
+  contracts.ts            # AgentId、配置、scope、装配契约
   registry.ts             # 仅装配/查找模块，无业务逻辑
-  profiles.ts             # 统一加载 YAML、校验、固定版本、读取配置快照
-  resource-loader.ts      # pi ResourceLoader 适配
-  knowledge.ts            # 绑定、受限知识访问，委托 WorkbenchStore
-  mcp.ts                  # 协议客户端适配；复杂后按职责拆目录
+  profiles.ts             # 统一加载 YAML、校验、固定版本
+  resources.ts snapshots.ts  # 配置资源快照与受限 Skill 读取
+  knowledge.ts            # 绑定、受限 KnowledgeAccess，委托 WorkbenchStore
+  mcp.ts                  # 协议客户端适配
   router.ts               # 模块能力/创建恢复入口
-  requirements/           # tools.ts、service.ts；不存配置和提示词
-  codes/                  # 自己的仓库/开发操作实现
-  logs/                   # 自己的查询操作实现
+  logs/tools.ts           # 旧 deep import 兼容 re-export
+server/workbench/
+  schema.mjs              # 模块清单、领域 schema 聚合与校验入口
+  schema-fields.mjs       # 所有数组模块共享字段校验
+  store.ts router.ts      # SQLite 与工作台 HTTP
+src/workbench-app/modules/
+  dashboard/ tasks/ works/ fixes/ logs/ requirements/ codes/ knowledge/
+                         # 每个目录以 index.jsx 公开页面，放专属 CSS/组件/辅助函数
+  X.jsx                  # 旧页面路径仅兼容 re-export（X 为原大小写模块名）
 src/workbench-app/agents/
   useModuleAgentChat.jsx   # 复用现有事件流；状态按 scope 隔离
   AgentCapabilities.jsx   # 当前模型、Skills、MCP、知识库与错误状态
+  definitions.js           # 通用面板定义注册入口，日志文案在 modules/logs/
 ```
 
-这是职责地图，不要求机械创建空文件。简单业务服务可先在同模块文件内，出现体量或第二实现再拆。现有 `modules/*.jsx` 是视图，领域校验留在服务端；公共聊天正文继续复用 `TranscriptView`。
+这是当前已实现路径的职责地图；未实现的业务服务不因目录对称而造空文件。后续需求/代码 Agent 的领域工具仍是未来工作。公共聊天正文继续复用 `TranscriptView`。
 
 ### 11.2 接口责任
 

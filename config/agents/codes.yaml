@@ -1,9 +1,15 @@
 schemaVersion: 1
 id: codes
-enabled: false
+enabled: true
 promptFile: ./prompts/codes.md
 skills: []
-tools: []
+tools:
+  - read
+  - grep
+  - find
+  - ls
+  - edit
+  - write
 mcp: []
 knowledge:
   homeBinding: codes
@@ -11,3 +17,7 @@ knowledge:
 limits:
   maxRunningSessions: 1
   maxToolOutputChars: 24000
+workspace: /Users/yin/Documents/ybs/code/agent/deepseek-harness
+model:
+  provider: cmdc
+  id: deepseek/deepseek-v4.1-flash

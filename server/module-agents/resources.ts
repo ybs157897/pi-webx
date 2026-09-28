@@ -4,13 +4,20 @@ import { parseDocument } from 'yaml';
 import { Type } from 'typebox';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 
-export interface SkillSnapshot { name: string; description: string; entry: string; files: Record<string, string> }
+export interface SkillSnapshot {
+  name: string;
+  description: string;
+  entry: string;
+  files: Record<string, string>;
+  binaryFiles?: Record<string, string>;
+}
 export async function snapshotSkills(paths: readonly string[]): Promise<SkillSnapshot[]> {
   const skills: SkillSnapshot[] = [];
   let bytes = 0; let count = 0;
   for (const entry of paths) {
     const root = path.dirname(entry);
     const files: Record<string, string> = {};
+    const binaryFiles: Record<string, string> = {};
     async function visit(dir: string): Promise<void> {
       for (const item of (await readdir(dir, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
         if (item.name === '.git' || item.name === 'node_modules') continue;
@@ -22,20 +29,23 @@ export async function snapshotSkills(paths: readonly string[]): Promise<SkillSna
         bytes += data.length; count += 1;
         if (bytes > 4_000_000 || count > 256) throw new Error('Skill 快照超过 4MB 或 256 个文件');
         const text = data.toString('utf8');
-        if (!Buffer.from(text).equals(data) || text.includes('\0')) throw new Error('Skill 资源仅支持 UTF-8 文本文件');
-        files[path.relative(root, absolute).split(path.sep).join('/')] = text;
+        const key = path.relative(root, absolute).split(path.sep).join('/');
+        if (!Buffer.from(text).equals(data) || text.includes('\0')) binaryFiles[key] = data.toString('base64');
+        else files[key] = text;
       }
     }
     await visit(root);
     const entryName = path.basename(entry);
     const content = files[entryName]!;
+    if (content === undefined) throw new Error(`Skill 正文必须是 UTF-8 文本：${entry}`);
     const match = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/.exec(content);
     if (!match) throw new Error(`Skill 缺少 frontmatter：${entry}`);
     const doc = parseDocument(match[1]!, { uniqueKeys: true });
     const meta = doc.toJS() as { name?: unknown; description?: unknown };
     if (doc.errors.length || typeof meta?.name !== 'string' || !meta.name || typeof meta.description !== 'string') throw new Error('Skill 必须声明 name 和 description');
     if (skills.some(skill => skill.name === meta.name)) throw new Error(`同一 Agent 中 Skill 名称重复：${meta.name}`);
-    skills.push({ name: meta.name, description: meta.description, entry: entryName, files });
+    skills.push({ name: meta.name, description: meta.description, entry: entryName, files,
+      ...(Object.keys(binaryFiles).length ? { binaryFiles } : {}) });
   }
   return skills;
 }
@@ -48,7 +58,9 @@ export function skillTool(skills: readonly SkillSnapshot[]): ToolDefinition {
       const skill = skills.find(item => item.name === name);
       const key = resource ?? skill?.entry ?? '';
       const text = skill && Object.hasOwn(skill.files, key) ? skill.files[key] : undefined;
-      return { content: [{ type: 'text', text: text ?? 'Skill 或资源不在本 Agent 的固定配置范围内' }], details: { name, resource: key, found: text !== undefined } };
+      const binary = skill?.binaryFiles && Object.hasOwn(skill.binaryFiles, key);
+      return { content: [{ type: 'text', text: text ?? (binary ? '该 Skill 资源是二进制文件，无法作为文本读取' : 'Skill 或资源不在本 Agent 的固定配置范围内') }],
+        details: { name, resource: key, found: text !== undefined, binary: !!binary } };
     },
   };
 }

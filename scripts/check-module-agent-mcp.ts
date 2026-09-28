@@ -7,7 +7,7 @@
  */
 import assert from 'node:assert/strict';
 import { execSync } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -27,6 +27,9 @@ const sessionDir = join(root, 'sessions');
 const cwd = join(root, 'work');
 const configRoot = join(root, 'config');
 const fixtureScript = fileURLToPath(new URL('./mcp-fixture-server.ts', import.meta.url));
+const tsxLoader = fileURLToPath(import.meta.resolve('tsx'));
+const savedWorkspaceRoot = process.env.PI_WEBX_AGENT_WORKSPACE_ROOT;
+process.env.PI_WEBX_AGENT_WORKSPACE_ROOT = join(root, 'dedicated');
 
 // 父进程环境哨兵：fixture 子进程不应看得到（env 不透传验证）。
 process.env.FIX_A_SENTINEL = 'sentinel-A';
@@ -43,7 +46,7 @@ function fixtureConn(id: string, over: Partial<McpConnectionConfig> = {}): McpCo
     connection: {
       transport: 'stdio',
       command: process.execPath,
-      args: ['--import', 'tsx', fixtureScript],
+      args: ['--import', tsxLoader, fixtureScript],
       envRefs: {
         FIXTURE_SENTINEL: sentinel,
         // fixture-b 顺带验证 token 注入：REQUIRE 与 TOKEN 指向同一父变量。
@@ -75,7 +78,7 @@ async function waitForExit(pid: number, ms: number): Promise<boolean> {
   return false;
 }
 
-async function writeProfile(mcp: McpConnectionConfig[]): Promise<ResolvedAgentProfile> {
+async function writeProfile(mcp: McpConnectionConfig[], useDefaultWorkspace = false): Promise<ResolvedAgentProfile> {
   await mkdir(join(configRoot, 'prompts'), { recursive: true });
   await writeFile(join(configRoot, 'prompts', 'logs.md'), '你是日志 Agent。\n');
   await writeFile(join(configRoot, 'logs.yaml'), [
@@ -83,6 +86,7 @@ async function writeProfile(mcp: McpConnectionConfig[]): Promise<ResolvedAgentPr
     'id: logs',
     'enabled: true',
     'promptFile: ./prompts/logs.md',
+    ...(useDefaultWorkspace ? [] : [`workspace: ${JSON.stringify(await realpath(cwd))}`]),
     'skills: []',
     'tools:',
     '  - logs.search',
@@ -127,6 +131,10 @@ const host = new PiHost({
 });
 
 try {
+  const firstUse = await writeProfile([fixtureConn('fixture-a')], true);
+  const firstAssembled = await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile: firstUse });
+  assert.equal(firstAssembled.mcp.connected.length, 1, 'first default workspace is created before MCP launch');
+  await firstAssembled.dispose();
   /* (5a) required 失败：已连子进程被 dispose，装配整体抛 503 */
   const baselinePids = liveFixturePids();
   const badProfile = await writeProfile([
@@ -175,10 +183,13 @@ try {
   assert.ok(names.includes('mcp__logs__fixture-b__search_logs'), 'fixture-b 的 search_logs 未装配');
   assert.ok(!names.some((name) => name.includes('extra_tool')), '配置未列的服务端工具不得注册');
 
-  const callVia = async (name: string, params: Record<string, unknown>) => {
+  const callResult = async (name: string, params: Record<string, unknown>) => {
     const tool = hosted.session.getToolDefinition(name);
     assert.ok(tool !== undefined, `工具 ${name} 未注册`);
-    const result = await tool.execute('call-1', params, undefined, undefined, toolCtx);
+    return tool.execute('call-1', params, undefined, undefined, toolCtx);
+  };
+  const callVia = async (name: string, params: Record<string, unknown>) => {
+    const result = await callResult(name, params);
     return result.content.map((item) => ('text' in item ? item.text : '')).join('\n');
   };
 
@@ -194,7 +205,13 @@ try {
   assert.ok(probeSentinel.includes('env:FIXTURE_SENTINEL=present'), 'envRefs 注入的变量子进程应可见');
 
   /* (4) 调用超时：slow 超 timeoutMs 报错误文本，会话仍可调用其他工具 */
-  const slowText = await callVia('mcp__logs__fixture-a__slow', { ms: 30_000 });
+  const slowResult = await callResult('mcp__logs__fixture-a__slow', { ms: 30_000 });
+  const slowText = slowResult.content.map(item => 'text' in item ? item.text : '').join('\n');
+  assert.equal((slowResult.details as { isError: boolean }).isError, true, '超时必须携带失败标记供正文识别');
+  const toolError = await callResult('mcp__logs__fixture-a__search_logs', { q: 'fixture-error' });
+  assert.equal((toolError.details as { isError: boolean }).isError, true, 'MCP isError 不得丢失');
+  const toolSuccess = await callResult('mcp__logs__fixture-a__search_logs', { q: 'ok' });
+  assert.equal((toolSuccess.details as { isError: boolean }).isError, false);
   assert.ok(slowText.includes('失败') || slowText.includes('报错'), `超时应回错误文本，实际：${slowText}`);
   const after = await callVia('mcp__logs__fixture-a__search_logs', { q: 'after-timeout' });
   assert.ok(after.includes('sentinel:sentinel-A:after-timeout'), '超时后连接应仍可用');
@@ -213,5 +230,7 @@ try {
   await host.disposeAll();
   if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
   else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+  if (savedWorkspaceRoot === undefined) delete process.env.PI_WEBX_AGENT_WORKSPACE_ROOT;
+  else process.env.PI_WEBX_AGENT_WORKSPACE_ROOT = savedWorkspaceRoot;
   await rm(root, { recursive: true, force: true });
 }

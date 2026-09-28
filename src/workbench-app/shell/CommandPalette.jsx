@@ -8,8 +8,6 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.mjs'
 import { IconCommand, IconMoon, IconSearch, IconSettings, IconSparkles } from '../icons.jsx'
 
-const MODULE_ACTIONS_LIMIT = 7
-
 export default function CommandPalette({ modules, onNavigate, onOpenSettings, onToggleTheme, theme, onClose }) {
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState([])
@@ -58,7 +56,7 @@ export default function CommandPalette({ modules, onNavigate, onOpenSettings, on
     if (moduleMatched.length > 0) {
       list.push({
         title: q === '' ? '跳转' : '模块',
-        items: moduleMatched.slice(0, MODULE_ACTIONS_LIMIT).map(module => ({
+        items: moduleMatched.map(module => ({
           key: `module-${module.id}`,
           icon: module.icon,
           title: module.label,

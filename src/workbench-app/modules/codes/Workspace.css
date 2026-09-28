@@ -1,0 +1,74 @@
+/* The editor and conversation each own their scroll area. */
+.main-inner.codes-main-inner {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  max-width: none;
+  padding: var(--sp-3);
+}
+.codes-main-inner > .page-head { flex: none; margin-bottom: var(--sp-3); align-items: center; }
+.codes-main-inner .page-title { font-size: var(--fs-md); }
+.codes-main-inner .page-desc { display: none; }
+.codes-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 29vw, 420px);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-0);
+}
+.codes-workspace-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.codes-workspace-toolbar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+}
+.codes-workspace-title { display: flex; flex: 1; flex-direction: column; min-width: 0; font-size: var(--fs-sm); }
+.codes-workspace-title span { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.codes-workspace-toolbar > button { flex: none; }
+.codes-ide-host { flex: 1; min-height: 0; display: flex; }
+.codes-ide-frame { display: block; border: 0; width: 100%; height: 100%; min-width: 0; flex: 1; background: var(--surface-0); }
+.codes-service-state { display: flex; align-items: center; justify-content: center; flex-direction: column; gap: var(--sp-3); width: 100%; padding: var(--sp-4); text-align: center; }
+.codes-service-state p { font-size: var(--fs-sm); color: var(--text-2); overflow-wrap: anywhere; }
+.codes-service-state code { font-family: var(--mono); }
+.codes-chat-column { min-width: 0; min-height: 0; border-left: 1px solid var(--line-1); background: var(--surface-0); }
+.codes-chat-column .agent-panel-embedded { position: relative; inset: auto; z-index: auto; height: 100%; }
+.codes-chat-column .agent-panel-embedded > div { height: 100%; min-height: 0; }
+.codes-chat-column .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
+.codes-chat-column .aside-head { gap: var(--sp-2); padding: var(--sp-3); }
+.codes-chat-column .aside-sub { overflow-wrap: anywhere; }
+.codes-chat-column .aside-head .grow { min-width: 0; }
+.codes-chat-column .chat-empty { padding: var(--sp-4); }
+.codes-chat-column .composer { padding: var(--sp-3); }
+.codes-chat-column .agent-cap-row { flex-wrap: wrap; }
+.codes-chat-column .agent-capabilities { max-width: 100%; }
+.codes-chat-column .ai-fallback { max-height: 160px; overflow: auto; }
+.codes-chat-empty { height: 100%; display: flex; flex-direction: column; font-size: var(--fs-sm); }
+.codes-chat-empty > header { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-4); border-bottom: 1px solid var(--line-1); }
+.codes-chat-empty > div { margin: auto; padding: var(--sp-5); text-align: center; }
+.codes-chat-empty p { font-weight: 600; margin-bottom: var(--sp-2); }
+.codes-chat-empty span { color: var(--text-3); }
+.codes-chat-inactive { padding: var(--sp-3); color: var(--text-3); border-top: 1px solid var(--line-1); }
+.codes-chat-inactive textarea { margin-top: var(--sp-2); width: 100%; resize: none; }
+.codes-records-host { flex: 1; min-height: 0; overflow: auto; }
+.codes-records-host .codes-shell { border: 0; border-radius: 0; box-shadow: none; height: 100%; }
+.codes-ide-host[hidden], .codes-records-host[hidden] { display: none; }
+.codes-mobile-tabs { display: none; }
+@media (max-width: 899px) {
+  .codes-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .codes-mobile-tabs { display: flex; gap: var(--sp-2); padding: var(--sp-2); border-bottom: 1px solid var(--line-1); }
+  .codes-mobile-tabs [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  .codes-workspace[data-mobile-view="editor"] .codes-chat-column,
+  .codes-workspace[data-mobile-view="chat"] .codes-workspace-left { display: none; }
+  .codes-chat-column { border-left: 0; }
+}
+@media (max-width: 639px) {
+  .main-inner.codes-main-inner { padding: var(--sp-2) var(--sp-2) 72px; }
+  .codes-main-inner > .page-head { flex-direction: row; }
+}

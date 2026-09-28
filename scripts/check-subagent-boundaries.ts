@@ -44,7 +44,7 @@ try {
   const parentSettings = SettingsManager.create(cwd, agentDir);
   const before = await readFile(join(agentDir, 'settings.json'), 'utf8');
   const copied = createWorkerSettings(parentSettings);
-  assert.deepEqual(copied.getRetrySettings(), { enabled: false, maxRetries: 1, baseDelayMs: 1500 });
+  assert.deepEqual(copied.getRetrySettings(), { enabled: false, maxRetries: 1, baseDelayMs: 1500, maxAgentDelayMs: 60000 });
   copied.setRetryEnabled(true); await copied.flush();
   assert.equal(copied.getRetrySettings().maxRetries, 1, 'project overrides survive a child setting write');
   assert.equal(parentSettings.getRetrySettings().enabled, false);

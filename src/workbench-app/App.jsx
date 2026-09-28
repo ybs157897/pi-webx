@@ -24,7 +24,7 @@ import {
 } from './ui.jsx'
 import {
   IconBug, IconBook, IconCode, IconHome, IconLogs, IconMenu,
-  IconRefresh, IconRequirements, IconSparkles, IconTasks, IconWorks,
+  IconRefresh, IconRequirements, IconSettings, IconSparkles, IconTasks, IconWorks,
 } from './icons.jsx'
 import { usePrefs } from './state/prefs.js'
 import { parseTranscriptViewMode } from '../lib/transcript/presentation'
@@ -32,16 +32,18 @@ import TopBar from './shell/TopBar.jsx'
 import SideNav from './shell/SideNav.jsx'
 import AIPanel, { nextAskState } from './shell/AIPanel.jsx'
 import ModuleAgentPanel from './agents/ModuleAgentPanel.jsx'
+import { moduleAgentPanelDefinition } from './agents/definitions.js'
 import CommandPalette from './shell/CommandPalette.jsx'
 import SettingsSheet from './shell/SettingsSheet.jsx'
-import Dashboard from './modules/Dashboard.jsx'
-import Tasks from './modules/Tasks.jsx'
-import Works from './modules/Works.jsx'
-import Fixes from './modules/Fixes.jsx'
-import Logs from './modules/Logs.jsx'
-import Requirements from './modules/Requirements.jsx'
-import Codes from './modules/Codes.jsx'
-import Knowledge from './modules/Knowledge.jsx'
+import AgentSettingsPage from './modules/agent-settings/index.jsx'
+import Dashboard from './modules/dashboard/index.jsx'
+import Tasks from './modules/tasks/index.jsx'
+import Works from './modules/works/index.jsx'
+import Fixes from './modules/fixes/index.jsx'
+import Logs from './modules/logs/index.jsx'
+import Requirements from './modules/requirements/index.jsx'
+import Codes from './modules/codes/index.jsx'
+import Knowledge from './modules/knowledge/index.jsx'
 
 export const APP_NAME = 'AI 指挥台'
 
@@ -55,6 +57,7 @@ export const MODULES = [
   { id: 'requirements', label: '需求管理', desc: '需求知识库：搜索、列表与阅读视图', icon: IconRequirements, Component: Requirements },
   { id: 'codes', label: '代码开发', desc: '文件树 + 编辑器工作区', icon: IconCode, Component: Codes },
   { id: 'knowledge', label: '知识库', desc: '检索、阅读与关联沉淀的知识', icon: IconBook, Component: Knowledge },
+  { id: 'agent-settings', label: 'Agent 配置', desc: '分别配置模块 Agent 的提示词、模型和 Skill', icon: IconSettings, Component: AgentSettingsPage },
 ]
 
 /** 底部 tab 的固定三项 + 更多 + AI。 */
@@ -118,6 +121,29 @@ export default function App() {
   // 笔记标题 / 正文会整段消失。这里先落成 pending 用户消息，回显成功后撤掉。
   const [ask, setAsk] = useState(ASK_IDLE)
   const toastId = useRef(0)
+  const navigationGuard = useRef(null)
+
+  const registerNavigationGuard = useCallback(guard => {
+    navigationGuard.current = guard
+    return () => { if (navigationGuard.current === guard) navigationGuard.current = null }
+  }, [])
+
+  const activateModule = useCallback(id => {
+    setActiveModule(id)
+    setDrawerOpen(false)
+    setPanelOpen(false)
+    setAgentPanel(null)
+  }, [])
+
+  const openModule = useCallback(id => {
+    if (!MODULES.some(module => module.id === id)) return
+    setDrawerOpen(false)
+    if (id === activeModule) return
+    // 移动端抽屉或全屏 AI 面板不能盖住未保存确认。
+    setPanelOpen(false)
+    if (navigationGuard.current?.(id) === false) return
+    activateModule(id)
+  }, [activeModule, activateModule])
 
   const notify = useCallback((text, tone = 'ok') => {
     toastId.current += 1
@@ -207,7 +233,7 @@ export default function App() {
     return () => { cancelled = true }
   }, [replacePrefs])
 
-  // 全局快捷键：⌘K 命令面板、⌘1-8 切模块。
+  // 全局快捷键：⌘K 命令面板、⌘数字切模块。
   useEffect(() => {
     const onKeyDown = event => {
       const mod = event.metaKey || event.ctrlKey
@@ -216,13 +242,12 @@ export default function App() {
         setPaletteOpen(open => !open)
       } else if (mod && event.key >= '1' && event.key <= String(MODULES.length)) {
         event.preventDefault()
-        setActiveModule(MODULES[Number(event.key) - 1].id)
-        setDrawerOpen(false)
+        openModule(MODULES[Number(event.key) - 1].id)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [openModule])
 
   // 浮层开合只是会话内状态：对话框不记忆「上次是否打开」（全屏形态下自动弹出不合适）。
   const applyPanel = useCallback((open) => {
@@ -236,13 +261,6 @@ export default function App() {
   // AI 对话的工作步骤展示模式（设置里的四档）：库里存的可能是旧值或脏值，
   // 统一过解析器，认不出就回落到「标准」。
   const stepsMode = parseTranscriptViewMode(prefs.transcriptView)
-
-  function openModule(id) {
-    setActiveModule(id)
-    setDrawerOpen(false)
-    // 全屏浮层挡住整个工作台：从命令面板等入口切模块时顺手收起，露出目标模块。
-    setPanelOpen(false)
-  }
 
   async function clearChat() {
     setAsk(ASK_IDLE)
@@ -334,7 +352,7 @@ export default function App() {
       <SideNav modules={MODULES} active={activeModule} data={data} piStatus={piStatus} onNavigate={openModule} />
 
       <main className="main">
-        <div className={`main-inner ${activeModule === 'knowledge' ? 'kb-main-inner' : ''}`}>
+        <div className={`main-inner ${activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : ''}`}>
           <div className="page-head">
             <div>
               <h1 className="page-title">{active.label}</h1>
@@ -355,11 +373,14 @@ export default function App() {
             notify={notify}
             navigate={openModule}
             prefs={prefs}
+            themeMode={theme}
             setPref={setPref}
             empty={empty}
             onLoadDemo={loadDemo}
             askAI={askAI}
             openAgent={(id) => { setAgentPanel(id); setPanelOpen(false) }}
+            registerNavigationGuard={registerNavigationGuard}
+            onNavigateConfirmed={activateModule}
           />
         </div>
       </main>
@@ -367,7 +388,7 @@ export default function App() {
       {agentPanel !== null && (
         <ModuleAgentPanel
           key={agentPanel}
-          agentId={agentPanel}
+          definition={moduleAgentPanelDefinition(agentPanel)}
           themeMode={theme}
           stepsMode={stepsMode}
           onClose={() => setAgentPanel(null)}
@@ -397,7 +418,7 @@ export default function App() {
       )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
-      {panelOpen === false && agentPanel === null && (
+      {panelOpen === false && agentPanel === null && activeModule !== 'codes' && (
         <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>

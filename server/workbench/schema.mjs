@@ -1,6 +1,6 @@
 /**
- * 工作台数据 schema：模块定义、字段校验、默认值。浏览器数据层在每次
- * 写入和旧版 JSON 导入时复用同一份校验。零依赖。
+ * 工作台数据 schema：聚合领域字段、公共校验与默认值。浏览器数据层在每次
+ * 写入和旧版 JSON 导入时复用同一份校验。
  * @module shared/schema
  */
 
@@ -23,139 +23,27 @@ export const MODULE_LABELS = {
   knowledgeFolders: '知识目录',
 }
 
-/** 本机今天，格式 YYYY-MM-DD。 */
-export function todayISO(now = new Date()) {
-  const y = now.getFullYear()
-  const m = String(now.getMonth() + 1).padStart(2, '0')
-  const d = String(now.getDate()).padStart(2, '0')
-  return `${y}-${m}-${d}`
-}
+/** 各领域字段定义的聚合入口，公共字段校验由 schema-fields.mjs 提供。 */
+import { schema as tasksSchema } from '../modules/tasks/schema.mjs'
+import { schema as worksSchema } from '../modules/works/schema.mjs'
+import { schema as fixesSchema } from '../modules/fixes/schema.mjs'
+import { schema as logsSchema } from '../modules/logs/schema.mjs'
+import { schema as requirementsSchema } from '../modules/requirements/schema.mjs'
+import { schema as codesSchema } from '../modules/codes/schema.mjs'
+import { schema as knowledgeSchema } from '../modules/knowledge/schema.mjs'
+import { COMMON_FIELDS, todayISO } from './schema-fields.mjs'
+export { todayISO } from './schema-fields.mjs'
 
-const DATE_RE = /^\d{4}-\d{2}-\d{2}$/
-const ID_RE = /^[\w-]{8,64}$/
-
-function validDate(value) {
-  if (typeof value !== 'string' || !DATE_RE.test(value)) return false
-  const date = new Date(`${value}T00:00:00Z`)
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
-}
-
-/** 字段校验器：返回清洗后的值，不合法抛出中文错误。 */
-const FIELDS = {
-  id: {
-    check: v => ID_RE.test(v), cast: v => String(v), message: 'id 格式不正确',
-  },
-  title: {
-    check: v => typeof v === 'string' && v.trim() !== '', cast: v => String(v).trim(), max: 200, message: '需要非空标题',
-  },
-  text: {
-    check: v => typeof v === 'string' && v.trim() !== '', cast: v => String(v).trim(), max: 5000, message: '需要非空文本',
-  },
-  body: {
-    check: v => typeof v === 'string', cast: v => String(v), max: 50000, message: '正文必须是字符串',
-  },
-  note: {
-    check: v => typeof v === 'string', cast: v => String(v), max: 5000, message: '备注必须是字符串',
-  },
-  boolean: {
-    check: v => typeof v === 'boolean', cast: v => v === true, message: '需要布尔值',
-  },
-  priority: {
-    check: v => ['low', 'normal', 'high'].includes(v), cast: v => (['low', 'normal', 'high'].includes(v) ? v : 'normal'), message: '优先级只能是 low/normal/high',
-  },
-  status: {
-    check: v => ['todo', 'doing', 'done'].includes(v), cast: v => (['todo', 'doing', 'done'].includes(v) ? v : 'todo'), message: '状态只能是 todo/doing/done',
-  },
-  level: {
-    check: v => ['info', 'warn', 'error'].includes(v), cast: v => (['info', 'warn', 'error'].includes(v) ? v : 'info'), message: '级别只能是 info/warn/error',
-  },
-  date: {
-    check: validDate, cast: v => String(v), message: '日期格式需要是 YYYY-MM-DD',
-  },
-  optionalDate: {
-    check: v => v === null || v === undefined || v === '' || validDate(v), cast: v => (v === null || v === undefined || v === '' ? null : String(v)), message: '日期格式需要是 YYYY-MM-DD 或留空',
-  },
-  recordId: {
-    check: v => typeof v === 'string' && (v === '' || ID_RE.test(v)), cast: v => String(v), message: '关联 ID 格式不正确',
-  },
-  tag: {
-    check: v => typeof v === 'string', cast: v => String(v).trim(), max: 40, message: '标签需要是字符串',
-  },
-  tags: {
-    check: v => Array.isArray(v) && v.length <= 8 && v.every(item => typeof item === 'string' && item.trim() !== '' && item.length <= 40),
-    cast: v => [...new Set(v.map(item => String(item).trim()))], max: 8, message: '标签需要是最多 8 个非空字符串',
-  },
-  refs: {
-    check: v => Array.isArray(v) && v.length <= 20 && v.every(item => item !== null && typeof item === 'object' && typeof item.type === 'string' && typeof item.id === 'string' && item.id.length <= 64),
-    cast: v => v.map(item => ({ type: String(item.type), id: String(item.id) })),
-    max: 20, message: '关联需要是 { type, id } 数组（最多 20 条）',
-  },
-  starred: {
-    check: v => typeof v === 'boolean', cast: v => v === true, message: '置顶需要是布尔值',
-  },
-}
-
-/** 全部数组模块通用的关联/分组/置顶字段：旧数据导入时走默认值路径，天然向后兼容。 */
-const COMMON_FIELDS = {
-  tags: { ...FIELDS.tags, default: () => [] },
-  refs: { ...FIELDS.refs, default: () => [] },
-  starred: { ...FIELDS.starred, default: false },
-}
-
-/** 每个模块的可写字段：类型 → 是否必填 / 默认值。 */
 const MODULE_SCHEMA = {
-  tasks: {
-    title: { ...FIELDS.title, required: true },
-    done: { ...FIELDS.boolean, default: false },
-    due: { ...FIELDS.optionalDate, default: null },
-    priority: { ...FIELDS.priority, default: 'normal' },
-    tag: { ...FIELDS.tag, default: '' },
-  },
-  works: {
-    title: { ...FIELDS.title, required: true },
-    note: { ...FIELDS.note, default: '' },
-    status: { ...FIELDS.status, default: 'todo' },
-  },
-  fixes: {
-    title: { ...FIELDS.title, required: true },
-    priority: { ...FIELDS.priority, default: 'normal' },
-    status: { ...FIELDS.status, default: 'todo' },
-    note: { ...FIELDS.note, default: '' },
-  },
-  logs: {
-    text: { ...FIELDS.text, required: true },
-    level: { ...FIELDS.level, default: 'info' },
-    source: { ...FIELDS.tag, default: '' },
-    date: { ...FIELDS.date, default: () => todayISO() },
-  },
-  requirements: {
-    title: { ...FIELDS.title, required: true },
-    priority: { ...FIELDS.priority, default: 'normal' },
-    status: { ...FIELDS.status, default: 'todo' },
-    note: { ...FIELDS.note, default: '' },
-  },
-  codes: {
-    title: { ...FIELDS.title, required: true },
-    project: { ...FIELDS.tag, default: '' },
-    status: { ...FIELDS.status, default: 'todo' },
-    note: { ...FIELDS.note, default: '' },
-  },
-  knowledge: {
-    title: { ...FIELDS.title, required: true },
-    body: { ...FIELDS.body, default: '' },
-    knowledgeBaseId: { ...FIELDS.recordId, default: '' },
-    folderId: { ...FIELDS.recordId, default: '' },
-  },
-  knowledgeBases: {
-    title: { ...FIELDS.title, required: true },
-    description: { ...FIELDS.note, default: '' },
-  },
-  knowledgeFolders: {
-    title: { ...FIELDS.title, required: true },
-    knowledgeBaseId: { ...FIELDS.recordId, required: true },
-    parentId: { ...FIELDS.recordId, default: '' },
-  },
+  ...tasksSchema,
+  ...worksSchema,
+  ...fixesSchema,
+  ...logsSchema,
+  ...requirementsSchema,
+  ...codesSchema,
+  ...knowledgeSchema,
 }
+
 
 /** 通用字段合入每个数组模块（在 MODULE_SCHEMA 定义之后统一注入，避免逐模块重复）。 */
 for (const schema of Object.values(MODULE_SCHEMA)) Object.assign(schema, COMMON_FIELDS)

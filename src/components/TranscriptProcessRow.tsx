@@ -13,6 +13,7 @@ import { Icon, Text } from '@lobehub/ui';
 import { theme } from 'antd';
 import {
   Brain,
+  BookOpen,
   ChevronDown,
   ChevronRight,
   Code,
@@ -21,6 +22,7 @@ import {
   Image,
   ListTodo,
   Pencil,
+  Plug,
   ScanSearch,
   Search,
   Terminal,
@@ -48,6 +50,8 @@ const LIVE_ICONS: Record<LiveActivity, LucideIcon> = {
   plan: ListTodo,
   questions: Wrench,
   tools: Wrench,
+  skill: BookOpen,
+  mcp: Plug,
 };
 
 /** dsh's `PROCESS_TITLE_MINIMUM_MS`: a live title commits at most once per 150ms. */
@@ -114,7 +118,9 @@ function DisclosureRow({
         display: 'flex',
         alignItems: 'center',
         gap: 6,
-        height: 24,
+        minHeight: 24,
+        minWidth: 0,
+        flexWrap: 'wrap',
         cursor: 'pointer',
         color: token.colorTextTertiary,
         userSelect: 'none',
@@ -140,11 +146,19 @@ export function TurnProcessRow({
   const Glyph = LIVE_ICONS[summary.activity];
   return (
     <DisclosureRow expanded={expanded} onToggle={onToggle} glyph={<Icon icon={Glyph} size={14} />} testId="turn-process-row" activity={summary.activity}>
-      <Text fontSize={13} type="secondary">
+      <Text fontSize={13} type="secondary" style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
         {summary.label}
       </Text>
+      {summary.identity && <ProcessIdentity identity={summary.identity} />}
     </DisclosureRow>
   );
+}
+
+function ProcessIdentity({ identity }: { identity: string }) {
+  return <span data-testid="process-capability-identity" title={identity}
+    style={{ flex: '1 1 100px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 13 }}>
+    {identity}
+  </span>;
 }
 
 /**
@@ -167,7 +181,7 @@ export function LiveProcessRow({
   expanded: boolean;
   onToggle: () => void;
 }) {
-  const desired = `${spec.label}${TITLE_PAIR_SEPARATOR}${detail}`;
+  const desired = `${spec.label}${TITLE_PAIR_SEPARATOR}${spec.identity ?? detail}`;
   const stableTitle = useStableLiveTitle(desired);
   const title = closed ? desired : stableTitle;
   const splitAt = title.indexOf(TITLE_PAIR_SEPARATOR);
@@ -182,10 +196,10 @@ export function LiveProcessRow({
       testId="live-process-row"
       activity={spec.activity}
     >
-      <span className={closed ? undefined : 'pi-live-shimmer'} style={{ flexShrink: 0, fontSize: 13 }}>
+      <span className={closed ? undefined : 'pi-live-shimmer'} style={{ minWidth: 0, maxWidth: '100%', overflowWrap: 'anywhere', fontSize: 13 }}>
         {label}
       </span>
-      {detailText !== '' && (
+      {detailText !== '' && spec.identity !== undefined ? <ProcessIdentity identity={detailText} /> : detailText !== '' && (
         <>
           <span style={{ opacity: 0.45, flexShrink: 0 }}>·</span>
           <Text fontSize={13} type="secondary" ellipsis style={{ flex: 1, minWidth: 0 }}>

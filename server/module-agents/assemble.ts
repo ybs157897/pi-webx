@@ -22,12 +22,15 @@ import { AGENT_IDS, type AgentId, type AgentScope, type ResolvedAgentProfile } f
 import { createKnowledgeAccess, ensureBinding } from './knowledge';
 import { connectMcp, type ConnectedMcp } from './mcp';
 import { moduleAgentDefinition, resolveToolNames } from './registry';
+import { boundSessionWorkspace } from './workspace';
 
 export interface AssembleModuleAgentInput {
   store: WorkbenchStore;
   workspaceKey: string;
   agentId: AgentId;
   profile: ResolvedAgentProfile;
+  /** Original stored cwd for a snapshot created before workspace binding existed. */
+  workspaceDir?: string;
   dataSourceRegistry?: DataSourceRegistry;
 }
 
@@ -46,6 +49,9 @@ export interface AssembledModuleAgent {
 
 export async function assembleModuleAgent(input: AssembleModuleAgentInput): Promise<AssembledModuleAgent> {
   const { store, workspaceKey, agentId, profile } = input;
+  let workspaceDir: string;
+  try { workspaceDir = await boundSessionWorkspace(profile, input.workspaceDir); }
+  catch (error) { throw new HostError(503, error instanceof Error ? error.message : '模块工作区不可用'); }
   const definition = moduleAgentDefinition(agentId);
   if (definition === undefined) {
     throw new HostError(503, `模块 Agent「${agentId}」尚未注册实现`);
@@ -84,7 +90,9 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     if (profile.skills.length) produced.push(skillTool(profile.skills));
     if (profile.skills.length && !profile.config.tools.includes('skills.read')) throw new HostError(503, '配置了 Skills 时必须允许 skills.read');
     const producedNames = new Set(produced.map((tool) => tool.name));
-    resolved = resolveToolNames(agentId, profile.config.tools);
+    // 手写 YAML 可能关闭全部 Skill，却仍保留旧的 skills.read 声明。
+    const configuredTools = profile.skills.length ? profile.config.tools : profile.config.tools.filter(name => name !== 'skills.read');
+    resolved = resolveToolNames(agentId, configuredTools);
     for (const name of resolved) {
       if (!producedNames.has(name) && !BUILTIN_TOOL_NAMES.has(name)) {
         throw new HostError(503, `模块 Agent「${agentId}」配置了未知工具：${name}`);
@@ -113,6 +121,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
       try {
         const conn = await connectMcp(agentId, cfg, {
           maxToolOutputChars: profile.config.limits.maxToolOutputChars,
+          workspaceDir,
         });
         connected.push(conn);
         customTools.push(...conn.tools);

@@ -30,7 +30,7 @@ const STEPS_MODE_OPTIONS = [
 
 const SHORTCUTS = [
   ['⌘K / Ctrl+K', '打开命令面板（搜索、跳转、执行命令）'],
-  ['⌘1 … ⌘7', '切换到对应模块'],
+  ['⌘1 … ⌘9', '切换到对应模块'],
   ['Esc', '关闭面板、弹窗与命令面板'],
   ['Enter / Shift+Enter', '在 AI 副驾里发送 / 换行'],
 ]

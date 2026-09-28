@@ -623,6 +623,7 @@ export interface ModuleAgentCapability {
   ok: boolean;
   error?: string;
   profileRevision?: string;
+  workspace?: string;
   tools?: string[];
   skills?: { name: string; description: string }[];
   dataSources?: { kind: 'logs' | 'issues'; id: string; adapter: string }[];
@@ -647,6 +648,8 @@ export interface CreateModuleAgentSessionRequest {
   requestId: string;
   /** 恢复已登记的模块会话。 */
   sessionId?: string;
+  /** Code Agent 的真实项目目录；服务端按 realpath 验证并绑定。 */
+  cwd?: string;
 }
 
 export interface ListSessionsResponse {

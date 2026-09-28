@@ -4,8 +4,11 @@ import path from 'node:path';
 import type { ResolvedAgentProfile } from './contracts';
 import { HostError } from '../pi/host-contract';
 
-export function profileRevision(profile: Pick<ResolvedAgentProfile, 'config' | 'promptText' | 'skills'>): string {
-  return createHash('sha256').update(JSON.stringify({ config: profile.config, promptText: profile.promptText, skills: profile.skills })).digest('hex');
+export function profileRevision(profile: Pick<ResolvedAgentProfile, 'config' | 'promptText' | 'skills' | 'effectiveWorkspace'>): string {
+  return createHash('sha256').update(JSON.stringify({
+    config: profile.config, promptText: profile.promptText, skills: profile.skills,
+    ...(profile.effectiveWorkspace === undefined ? {} : { effectiveWorkspace: profile.effectiveWorkspace }),
+  })).digest('hex');
 }
 /** Immutable JSON captures selected source definitions and text resources, never resolved secrets. */
 export class ProfileSnapshots {

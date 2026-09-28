@@ -14,6 +14,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Type } from 'typebox';
+import path from 'node:path';
 
 import type { AgentToolResult, ToolDefinition } from '@earendil-works/pi-coding-agent';
 
@@ -89,13 +90,16 @@ const DISPOSE_TIMEOUT_MS = 5_000;
 export async function connectMcp(
   agentId: AgentId,
   cfg: McpConnectionConfig,
-  opts: { secrets?: McpSecretResolver; signal?: AbortSignal; maxToolOutputChars?: number } = {},
+  opts: { secrets?: McpSecretResolver; signal?: AbortSignal; maxToolOutputChars?: number; workspaceDir?: string } = {},
 ): Promise<ConnectedMcp> {
   const secrets = opts.secrets ?? defaultSecrets;
   const maxChars = opts.maxToolOutputChars ?? 8_000;
 
   let transport: StdioClientTransport | StreamableHTTPClientTransport;
   if (cfg.connection.transport === 'stdio') {
+    const cwd = cfg.connection.cwd === undefined ? opts.workspaceDir
+      : path.isAbsolute(cfg.connection.cwd) ? cfg.connection.cwd
+        : path.resolve(opts.workspaceDir ?? process.cwd(), cfg.connection.cwd);
     const env = {
       ...minimalEnv(),
       ...resolveRefs(cfg.connection.envRefs, secrets, `MCP「${cfg.id}」envRefs`),
@@ -103,7 +107,7 @@ export async function connectMcp(
     transport = new StdioClientTransport({
       command: cfg.connection.command,
       args: cfg.connection.args ?? [],
-      ...(cfg.connection.cwd === undefined ? {} : { cwd: cfg.connection.cwd }),
+      ...(cwd === undefined ? {} : { cwd }),
       env,
       stderr: 'pipe',
     });
@@ -139,6 +143,7 @@ export async function connectMcp(
         parameters: Type.Unsafe(serverTool.inputSchema),
         async execute(_toolCallId, params, signal) {
           let text: string;
+          let isError = false;
           try {
             const result = await client.callTool(
               { name: wanted, arguments: params as Record<string, unknown> },
@@ -146,13 +151,15 @@ export async function connectMcp(
               { timeout: cfg.timeoutMs, ...(signal === undefined ? {} : { signal }) },
             );
             text = textOfContent(result as { content?: unknown }, maxChars);
-            if (result.isError === true) text = `MCP 工具报错：${text}`;
+            isError = result.isError === true;
+            if (isError) text = `MCP 工具报错：${text}`;
           } catch (error) {
+            isError = true;
             text = `MCP 调用失败：${error instanceof Error ? error.message : String(error)}`;
           }
           const result: AgentToolResult<unknown> = {
             content: [{ type: 'text', text }],
-            details: { mcp: cfg.id, tool: wanted },
+            details: { mcp: cfg.id, tool: wanted, isError },
           };
           return result;
         },

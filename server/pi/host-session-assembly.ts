@@ -8,6 +8,8 @@
  * 以取消收尾。
  */
 import { rmSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
+import path from 'node:path';
 
 import type { Model } from '@earendil-works/pi-ai';
 import {
@@ -31,6 +33,7 @@ import {
   refreshSubagentTool,
 } from './host-teams';
 import { skillsPrompt } from '../module-agents/resources';
+import { boundSessionWorkspace } from '../module-agents/workspace';
 import {
   MAX_SESSIONS,
   errorText,
@@ -119,8 +122,23 @@ export async function createHostedSession(
   let createdHost: HostedSession | undefined;
   let createdTeamId: string | null = null;
   try {
-    const cwd = options.cwd ?? process.cwd();
     const moduleAgent = options.moduleAgent;
+    let cwd: string;
+    if (moduleAgent === undefined) cwd = options.cwd ?? process.cwd();
+    else {
+      try {
+        cwd = await boundSessionWorkspace(moduleAgent.profile, options.sessionPath ? options.cwd : undefined);
+      } catch (error) {
+        throw new HostError(503, error instanceof Error ? error.message : '模块工作区不可用');
+      }
+      if (moduleAgent.scope.agentId === 'codes' && options.cwd !== undefined) {
+        if (!path.isAbsolute(options.cwd) || options.cwd.includes('\0')) throw new HostError(400, '代码 Agent 需要绝对路径的项目目录');
+        let requested: string;
+        try { requested = await realpath(options.cwd); }
+        catch { throw new HostError(400, '项目目录不存在或不可访问'); }
+        if (requested !== cwd) throw new HostError(409, '项目目录与 Agent 工作区不一致');
+      }
+    }
     if (moduleAgent !== undefined && options.teamMode === true) {
       throw new HostError(400, '模块 Agent 会话不支持团队模式');
     }
@@ -148,6 +166,16 @@ export async function createHostedSession(
       : options.noSession
         ? SessionManager.inMemory(cwd)
         : SessionManager.create(cwd, host.sessionDir);
+    if (moduleAgent?.scope.agentId === 'codes' && options.sessionPath !== undefined) {
+      const recordedCwd = sessionManager.getHeader()?.cwd;
+      if (typeof recordedCwd !== 'string' || !path.isAbsolute(recordedCwd)) {
+        throw new HostError(409, '会话记录缺少有效项目目录');
+      }
+      let canonicalRecorded: string;
+      try { canonicalRecorded = await realpath(recordedCwd); }
+      catch { throw new HostError(409, '会话记录的项目目录不可用'); }
+      if (canonicalRecorded !== cwd) throw new HostError(409, '会话记录的项目目录不匹配');
+    }
 
     const hostedId = sessionManager.getSessionId();
     /**

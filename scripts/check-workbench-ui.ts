@@ -38,7 +38,11 @@ import Fixes from '../src/workbench-app/modules/Fixes.jsx';
 import Logs from '../src/workbench-app/modules/Logs.jsx';
 import Requirements from '../src/workbench-app/modules/Requirements.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
+import CodeRecords from '../src/workbench-app/modules/codes/Records.jsx';
+import CodeChat from '../src/workbench-app/modules/codes/CodeChat.jsx';
+import { readIdeState } from '../src/workbench-app/modules/codes/ide-state.mjs';
 import Knowledge from '../src/workbench-app/modules/Knowledge.jsx';
+import { moduleAgentPanelDefinition } from '../src/workbench-app/agents/definitions.js';
 import AIPanel, { nextAskState } from '../src/workbench-app/shell/AIPanel.jsx';
 import AgentCapabilities from '../src/workbench-app/agents/AgentCapabilities.jsx';
 import SettingsSheet from '../src/workbench-app/shell/SettingsSheet.jsx';
@@ -46,6 +50,8 @@ import AssistantMarkdown from '../src/workbench-app/pi-webx/AssistantMarkdown.js
 import { AssistantMessageItem } from '../src/components/MessageItem';
 import { TranscriptView } from '../src/components/TranscriptView';
 import { todayISO } from '../src/workbench-app/util.mjs';
+import './check-capability-tools';
+import './check-module-agent-settings-ui';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
@@ -167,7 +173,7 @@ const data = fakeData();
   // empty 标志误报为 true 但库里有记录时，不许把用户数据藏起来。
   assert.ok(render(Dashboard, data, { empty: true }).includes('data-widget="progress"'), '有记录时即使 empty=true 也该渲染 widget 板');
 
-  assert.ok(sourceOf('../src/workbench-app/modules/Dashboard.jsx').includes('onLoadDemo()'), '主页演示数据按钮未接线');
+  assert.ok(sourceOf('../src/workbench-app/modules/dashboard/index.jsx').includes('onLoadDemo()'), '主页演示数据按钮未接线');
 }
 
 /* ================================================== 2. 今日规划：快速捕获 + 分组 */
@@ -184,7 +190,9 @@ const data = fakeData();
   const allMarkup = render(Tasks, data, { prefs: { tasksScope: 'all' } });
   assert.equal(occurrences(allMarkup, 'data-testid="task-row"'), 4, '全部档应有 4 行');
 
-  assert.ok(sourceOf('../src/workbench-app/modules/Tasks.jsx').includes('parseQuickAdd'), '快速捕获语法解析未落地');
+  assert.ok(sourceOf('../src/workbench-app/modules/tasks/index.jsx').includes('parseQuickAdd')
+    && sourceOf('../src/workbench-app/modules/tasks/model.jsx').includes('function parseQuickAdd'),
+    '快速捕获语法解析未落地');
 }
 
 /* ================================================== 3. 工作助理：看板 / 列表双视图 */
@@ -203,7 +211,8 @@ const data = fakeData();
   assert.ok(!list.includes('data-testid="works-board"'), 'list 视图不该渲染看板');
   assert.equal(occurrences(list, 'data-testid="work-row"'), 3, '列表行数应等于记录数');
 
-  const worksSource = sourceOf('../src/workbench-app/modules/Works.jsx');
+  const worksSource = sourceOf('../src/workbench-app/modules/works/index.jsx')
+    + sourceOf('../src/workbench-app/modules/works/model.jsx');
   assert.ok(worksSource.includes('onDragStart') && worksSource.includes('onDrop'), '看板缺拖拽接线');
   assert.ok(worksSource.includes("api.patchRecord('works'"), '拖拽落库未接线');
 
@@ -221,7 +230,7 @@ const data = fakeData();
   assert.ok(!markup.includes('kanban') && !markup.includes('work-card'), '修复模块不许出现看板痕迹（用户定调：列表）');
   assertNoLeaks(markup, '修复');
 
-  const fixesSource = sourceOf('../src/workbench-app/modules/Fixes.jsx');
+  const fixesSource = sourceOf('../src/workbench-app/modules/fixes/index.jsx');
   assert.ok(fixesSource.includes("api.addRecord('logs'"), '修复详情应能回记日志');
   assert.ok(fixesSource.includes("type: 'fixes'"), '回记日志应带 fix 关联');
 
@@ -244,7 +253,7 @@ const data = fakeData();
   assert.ok(!markup.includes('logs-filter-bar'), '无筛选时不该画条件条');
   assertNoLeaks(markup, '日志');
 
-  const logsSource = sourceOf('../src/workbench-app/modules/Logs.jsx');
+  const logsSource = sourceOf('../src/workbench-app/modules/logs/index.jsx');
   assert.ok(logsSource.includes("api.addRecord('logs'"), '记录日志未接线');
   assert.ok(logsSource.includes('queryOpen') && logsSource.includes('recordOpen'), '查询/记录弹窗状态未落地');
 
@@ -288,7 +297,22 @@ const data = fakeData();
 /* ================================================== 7. 代码开发：编辑器工作区（用户定调） */
 
 {
-  const markup = render(Codes, data);
+  const workspace = render(Codes, data);
+  for (const id of ['codes-workspace', 'codes-ide-panel', 'codes-chat-panel', 'codes-records-toggle', 'codes-show-editor', 'codes-show-chat']) {
+    assert.ok(workspace.includes(`data-testid="${id}"`), `代码开发缺 ${id}`);
+  }
+  assert.ok(workspace.includes('data-testid="codes-chat-awaiting-project"'), '未打开项目时应提示项目绑定');
+  const chat = renderToStaticMarkup(h(CodeChat, { root: '/tmp/codes-ui-fixture' }));
+  assert.ok(chat.includes('data-agent-id="codes"') && chat.includes('agent-panel-embedded'), '项目对话必须是嵌入的 codes Agent');
+  assert.ok(chat.includes('role="region"') && !chat.includes('aria-modal="true"'), '固定对话不能声明为模态弹窗');
+  assert.ok(!chat.includes('收起对话（Esc）'), '固定对话不应有关闭按钮或 Esc 退出');
+  assert.equal(readIdeState({ type: 'wrong', payload: {} }), null);
+  assert.equal(readIdeState({ type: 'web-idea:state', payload: { root: 'relative' } }), null);
+  const state = { root: '/tmp/project', path: 'README.md', dirty: false, saving: true, workspaceId: 'fixture' };
+  assert.deepEqual(readIdeState({ type: 'web-idea:state', payload: state }), state);
+
+  // 原开发事项入口保留：其记录与真实磁盘文件分别持有。
+  const markup = render(CodeRecords, data);
   assert.ok(markup.includes('data-module="codes"'), '代码模块缺 data-module');
   assert.ok(markup.includes('data-testid="codes-tree-panel"'), '代码模块缺文件树面板');
   assert.equal(occurrences(markup, 'data-testid="code-item"'), 3, '树项数应等于记录数');
@@ -297,7 +321,8 @@ const data = fakeData();
   assert.ok(markup.includes('data-testid="codes-new"'), '代码模块缺新建入口');
   assertNoLeaks(markup, '代码');
 
-  const codesSource = sourceOf('../src/workbench-app/modules/Codes.jsx');
+  const codesSource = sourceOf('../src/workbench-app/modules/codes/Records.jsx')
+    + sourceOf('../src/workbench-app/modules/codes/View.jsx');
   assert.ok(codesSource.includes("'s'") && codesSource.includes('metaKey'), '编辑器缺 ⌘S 保存');
   assert.ok(codesSource.includes('codes-gutter'), '编辑器缺行号槽');
   assert.ok(codesSource.includes('preventDefault'), '⌘S 未阻止浏览器默认保存');
@@ -408,7 +433,10 @@ const data = fakeData();
   assert.ok(blank.includes('data-testid="kb-load-demo"'), '首启演示数据入口丢失');
   assertNoLeaks(blank, '知识库空库');
 
-  const kbSource = sourceOf('../src/workbench-app/modules/Knowledge.jsx');
+  const kbSource = sourceOf('../src/workbench-app/modules/knowledge/index.jsx')
+    + sourceOf('../src/workbench-app/modules/knowledge/model.jsx')
+    + sourceOf('../src/workbench-app/modules/knowledge/actions.jsx')
+    + sourceOf('../src/workbench-app/modules/knowledge/View.jsx');
   assert.ok(kbSource.includes("api.addRecord('knowledgeBases'") && kbSource.includes("api.addRecord('knowledgeFolders'"), '库或目录创建未接后端');
   assert.ok(kbSource.includes("api.patchRecord('knowledge'") && kbSource.includes("api.addRecord('knowledge'"), '文档写入未接后端');
   assert.ok(kbSource.includes('WIKI_PATTERN') && kbSource.includes('buildRefs'), '[[双链]] 解析未落地');
@@ -736,6 +764,7 @@ console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + 
     }));
   const sheetDefault = renderSheet({});
   assert.ok(sheetDefault.includes('data-testid="settings-steps-mode"'), '设置弹窗应有工作步骤展示设置项');
+  assert.ok(!sheetDefault.includes('settings-open-agent-settings'), '模块 Agent 配置应从全局设置移到左侧模块');
   for (const label of ['工作步骤展示', '简洁', '标准', '详细', '完全展开']) {
     assert.ok(sheetDefault.includes(label), `设置项应含「${label}」选项`);
   }
@@ -748,6 +777,7 @@ console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + 
 
   // 接线钉在源码上：App 解析 prefs 并透传，AIPanel 把模式交给 TranscriptView。
   const appSource = sourceOf('../src/workbench-app/App.jsx');
+  assert.ok(appSource.includes("id: 'agent-settings'") && appSource.includes('onNavigateConfirmed={activateModule}'), 'App 应注册配置模块和离页确认接线');
   assert.ok(appSource.includes('parseTranscriptViewMode(prefs.transcriptView)'), 'App 应从 prefs 解析工作步骤展示模式');
   assert.ok(appSource.includes('stepsMode={stepsMode}'), 'App 应把模式传给 AI 浮层');
   const panelSource2 = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
@@ -818,6 +848,10 @@ console.log('workbench UI: transcript work-details modes (compact/standard/detai
   const appSource = sourceOf('../src/workbench-app/App.jsx');
   assert.ok(appSource.includes('ModuleAgentPanel'), 'App 未接 ModuleAgentPanel');
   assert.ok(appSource.includes('openAgent='), 'App 未把 openAgent 传给模块');
+  const logsPanel = moduleAgentPanelDefinition('logs');
+  assert.equal(logsPanel.id, 'logs', '日志 Agent 定义未注册');
+  assert.ok(logsPanel.welcomeText?.includes('日志和问题清单') && logsPanel.suggestions?.length === 3, '日志面板文案未从模块定义提供');
+  assert.ok(!sourceOf('../src/workbench-app/agents/ModuleAgentPanel.jsx').includes('查询已接入的日志'), '通用面板仍硬编码日志欢迎语');
 }
 
 console.log('workbench UI: module agent panel (capabilities redaction, AIPanel optional props, App wiring) passed');

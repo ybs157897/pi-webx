@@ -7,7 +7,7 @@
  * set_tools/fork/reset/普通恢复路径全部收口、普通会话回归不受影响。
  */
 import assert from 'node:assert/strict';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -20,6 +20,7 @@ import { WorkbenchStore } from '../server/workbench/store';
 import { assembleModuleAgent } from '../server/module-agents/assemble';
 import { LOGS_TOOL_NAMES } from '../server/module-agents/logs/tools';
 import { loadAgentProfiles, defaultAgentsConfigRoot } from '../server/module-agents/profiles';
+import { profileRevision } from '../server/module-agents/snapshots';
 import type { ResolvedAgentProfile } from '../server/module-agents/contracts';
 import type { PiCommandEnvelope } from '../src/shared/protocol';
 
@@ -83,6 +84,10 @@ async function main(): Promise<void> {
   await writeFile(join(agentDir, 'SYSTEM.md'), 'GLOBAL-PROMPT-MUST-NOT-LEAK');
   await mkdir(sessionDir, { recursive: true });
   await mkdir(cwd, { recursive: true });
+  const boundCwd = await realpath(cwd);
+  profile.config.workspace = boundCwd;
+  profile.effectiveWorkspace = boundCwd;
+  profile.profileRevision = profileRevision(profile);
 
   const runtime = await ModelRuntime.create({
     authPath: join(agentDir, 'auth.json'),
@@ -109,7 +114,38 @@ async function main(): Promise<void> {
     const moduleOption = await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile });
 
     /* (a) 工具面恰为 配置允许的模块工具，无内置工具、无 subagent/render_ui */
-    const hosted = await host.create({ cwd, provider: probeModel.provider, model: probeModel.id, moduleAgent: moduleOption });
+    const hosted = await host.create({ cwd: join(root, 'ignored-cwd'), provider: probeModel.provider, model: probeModel.id, moduleAgent: moduleOption });
+    assert.equal(hosted.cwd, boundCwd);
+    assert.equal(hosted.session.sessionManager.getCwd(), boundCwd);
+    const reboundDir = join(root, 'rebound');
+    await mkdir(reboundDir);
+    const canonicalRebound = await realpath(reboundDir);
+    const reboundProfile = structuredClone(profile);
+    reboundProfile.config.workspace = canonicalRebound;
+    reboundProfile.effectiveWorkspace = canonicalRebound;
+    reboundProfile.profileRevision = profileRevision(reboundProfile);
+    const reboundOption = await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile: reboundProfile });
+    const reboundHosted = await host.create({ provider: probeModel.provider, model: probeModel.id, moduleAgent: reboundOption });
+    assert.equal(reboundHosted.cwd, canonicalRebound, 'new session uses latest binding');
+    assert.equal(hosted.cwd, boundCwd, 'existing session retains original binding');
+    await host.kill(reboundHosted.id);
+
+    const codesResult = profiles.get('codes');
+    assert.ok(codesResult?.ok);
+    const codesDir = join(root, 'codes-work');
+    await mkdir(codesDir);
+    const canonicalCodes = await realpath(codesDir);
+    const codesProfile = structuredClone(codesResult.profile);
+    codesProfile.config.workspace = canonicalCodes;
+    codesProfile.effectiveWorkspace = canonicalCodes;
+    codesProfile.profileRevision = profileRevision(codesProfile);
+    const codesOption = await assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'codes', profile: codesProfile });
+    await assert.rejects(host.create({ cwd: boundCwd, provider: probeModel.provider, model: probeModel.id, moduleAgent: codesOption }),
+      (error) => error instanceof HostError && error.status === 409, 'codes cannot override bound cwd');
+    const codesHosted = await host.create({ provider: probeModel.provider, model: probeModel.id, moduleAgent: codesOption });
+    assert.equal(codesHosted.cwd, canonicalCodes);
+    assert.equal(codesHosted.session.sessionManager.getCwd(), canonicalCodes);
+    await host.kill(codesHosted.id);
     const allNames = hosted.session.getAllTools().map((tool) => tool.name).sort();
     assert.deepEqual(allNames, MODULE_TOOL_NAMES, '模块会话的工具目录必须恰为 配置允许的领域工具');
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), MODULE_TOOL_NAMES, '全部模块工具应处于激活态');

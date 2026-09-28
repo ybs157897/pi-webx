@@ -23,6 +23,7 @@ server.registerTool('search_logs', {
   description: 'fixture log search',
   inputSchema: { q: z.string() },
 }, ({ q }) => ({
+  ...(q === 'fixture-error' ? { isError: true } : {}),
   content: [{ type: 'text', text: `sentinel:${process.env.FIXTURE_SENTINEL ?? 'unset'}:${q}` }],
 }));
 

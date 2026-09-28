@@ -22,7 +22,8 @@
 
 - `server/routes.ts` 有提交门禁会拦截，尽量别动它。
 - 删改 `data-testid` = 破坏门禁；新增交互必须补 testid 并同步进 UI 门禁。
-- 模块样式放各自 `modules/X.css`，类名带模块前缀，视觉令牌只取 `styles.css`。
+- 模块页面、专属组件/辅助函数和样式放在各自 `src/workbench-app/modules/<id>/`，由 `index.jsx` 公开；旧 `modules/X.jsx` 仅作兼容 re-export。类名带模块前缀，视觉令牌只取 `styles.css`。
+- 后端业务字段/工具放 `server/modules/<id>/`；`server/module-agents/` 只放公共 Agent 加载、装配、MCP 与作用域机制。Agent 配置、提示词和 Skills 仍统一维护在 `config/agents/`。
 - 渲染期不碰 `window/document`（SSR 门禁会跑纯渲染）；浏览器 API 进 effect 并加 `typeof window` 守卫。
 - 提示词文件在 `server/prompts/`：`subagent/*.md` 逐字节冻结，改前读该目录 README 的同步规则；架构说明见 `docs/system-prompt-design.md`。
 - 知识库接入协议见 `docs/workbench-knowledge-protocol.md`（写入契约与读/写口子）。

@@ -3,14 +3,13 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-24（对应 `codex/ai-workbench-migration` 分支的大拆分轮次：
-七个上帝文件按职责拆成目录模块，原路径保留为 barrel，导出面不变）。
+更新日期：2026-09-28。工作台八个业务模块与现有后端领域字段/工具按业务目录归位，并新增左侧 Agent 配置页；原前端页面路径仅保留兼容 re-export。
 
 ## 总体架构
 
 ```
 浏览器
- ├─ /            工作台前端（src/workbench-app/，React，8 模块）
+ ├─ /            工作台前端（src/workbench-app/，React，8 业务模块 + Agent 配置）
  └─ /chat        聊天前端（src/App.tsx → src/app/，LobeHub 风格）
         │ SSE + POST
         ▼
@@ -18,6 +17,8 @@
  ├─ server/routes.ts            HTTP 面（提交门禁冻结，尽量别动）
  ├─ server/ws.ts                WebSocket
  ├─ server/pi/                  pi 会话宿主（进程内 SDK）
+ ├─ server/modules/             工作台领域字段与日志/知识工具
+ ├─ server/module-agents/        Agent 公共装配与作用域机制
  ├─ server/agent-team/          多智能体团队运行时
  ├─ server/agent-definitions/   用户子智能体定义存储
  └─ server/workbench/           工作台 SQLite（store + router）
@@ -44,6 +45,7 @@
 | 功能 | 位置 |
 | --- | --- |
 | UI 渲染 | `src/components/TranscriptView.tsx`、`MessageItem.tsx`、`ToolCard.tsx`；轮次摘要行/进行中活动头在 `TranscriptProcessRow.tsx` |
+| Skill / MCP 加载与调用记录 | `src/lib/capability-call.ts` 统一识别名称、资源与失败；`components/CapabilityToolCard.tsx` 展示状态并按需展开参数/结果，`ToolRunView.tsx` 分发；`scripts/check-capability-tools.ts` 随工作台 UI 门禁运行 |
 | 工作步骤展示（简洁/标准/详细/完全展开四档，默认标准） | 策略表 `src/lib/transcript/presentation.ts`（模式→渲染开关，渲染层只读字段不比枚举；`liveProcessSpec` 派生活动头）；工作台存 SQLite prefs `transcriptView`，/chat 存 localStorage（`src/app/preferences.ts`）；规范 `docs/workbench-ai-chat-compact-mode.md` |
 | 归约器（reducer） | `src/lib/transcript/`，barrel 在 `index.ts`（公开面：`createTranscript` / `applySnapshot` / `applyPiEvent` / `answerIndexOf` / `addEcho` / `retireEcho`） |
 | ├ 未知值守卫 | `guards.ts` |
@@ -144,33 +146,53 @@
 | --- | --- |
 | 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id |
 | 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
-| 统一加载器（逐文件隔离、profileRevision 摘要） | `server/module-agents/profiles.ts` |
+| 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要） | `server/module-agents/profiles.ts` |
+| 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆；新对话使用新配置 |
+| 模块独立工作区（默认目录、自定义绑定、真实路径与重叠校验） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录 |
+| 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
-| 模块注册表（createTools 工厂，目前仅 logs） | `server/module-agents/registry.ts` |
+| 模块注册表（createTools 工厂，logs + codes） | `server/module-agents/registry.ts` |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
-| 日志领域服务 / 领域工具（`logs_*`、`knowledge_*`） | `server/data-sources/` 的适配器、`server/module-agents/logs/tools.ts` |
+| 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
+| 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
 | 装配纯函数（工具白名单过滤 + 校验 + MCP 连接装配） | `server/module-agents/assemble.ts`（router 与会话/MCP 门禁共用） |
 | 数据源统一契约与适配器 | `server/data-sources/contracts.ts`、`registry.ts`、`workbench.ts`、`http-json.ts`、`mapping.ts`；接入说明 `docs/architecture/data-source-adapters.md` |
-| 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts` |
+| 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts`；文本可经 `skills_read` 读取，二进制配套资源以 base64 留存固定版本 |
 | MCP 适配（envRefs/headerRefs 注入、工具桥接、dispose） | `server/module-agents/mcp.ts`；stdio fixture `scripts/mcp-fixture-server.ts` |
 | 前端会话 hook（懒创建、双存储恢复指针、requestId 幂等） | `src/workbench-app/agents/useModuleAgentChat.jsx` |
-| 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`AgentCapabilities.jsx`、`ModuleAgentPanel.css`（App.jsx 以 `agentPanel` 态与通用浮层互斥；`Logs.jsx` 的 `logs-agent-open` 入口） |
+| 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`definitions.js`、`AgentCapabilities.jsx`；日志专属文案在 `modules/logs/agent-ui.js`（App.jsx 以 `agentPanel` 态与通用浮层互斥；日志页保留 `logs-agent-open` 入口） |
 | 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
 | Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |
 | 门禁 | `scripts/check-data-source-adapters.ts`（异构接口与插件）、`check-module-agent-http.ts`（幂等/并发/快照恢复）、`scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用）、`check-module-agent-mcp.ts`（A03/A04 服务端，stdio fixture 子进程） |
+| 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
 
-### 工作台（/，8 模块）
+### 工作台（/，9 个导航入口）
 
 | 功能 | 位置 |
 | --- | --- |
-| 模块导航定义（8 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / tasks 今日规划 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 |
-| 模块实现 | `src/workbench-app/modules/*.jsx`（样式同名 .css；已退役的生活模块 Meals/Pets/Relationships/Reviews/Finance/Hotspots/Exercises 的组件文件、schema 注册与 SQLite 数据已于 2026-09-27 全部清除，atom（资料卡+时间轴）机制随之移除） |
+| 模块导航定义（9 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / tasks 今日规划 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
+| 模块实现 | `src/workbench-app/modules/{dashboard,tasks,works,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；旧 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import |
+| Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker.ts`），`ModuleTabs.jsx` 模块卡片切换，`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
 | 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
-| SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`、`schema.mjs`（模块清单唯一事实源：schema.mjs 的 `ARRAY_MODULES`） |
+| SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`；`schema.mjs` 保留 `ARRAY_MODULES`、公共校验和演示数据，`schema-fields.mjs` 放共享字段，`server/modules/<id>/schema.mjs` 放模块字段（`knowledgeBases` / `knowledgeFolders` 归 knowledge） |
 | 知识库接入协议（读/写口子） | `docs/workbench-knowledge-protocol.md`；pi 侧工具 `extensions/pi-webx-knowledge.ts` |
+
+### 代码开发 IDE 与固定对话
+
+| 功能 | 位置 |
+| --- | --- |
+| IDE + 最右侧固定代码对话 | `src/workbench-app/modules/codes/index.jsx`、`Workspace.css`、`CodeChat.jsx`；桌面双列独立滚动，窄屏切换编辑器/对话 |
+| 开项目绑定与状态协议 | `modules/codes/workspace-binding.mjs` 仅读取 codes settings 的当前目录，进入菜单自动打开，换目录统一在 Agent 配置页；`ide-state.mjs` 校验 iframe 状态，父页同时核验 origin/source；未保存/保存中阻止离页 |
+| 原 SQLite 开发事项 | `modules/codes/Records.jsx` + `View.jsx` + `model.jsx` + `Codes.css`，通过「开发事项」按钮进入；已有 testid 保留 |
+| 嵌入对话变体 | `agents/ModuleAgentPanel.jsx`、`shell/AIPanel.jsx` 的 `embedded` 变体，非模态 region；会话指针/草稿按项目目录分离 |
+| 独立编辑器来源 | 同级 `../web-idea`：Monaco、文件树、轻量编辑、快速导航及可选 Java LSP；嵌入状态/开项目握手在其 `apps/web/src/embed.ts` |
+| 本地 IDE 服务 | `server/modules/codes/ide-runtime.ts` 懒启动 Go gateway；`ide-router.ts` 同源静态页与配置；`ide-proxy.ts` HTTP/WS 代理；`server/index.ts` 负责装配和退出清理 |
+| 安装构建与门禁 | `scripts/setup-web-idea.mjs`、`scripts/check-codes-ide.ts`；UI 纳入 `check-workbench-ui.ts`，项目绑定/真实SDK文件读写纳入 `check-module-agent-http.ts` |
+
+接入说明与边界：`docs/architecture/codes-ide.md`。代码 Agent 在 `registry.ts` 注册，`config/agents/codes.yaml` 启用 read/grep/find/ls/edit/write；cwd 作为已保存工作区或历史会话目录的一致性断言。
 
 ### UI 基础件与图标
 
@@ -190,7 +212,7 @@
 | `scripts/check-task-panel.ts` | 读 `TaskPanel.tsx` 源码与图标 path |
 | `scripts/check-agent-team-browser.mjs` | 带扩展名 import `team-runtime.ts` → 该文件不能改成目录 |
 | `src/ui/primitives/Menu.tsx` 等 | 带扩展名 import `icons/index.tsx` → barrel 必须留在这个路径 |
-| 所有 `scripts/check-*.ts` | 按路径 import 业务模块 → 拆分时原路径保留 barrel 即全绿 |
+| 所有 `scripts/check-*.ts` | 按旧路径 import 业务模块仍可用；源码文本断言应读取新目录的真实实现文件，不能只读兼容 re-export |
 | `data-testid` | 删改即破坏 UI 门禁（详见根 AGENTS.md） |
 
 ## 文件体量约定

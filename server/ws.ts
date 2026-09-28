@@ -28,7 +28,11 @@ interface Connection {
   alive: boolean;
 }
 
-export function attachWebSocketGateway(server: { on: (event: 'upgrade', listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void) => void }, manager: PiHost): () => void {
+export function attachWebSocketGateway(
+  server: { on: (event: 'upgrade', listener: (req: IncomingMessage, socket: Duplex, head: Buffer) => void) => void },
+  manager: PiHost,
+  handleCodesUpgrade?: (req: IncomingMessage, socket: Duplex, head: Buffer) => boolean,
+): () => void {
   const wss = new WebSocketServer({ noServer: true });
   const connections = new Set<Connection>();
   const pinger = setInterval(() => heartbeat(), PING_INTERVAL_MS);
@@ -37,6 +41,7 @@ export function attachWebSocketGateway(server: { on: (event: 'upgrade', listener
   server.on('upgrade', (req, socket, head) => {
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
     if (pathname !== WS_PATH) {
+      if (handleCodesUpgrade?.(req, socket, head)) return;
       socket.destroy();
       return;
     }

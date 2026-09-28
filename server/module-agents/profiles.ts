@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import { parseDataSources } from '../data-sources/config';
 import { snapshotSkills } from './resources';
 import { profileRevision } from './snapshots';
+import { captureEffectiveWorkspace } from './workspace';
 
 import { LineCounter, isMap, isScalar, parseDocument } from 'yaml';
 
@@ -94,7 +95,6 @@ async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProf
 
   for (const entry of config.mcp) {
     if (entry.connection.transport === 'stdio') {
-      if (entry.connection.cwd) entry.connection.cwd = path.resolve(rootDir, entry.connection.cwd);
       if (entry.connection.command.startsWith('.')) entry.connection.command = path.resolve(rootDir, entry.connection.command);
     }
   }
@@ -109,7 +109,8 @@ async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProf
   }
 
   const skills = await snapshotSkills(skillPaths);
-  const profile = { config, configPath: file, promptText, skillPaths, skills };
+  const effectiveWorkspace = await captureEffectiveWorkspace(config.id, config.workspace);
+  const profile = { config, configPath: file, effectiveWorkspace, promptText, skillPaths, skills };
   return { ...profile, profileRevision: profileRevision(profile) };
 }
 
@@ -196,7 +197,7 @@ function validateConfig(
 ): AgentProfileConfig {
   const pos = topLevelPos(doc, lineCounter);
   requireKeys(raw, [
-    'schemaVersion', 'id', 'enabled', 'promptFile', 'model',
+    'schemaVersion', 'id', 'enabled', 'promptFile', 'workspace', 'model',
     'skills', 'tools', 'mcp', 'knowledge', 'limits', 'dataSources',
   ], '顶层 ', pos);
 
@@ -207,6 +208,11 @@ function validateConfig(
   const enabled = needBool(raw.enabled, 'enabled');
   const promptFile = needString(raw.promptFile, 'promptFile');
   if (path.isAbsolute(promptFile)) fail('promptFile 必须是相对路径');
+  let workspace: string | undefined;
+  if (raw.workspace !== undefined && raw.workspace !== null) {
+    workspace = needString(raw.workspace, 'workspace');
+    if (!path.isAbsolute(workspace) || workspace.includes('\0')) fail('workspace 必须是绝对路径');
+  }
 
   let model: AgentProfileConfig['model'];
   if (raw.model !== undefined) {
@@ -215,10 +221,26 @@ function validateConfig(
     model = { provider: needString(raw.model.provider, 'model.provider'), id: needString(raw.model.id, 'model.id') };
   }
 
-  const skills = needStringArray(raw.skills, 'skills');
-  for (const skill of skills) {
-    if (path.isAbsolute(skill)) fail(`skills 中的 ${skill} 必须是相对路径`);
-  }
+  if (!Array.isArray(raw.skills)) fail('skills 必须是数组');
+  const skillEntries = (raw.skills as unknown[]).map((item, index) => {
+    let skill: string;
+    let enabled: boolean;
+    if (typeof item === 'string') { skill = item; enabled = true; }
+    else {
+      if (!isObject(item)) fail(`skills[${index}] 必须是路径或对象`);
+      requireKeys(item, ['path', 'enabled'], `skills[${index}] `);
+      skill = needString(item.path, `skills[${index}].path`);
+      enabled = needBool(item.enabled, `skills[${index}].enabled`);
+    }
+    if (!/^\.\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_.-]+$/.test(skill)
+      || skill.slice(2).split('/').includes('..') || skill.slice(2).split('/').includes('.')) {
+      fail(`skills[${index}] 路径必须是安全的相对路径`);
+    }
+    if (!skill.endsWith('/SKILL.md')) fail(`skills[${index}] 必须指向 SKILL.md`);
+    return { path: skill, enabled };
+  });
+  if (new Set(skillEntries.map(entry => entry.path)).size !== skillEntries.length) fail('skills 路径不得重复');
+  const skills = skillEntries.filter(entry => entry.enabled).map(entry => entry.path);
   const tools = needStringArray(raw.tools, 'tools');
 
   if (!Array.isArray(raw.mcp)) fail('mcp 必须是数组');
@@ -244,8 +266,10 @@ function validateConfig(
     id: raw.id as AgentId,
     enabled,
     promptFile,
+    ...(workspace === undefined ? {} : { workspace }),
     ...(model === undefined ? {} : { model }),
     skills,
+    skillEntries,
     dataSources: parseDataSources(raw.dataSources),
     tools,
     mcp,

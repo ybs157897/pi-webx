@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api as piApi } from '../../lib/api'
 import { usePiSession } from '../../lib/usePiSession'
-import { agentStorageKey, readPointer, writePointer, clearPointer, readDraft, writeDraft } from './session-storage.mjs'
+import { agentStorageKey, normalizeProjectCwd, readPointer, writePointer, clearPointer, readDraft, writeDraft } from './session-storage.mjs'
 
 const errorText = error => error instanceof Error ? error.message : String(error)
 const requestId = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `req-${Date.now()}-${Math.random()}`
 
-export function useModuleAgentChat(agentId) {
-  const storageKey = agentStorageKey(agentId)
+export function useModuleAgentChat(agentId, { cwd } = {}) {
+  const projectCwd = agentId === 'codes' ? normalizeProjectCwd(cwd) : null
+  const storageKey = agentStorageKey(agentId, projectCwd)
   const [sessionId, setSessionId] = useState(null)
   const [sending, setSending] = useState(false)
   const [stopping, setStopping] = useState(false)
@@ -30,9 +31,10 @@ export function useModuleAgentChat(agentId) {
     writeDraft(storageKey, text); setDraftState(text)
   }, [storageKey])
   const open = useCallback((stored = undefined) => {
+    if (agentId === 'codes' && !projectCwd) return Promise.reject(new Error('请先打开代码项目目录'))
     if (opening.current) return opening.current
     const version = generation.current
-    const work = piApi.createModuleAgentSession(agentId, { requestId: requestId(), ...(stored ? { sessionId: stored } : {}) })
+    const work = piApi.createModuleAgentSession(agentId, { requestId: requestId(), ...(stored ? { sessionId: stored } : {}), ...(projectCwd ? { cwd: projectCwd } : {}) })
       .then(({ session }) => {
         if (version !== generation.current) throw new Error('会话已切换，请重新发送')
         targetId.current = session.id
@@ -43,7 +45,7 @@ export function useModuleAgentChat(agentId) {
     opening.current = work
     void work.then(() => { if (opening.current === work) opening.current = null }, () => { if (opening.current === work) opening.current = null })
     return work
-  }, [agentId, storageKey])
+  }, [agentId, projectCwd, storageKey])
 
   useEffect(() => {
     mounted.current = true
@@ -68,6 +70,7 @@ export function useModuleAgentChat(agentId) {
   const send = useCallback(async text => {
     const content = text.trim()
     if (!content || sendingRef.current || restoring) return false
+    if (agentId === 'codes' && !projectCwd) { setError('请先打开代码项目目录'); return false }
     sendingRef.current = true
     stopRequested.current = false
     setSending(true); setError(''); setPendingText(content)
@@ -85,7 +88,7 @@ export function useModuleAgentChat(agentId) {
       sendingRef.current = false
       if (mounted.current) { setSending(false); setPendingText('') }
     }
-  }, [ensureSession, restoring])
+  }, [agentId, projectCwd, ensureSession, restoring])
 
   const stop = useCallback(async () => {
     stopRequested.current = true

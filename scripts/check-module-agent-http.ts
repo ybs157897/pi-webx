@@ -3,21 +3,30 @@ import assert from 'node:assert/strict';
 import express from 'express';
 import { once } from 'node:events';
 import { join } from 'node:path';
-import { rm } from 'node:fs/promises';
+import { mkdir, readFile, realpath, rm } from 'node:fs/promises';
 import { PiHost } from '../server/pi/host';
 import { WorkbenchStore } from '../server/workbench/store';
 import { createModuleAgentsRouter } from '../server/module-agents/router';
+import { assembleModuleAgent } from '../server/module-agents/assemble';
 import { defaultAgentsConfigRoot, loadAgentProfiles } from '../server/module-agents/profiles';
 import { ProfileSnapshots, profileRevision } from '../server/module-agents/snapshots';
 import { sandbox, memorySettings, scripted } from './subagent-check-fixtures';
+import { agentStorageKey, normalizeProjectCwd } from '../src/workbench-app/agents/session-storage.mjs';
 
 const env = await sandbox();
 env.runtime.hasConfiguredAuth = () => true;
 const saved = process.env.PI_CODING_AGENT_DIR; process.env.PI_CODING_AGENT_DIR = env.agentDir;
+const savedWorkspaceRoot = process.env.PI_WEBX_AGENT_WORKSPACE_ROOT;
+process.env.PI_WEBX_AGENT_WORKSPACE_ROOT = join(env.root, 'agent-workspaces');
 const store = new WorkbenchStore(join(env.root, 'workbench.sqlite'));
 const host = new PiHost({ definitions: { read: async () => ({ schemaVersion: 1, revision: 1, path: join(env.root, 'defs.json'), agents: [] }) }, modelRuntimeFactory: async () => env.runtime, settingsManagerFactory: memorySettings, sessionDir: join(env.root, 'sessions') });
 const originalCreate = host.create.bind(host);
-host.create = async options => originalCreate({ ...options, cwd: env.cwd, provider: env.model.provider, model: env.model.id });
+/**
+ * 配置里的模型按本机运行时目录填写，可能是 fixture 目录没有的自定义 provider；
+ * 这个门禁验的是 cwd 绑定，直连创建也要换成 fixture 模型，否则测试会随本机配置而红。
+ */
+const fixtureModel = { provider: env.model.provider, model: env.model.id };
+host.create = async options => originalCreate({ ...options, cwd: options.moduleAgent?.scope.agentId === 'codes' ? options.cwd : options.cwd ?? env.cwd, ...fixtureModel });
 const profiles = await loadAgentProfiles(defaultAgentsConfigRoot());
 const loaded = profiles.get('logs'); assert.ok(loaded?.ok);
 const original = structuredClone(loaded.profile);
@@ -71,9 +80,64 @@ try {
   assert.equal((await post({ requestId: 'broken-config' })).status, 503);
   await new Promise(resolve => setTimeout(resolve, 20));
   assert.deepEqual(unhandled, [], 'failed requests do not leak rejected finally promises');
-  assert.equal((await post({ requestId: 'disabled' }, 'codes')).status, 503);
-  console.log('PASS 模块 HTTP：创建幂等、运行中恢复、并发恢复合并、真实 SDK 工具回合、旧配置/Skill/源快照恢复、新会话新版本、缺快照拒绝、错误无未处理拒绝');
+  const codesA = join(env.root, 'project-a');
+  const codesB = join(env.root, 'project-b');
+  await mkdir(codesA); await mkdir(codesB);
+  const canonicalA = await realpath(codesA);
+  const loadedCodes = profiles.get('codes');
+  assert.ok(loadedCodes?.ok);
+  const boundCodes = structuredClone(loadedCodes.profile);
+  boundCodes.config.workspace = canonicalA;
+  boundCodes.effectiveWorkspace = canonicalA;
+  boundCodes.profileRevision = profileRevision(boundCodes);
+  profiles.set('codes', { ok: true, profile: boundCodes });
+  const codeWithoutCwd = await post({ requestId: 'codes-no-cwd' }, 'codes');
+  assert.equal(codeWithoutCwd.status, 200, JSON.stringify(codeWithoutCwd));
+  assert.equal(host.get(codeWithoutCwd.body.session.id)?.cwd, canonicalA);
+  assert.equal((await post({ requestId: 'codes-relative', cwd: 'project-a' }, 'codes')).status, 400);
+  assert.equal((await post({ requestId: 'codes-missing', cwd: join(env.root, 'missing') }, 'codes')).status, 400);
+  assert.equal((await post({ requestId: 'logs-with-cwd', cwd: codesA })).status, 400);
+  assert.equal((await post({ requestId: 'codes-other-project', cwd: codesB }, 'codes')).status, 409);
+  const codeA = await post({ requestId: 'codes-create-a', cwd: codesA }, 'codes');
+  assert.equal(codeA.status, 200, JSON.stringify(codeA));
+  const codeId = codeA.body.session.id;
+  const codeHosted = host.get(codeId)!;
+  assert.equal(codeHosted.cwd, canonicalA);
+  for (const name of ['read', 'grep', 'find', 'ls', 'edit', 'write']) {
+    assert.ok(codeHosted.session.getToolDefinition(name), `codes has ${name}`);
+  }
+  assert.equal(codeHosted.session.getToolDefinition('bash'), undefined, 'codes cannot run shell');
+  const codeWrite = codeHosted.session.getToolDefinition('write')!;
+  await codeWrite.execute('codes-write', { path: 'codes-fixture.txt', content: 'bound project marker' }, undefined, undefined, {} as never);
+  assert.equal(await readFile(join(codesA, 'codes-fixture.txt'), 'utf8'), 'bound project marker', 'real SDK write resolves relative to bound project');
+  const codeRead = codeHosted.session.getToolDefinition('read')!;
+  const readResult = await codeRead.execute('codes-read', { path: 'codes-fixture.txt' }, undefined, undefined, {} as never);
+  assert.ok(JSON.stringify(readResult).includes('bound project marker'), 'real SDK read uses bound project');
+  assert.equal((await post({ requestId: 'codes-cross-live', sessionId: codeId, cwd: codesB }, 'codes')).status, 409);
+  assert.equal((await post({ requestId: 'codes-reuse-target', cwd: codesA }, 'codes')).status, 200);
+  assert.equal((await post({ requestId: 'codes-reuse-target', cwd: codesB }, 'codes')).status, 409, 'requestId cannot change project');
+  scripted(codeHosted.session, () => ({ content: [{ type: 'text', text: 'code fixture completed' }], stopReason: 'stop' }));
+  await codeHosted.session.prompt('inspect project');
+  stored.push({ id: codeId, path: codeHosted.sessionFile, cwd: codesA });
+  await host.kill(codeId);
+  assert.equal((await post({ requestId: 'codes-cross-disk', sessionId: codeId, cwd: codesB }, 'codes')).status, 409);
+  const codeResume = await post({ requestId: 'codes-restore-a', sessionId: codeId, cwd: codesA }, 'codes');
+  assert.equal(codeResume.status, 200, JSON.stringify(codeResume));
+  assert.equal(host.get(codeId)?.cwd, canonicalA);
+  const codeAssembly = () => assembleModuleAgent({ store, workspaceKey: 'default', agentId: 'codes', profile: boundCodes });
+  const directCode = await originalCreate({ moduleAgent: await codeAssembly(), ...fixtureModel });
+  assert.equal(directCode.cwd, canonicalA, 'direct host creation uses the bound project');
+  await host.kill(directCode.id);
+  await host.kill(codeId);
+  await assert.rejects(originalCreate({ moduleAgent: await codeAssembly(), sessionPath: codeHosted.sessionFile!, cwd: codesB, ...fixtureModel }), /项目目录.*(?:不一致|不匹配)/,
+    'direct host restoration cannot switch a code session to another project');
+  assert.equal(normalizeProjectCwd(`${codesA}/./`), codesA);
+  assert.notEqual(agentStorageKey('codes', codesA), agentStorageKey('codes', codesB));
+  assert.equal(agentStorageKey('logs'), 'ai-workbench.agent-session:default:logs');
+  console.log('PASS 模块 HTTP：创建幂等、运行中恢复、并发恢复、SDK 工具回合与快照；代码 Agent 真实目录、工具白名单、按项目恢复隔离');
 } finally {
   process.removeListener('unhandledRejection', capture); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
-  await host.disposeAll(); store.close(); if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = saved; await env.close();
+  await host.disposeAll(); store.close(); if (saved === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = saved;
+  if (savedWorkspaceRoot === undefined) delete process.env.PI_WEBX_AGENT_WORKSPACE_ROOT; else process.env.PI_WEBX_AGENT_WORKSPACE_ROOT = savedWorkspaceRoot;
+  await env.close();
 }

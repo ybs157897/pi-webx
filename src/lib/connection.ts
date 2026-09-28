@@ -52,8 +52,10 @@ export class ConnectionController {
   private readonly statusListeners = new Set<StatusListener>();
 
   constructor() {
-    window.addEventListener('online', this.onNetworkOnline);
-    window.addEventListener('offline', this.onNetworkOffline);
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.onNetworkOnline);
+      window.addEventListener('offline', this.onNetworkOffline);
+    }
   }
 
   /** Register interest in a session's stream; connects lazily on first use. */

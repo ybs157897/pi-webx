@@ -10,7 +10,7 @@ import type { DataSource } from '../data-sources/contracts';
 import type { WorkbenchStore } from '../workbench/store';
 import type { AgentId } from './contracts';
 import type { KnowledgeAccess } from './knowledge';
-import { LOGS_TOOL_NAMES, createLogsTools } from './logs/tools';
+import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
 
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
@@ -27,6 +27,7 @@ export interface ModuleAgentDefinition {
 }
 
 const definitions = new Map<AgentId, ModuleAgentDefinition>([
+  ['codes', { id: 'codes', toolNameMap: {}, createTools: () => [] }],
   ['logs', { id: 'logs', toolNameMap: LOGS_TOOL_NAMES, createTools: createLogsTools }],
 ]);
 

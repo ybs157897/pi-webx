@@ -140,8 +140,8 @@ export const api = {
    * dialog should start; the server ignores it when it is not a directory.
    * `path: null` means the user dismissed the dialog.
    */
-  pickDirectory(initial: string): Promise<PickDirectoryResponse> {
-    return request<PickDirectoryResponse>('/api/workspace/pick', jsonInit({ initial }));
+  pickDirectory(initial: string, signal?: AbortSignal): Promise<PickDirectoryResponse> {
+    return request<PickDirectoryResponse>('/api/workspace/pick', { ...jsonInit({ initial }), signal });
   },
 
   storedSessions(options?: { cwd?: string; limit?: number }): Promise<ListStoredSessionsResponse> {

@@ -12,6 +12,13 @@ import { createWorkbenchRouter } from './workbench/router';
 import { WorkbenchStore } from './workbench/store';
 import { defaultAgentsConfigRoot, loadAgentProfiles } from './module-agents/profiles';
 import { createModuleAgentsRouter } from './module-agents/router';
+import { ModuleAgentSettingsService } from './module-agents/settings/service';
+import { createModuleAgentSettingsRouter } from './module-agents/settings/router';
+import { createModuleAgentPromptPolishRouter } from './module-agents/settings/polish';
+import { CodesIdeRuntime } from './modules/codes/ide-runtime';
+import { createCodesIdeRouter } from './modules/codes/ide-router';
+import { CodesIdeWebSockets } from './modules/codes/ide-proxy';
+import { boundSessionWorkspace } from './module-agents/workspace';
 
 /** Default port; override with PI_WEBX_PORT. */
 const DEFAULT_PORT = 8787;
@@ -28,15 +35,35 @@ const isProduction = process.env.NODE_ENV === 'production';
 async function main(): Promise<void> {
   const manager = new PiHost();
   const workbench = new WorkbenchStore();
+  const codesIde = new CodesIdeRuntime();
+  const codesIdeSockets = new CodesIdeWebSockets(codesIde);
   const app = express();
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use('/api/workbench', createWorkbenchRouter(workbench));
-  const agentProfiles = await loadAgentProfiles(defaultAgentsConfigRoot());
+  // Use one absolute configuration root for loading, editing and subsequent session creation.
+  // PI_WEBX_AGENT_CONFIG_DIR lets local acceptance run against a temporary clone.
+  const agentConfigRoot = process.env.PI_WEBX_AGENT_CONFIG_DIR ?? defaultAgentsConfigRoot();
+  if (!path.isAbsolute(agentConfigRoot)) throw new Error('PI_WEBX_AGENT_CONFIG_DIR 必须是绝对路径');
+  const agentProfiles = await loadAgentProfiles(agentConfigRoot);
   for (const [id, result] of agentProfiles) {
     if (!result.ok) console.warn(`[pi-webx] 模块 Agent 配置不可用 ${id}: ${result.error}`);
   }
+  app.use('/api/codes', createCodesIdeRouter(codesIde, async () => {
+    const codes = agentProfiles.get('codes');
+    if (!codes?.ok) throw new Error(`代码开发 Agent 配置不可用：${codes?.error ?? '未找到配置'}`);
+    return await boundSessionWorkspace(codes.profile);
+  }));
+  app.use('/api/module-agents', createModuleAgentSettingsRouter(new ModuleAgentSettingsService({
+    root: agentConfigRoot,
+    profiles: agentProfiles,
+    validateModel: async ({ provider, id }) => {
+      await manager.syncModelConfig();
+      return (await manager.runtime()).getModel(provider, id) !== undefined;
+    },
+  })));
+  app.use('/api/module-agents', createModuleAgentPromptPolishRouter(manager));
   app.use('/api/module-agents', createModuleAgentsRouter({
     host: manager,
     store: workbench,
@@ -106,7 +133,8 @@ async function main(): Promise<void> {
     console.log(`[pi-webx] pi SDK ${resolvePiVersion()} (agent runs in-process)`);
   });
 
-  const disposeWebSocket = attachWebSocketGateway(server, manager);
+  const disposeWebSocket = attachWebSocketGateway(server, manager, (req, socket, head) =>
+    codesIdeSockets.handleUpgrade(req, socket, head));
 
   server.on('error', (error: NodeJS.ErrnoException) => {
     if (error.code === 'EADDRINUSE') {
@@ -117,13 +145,17 @@ async function main(): Promise<void> {
     process.exitCode = 1;
   });
 
-  installSignalHandlers(server, manager, disposeWebSocket, workbench);
+  installSignalHandlers(server, manager, () => {
+    disposeWebSocket();
+    codesIdeSockets.close();
+    return codesIde.stop();
+  }, workbench);
 }
 
 function installSignalHandlers(
   server: ReturnType<express.Express['listen']>,
   manager: PiHost,
-  disposeWebSocket: () => void,
+  disposeWebSocket: () => void | Promise<void>,
   workbench: WorkbenchStore,
 ): void {
   let shuttingDown = false;
@@ -136,7 +168,7 @@ function installSignalHandlers(
     // WebSocket clients hold connections open, so close() alone would hang:
     // the gateway is torn down first so sockets close instead of keeping the
     // http server alive through open upgrades.
-    disposeWebSocket();
+    const ideStopped = Promise.resolve(disposeWebSocket());
     const httpClosed = new Promise<void>((resolve) => {
       server.close(() => {
         console.log('[pi-webx] http server closed');
@@ -156,7 +188,7 @@ function installSignalHandlers(
       },
     );
 
-    void Promise.all([httpClosed, sessionsStopped]).then(() => {
+    void Promise.all([httpClosed, sessionsStopped, ideStopped]).then(() => {
       workbench.close();
       process.exit(0);
     });

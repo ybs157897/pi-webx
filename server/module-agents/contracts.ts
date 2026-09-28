@@ -47,8 +47,12 @@ export interface AgentProfileConfig {
   id: AgentId;
   enabled: boolean;
   promptFile: string;
+  /** Optional custom Agent working directory; absence selects its dedicated default. */
+  workspace?: string;
   model?: { provider: string; id: string };
   skills: string[];
+  /** YAML 声明的完整候选；旧会话快照可没有此字段。 */
+  skillEntries?: { path: string; enabled: boolean }[];
   dataSources: DataSourceConfigs;
   tools: string[];
   mcp: McpConnectionConfig[];
@@ -59,6 +63,8 @@ export interface AgentProfileConfig {
 export interface ResolvedAgentProfile {
   config: AgentProfileConfig;
   configPath: string;
+  /** Canonical effective SDK cwd captured with this immutable profile snapshot. */
+  effectiveWorkspace?: string;
   promptText: string;
   /** 绝对路径，已 stat 存在。 */
   skillPaths: string[];

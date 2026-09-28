@@ -1,4 +1,18 @@
-export const agentStorageKey = agentId => `ai-workbench.agent-session:default:${agentId}`
+// Normalize browser-provided project roots before keying pointers and drafts.
+// The server resolves symlinks with realpath before using the directory as SDK cwd.
+export function normalizeProjectCwd(cwd) {
+  if (typeof cwd !== 'string' || !cwd.startsWith('/')) return null
+  const parts = []
+  for (const part of cwd.split('/')) {
+    if (!part || part === '.') continue
+    if (part === '..') parts.pop()
+    else parts.push(part)
+  }
+  return `/${parts.join('/')}`
+}
+export const agentStorageKey = (agentId, cwd) => agentId === 'codes'
+  ? `ai-workbench.agent-session:default:codes:${encodeURIComponent(normalizeProjectCwd(cwd) ?? '')}`
+  : `ai-workbench.agent-session:default:${agentId}`
 export function readPointer(key) {
   if (typeof window === 'undefined') return null
   try {

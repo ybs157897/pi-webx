@@ -9,7 +9,8 @@
  */
 
 import { summarizeToolCall } from '../format';
-import type { ActiveTurn, TranscriptEntry } from '../../shared/transcript';
+import { capabilityCall } from '../capability-call';
+import type { ActiveTurn, ToolRun, TranscriptEntry } from '../../shared/transcript';
 
 /* ------------------------------------------------------------------- modes */
 
@@ -85,7 +86,7 @@ export function presentationPolicyFor(mode: TranscriptViewMode): ChatPresentatio
 
 export type LiveActivity =
   | 'think' | 'read' | 'readImage' | 'search' | 'write' | 'edit' | 'bash'
-  | 'code' | 'webSearch' | 'web' | 'subagents' | 'plan' | 'questions' | 'tools';
+  | 'code' | 'webSearch' | 'web' | 'subagents' | 'plan' | 'questions' | 'tools' | 'skill' | 'mcp';
 
 /** What the live group's header shows while the turn is in flight. */
 export interface LiveProcessSpec {
@@ -94,11 +95,14 @@ export interface LiveProcessSpec {
   readonly label: string;
   /** Command / path / pattern summary (the `summarizeToolCall` vocabulary), '' when none. */
   readonly detail: string;
+  /** Capability identity stays visible even when command/argument details are hidden. */
+  readonly identity?: string;
 }
 
 export interface CompletedProcessSpec {
   readonly activity: LiveActivity;
   readonly label: string;
+  readonly identity?: string;
 }
 
 interface ActivityCopy {
@@ -145,34 +149,43 @@ function activityOfTool(name: string): ActivityCopy {
 
 /** Closed process titles follow dsh's ranked activity vocabulary, without counts. */
 export function completedProcessSpec(entries: readonly TranscriptEntry[]): CompletedProcessSpec {
-  const counts = new Map<LiveActivity, { copy: ActivityCopy; count: number; order: number }>();
+  const counts = new Map<string, { copy: ActivityCopy; count: number; order: number; failed: boolean }>();
   const seenCalls = new Set<string>();
+  const identities = new Set<string>();
   let order = 0;
-  const record = (name: string, id: string): void => {
+  const record = (name: string, id: string, run?: ToolRun): void => {
     if (seenCalls.has(id)) return;
     seenCalls.add(id);
-    const copy = activityOfTool(name);
-    const current = counts.get(copy.activity);
+    const capability = run ? capabilityCall(run) : null;
+    const copy: ActivityCopy = capability
+      ? { activity: capability.kind, label: capability.label, done: capability.label }
+      : activityOfTool(name);
+    if (capability) identities.add(`${capability.kind === 'skill' ? 'Skill' : 'MCP'} · ${capability.identity}`);
+    const key = capability ? `${copy.activity}:${capability.status}` : copy.activity;
+    const current = counts.get(key);
     if (current) current.count += 1;
-    else counts.set(copy.activity, { copy, count: 1, order: order++ });
+    else counts.set(key, { copy, count: 1, order: order++, failed: capability?.status === 'error' });
   };
   for (const entry of entries) {
     if (entry.kind === 'assistant') {
-      for (const run of entry.tools) record(run.toolName, run.toolCallId);
+      for (const run of entry.tools) record(run.toolName, run.toolCallId, run);
     } else if (entry.kind === 'toolResult') {
-      record(entry.run.toolName, entry.run.toolCallId);
+      record(entry.run.toolName, entry.run.toolCallId, entry.run);
     } else if (entry.kind === 'bash') {
       record('bash', entry.id);
     }
   }
-  const ranked = [...counts.values()].sort((left, right) => right.count - left.count || left.order - right.order);
+  const ranked = [...counts.values()].sort((left, right) => Number(right.failed) - Number(left.failed) || right.count - left.count || left.order - right.order);
   if (ranked.length === 0) return { activity: ANALYSIS.activity, label: ANALYSIS.done };
   const labels = ranked.slice(0, 3).map(({ copy }) => copy.done);
   const first = labels[0]!;
   const second = labels[1];
   let label = first;
   if (second !== undefined) {
-    if (labels.length === 2) {
+    if (identities.size > 0) {
+      label = labels.join('，');
+      if (ranked.length > 3) label += '等';
+    } else if (labels.length === 2) {
       const continuation = first.startsWith('已') && second.startsWith('已') ? second.slice(1) : second;
       label = `${first}并${continuation}`;
     } else {
@@ -180,7 +193,10 @@ export function completedProcessSpec(entries: readonly TranscriptEntry[]): Compl
       if (ranked.length > 3) label += '等';
     }
   }
-  return { activity: ranked[0]!.copy.activity, label };
+  return {
+    activity: ranked[0]!.copy.activity, label,
+    ...(identities.size > 0 ? { identity: [...identities].join('；') } : {}),
+  };
 }
 
 /**
@@ -224,13 +240,12 @@ export function liveProcessSpec(
   region: readonly TranscriptEntry[],
   streamingEntryId: string | null,
 ): LiveProcessSpec {
-  let running: { toolName: string; args: Record<string, unknown> } | null = null;
+  let running: ToolRun | null = null;
   let thinkingDetail = '';
   for (const entry of region) {
     if (entry.kind === 'assistant') {
       for (const run of entry.tools) {
-        const call = { toolName: run.toolName, args: run.args };
-        if (run.status === 'running') running = call;
+        if (run.status === 'running') running = run;
       }
       if (
         entry.id === streamingEntryId &&
@@ -240,14 +255,17 @@ export function liveProcessSpec(
         thinkingDetail = lines.length > 1 ? (lines.at(-2) ?? '').trim() : '';
       }
     } else if (entry.kind === 'toolResult') {
-      const call = { toolName: entry.run.toolName, args: entry.run.args };
-      if (entry.run.status === 'running') running = call;
+      if (entry.run.status === 'running') running = entry.run;
     } else if (entry.kind === 'bash') {
-      const call = { toolName: 'bash', args: { command: entry.command } };
-      if (entry.streaming) running = call;
+      if (entry.streaming) running = {
+        toolName: 'bash', args: { command: entry.command }, toolCallId: entry.id,
+        status: 'running', startedAt: entry.at, output: entry.output,
+      };
     }
   }
   if (running !== null) {
+    const capability = capabilityCall(running);
+    if (capability) return { activity: capability.kind, label: capability.label, identity: capability.identity, detail: '' };
     const copy = activityOfTool(running.toolName);
     return { activity: copy.activity, label: copy.label, detail: summarizeToolCall(running.toolName, running.args) };
   }
