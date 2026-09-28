@@ -191,6 +191,56 @@ export class WorkbenchStore {
     this.db.close();
   }
 
+  /** @internal 同库协作模块（模块 Agent 绑定表）复用同一连接与其事务。 */
+  get sqlite(): Database.Database {
+    return this.db;
+  }
+
+  /** 单个数组模块的全部记录（按写入顺序），给领域服务做内存内过滤用。 */
+  listRecords(module: string): RecordRow[] {
+    arrayModule(module);
+    const rows = this.db.prepare('SELECT payload FROM workbench_records WHERE module = ? ORDER BY seq').all(module) as PayloadRow[];
+    return rows.map((row) => parseRecord(row.payload));
+  }
+
+  /**
+   * 受限知识检索：库归属过滤下推到 SQL（json_extract），limit 语义因此不受
+   * 「先全库取回再过滤」的截断污染。排序与全模块 search 一致：标题命中优先。
+   */
+  searchKnowledge(
+    baseIds: readonly string[],
+    query: string,
+    limit = 20,
+  ): Array<{ id: string; title: string; snippet: string; knowledgeBaseId: string }> {
+    const q = query.trim();
+    if (q === '' || baseIds.length === 0 || limit < 1) return [];
+    const like = `%${q.replace(/[\\%_]/g, character => `\\${character}`)}%`;
+    const placeholders = baseIds.map(() => '?').join(',');
+    const rows = this.db.prepare(
+      `SELECT payload FROM workbench_records
+       WHERE module = 'knowledge'
+         AND payload LIKE ? ESCAPE '\\'
+         AND json_extract(payload, '$.knowledgeBaseId') IN (${placeholders})
+       ORDER BY seq DESC LIMIT ?`,
+    ).all(like, ...baseIds, limit * 2) as PayloadRow[];
+    const hits = rows.map((row) => {
+      const record = parseRecord(row.payload);
+      const hit = hitOf('knowledge', record);
+      return { id: record.id, title: hit.title, snippet: hit.snippet, knowledgeBaseId: String(record.knowledgeBaseId) };
+    });
+    hits.sort((left, right) => rankOf(right) - rankOf(left) || right.snippet.length - left.snippet.length);
+    function rankOf(hit: { title: string }): number {
+      return hit.title.toLowerCase().includes(q.toLowerCase()) ? 1 : 0;
+    }
+    return hits.slice(0, limit);
+  }
+
+  /** 按 id 读一条知识记录（含 knowledgeBaseId，归属核对由调用方负责）。 */
+  readKnowledge(id: string): RecordRow | null {
+    const row = this.db.prepare("SELECT payload FROM workbench_records WHERE module = 'knowledge' AND id = ?").get(id) as PayloadRow | undefined;
+    return row ? parseRecord(row.payload) : null;
+  }
+
   read(): WorkbenchState {
     const state = emptyState(DEFAULT_PROFILE) as WorkbenchState;
     const profile = this.db.prepare('SELECT value FROM workbench_meta WHERE key = ?').get('profile') as { value: string } | undefined;
