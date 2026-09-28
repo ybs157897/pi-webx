@@ -18,6 +18,7 @@ import { PiHost, HostError } from '../server/pi/host';
 import { MAIN_IDENTITY_PROMPT } from '../server/prompts/loader';
 import { WorkbenchStore } from '../server/workbench/store';
 import { ensureBinding, createKnowledgeAccess } from '../server/module-agents/knowledge';
+import { assembleModuleAgent } from '../server/module-agents/assemble';
 import { createLogsTools, LOGS_TOOL_NAMES } from '../server/module-agents/logs/tools';
 import { loadAgentProfiles, defaultAgentsConfigRoot } from '../server/module-agents/profiles';
 import type { ResolvedAgentProfile } from '../server/module-agents/contracts';
@@ -123,6 +124,35 @@ async function main(): Promise<void> {
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), MODULE_TOOL_NAMES, '全部模块工具应处于激活态');
     assert.equal(hosted.moduleAgent?.agentId, 'logs');
     assert.equal(hosted.moduleAgent?.sessionId, hosted.id);
+
+    /* (a2) 配置 tools 是真实白名单：删掉 knowledge.create/update 就真没有 */
+    const trimmedProfile: ResolvedAgentProfile = {
+      ...profile,
+      config: {
+        ...profile.config,
+        tools: profile.config.tools.filter((name) => name !== 'knowledge.create' && name !== 'knowledge.update'),
+      },
+    };
+    const trimmed = await host.create({
+      cwd, provider: probeModel.provider, model: probeModel.id,
+      moduleAgent: assembleModuleAgent({ store, workspaceKey: 'ws', agentId: 'logs', profile: trimmedProfile }),
+    });
+    assert.deepEqual(
+      trimmed.session.getAllTools().map((tool) => tool.name).sort(),
+      ['knowledge_read', 'knowledge_search', 'logs_read', 'logs_search'],
+      '配置删掉的名字不得出现在会话工具里',
+    );
+    assert.equal(trimmed.session.getToolDefinition('knowledge_create'), undefined);
+    await host.kill(trimmed.id);
+    // 未知工具名报装配错误，不默默放行。
+    assert.throws(
+      () => assembleModuleAgent({
+        store, workspaceKey: 'ws', agentId: 'logs',
+        profile: { ...profile, config: { ...profile.config, tools: ['logs.bogus'] } },
+      }),
+      (error) => error instanceof HostError && error.status === 503,
+      '未知工具名必须装配失败',
+    );
 
     /* (b) Skills 只含 log-analysis */
     const commands = hosted.extensionsResult.runtime.getCommands();

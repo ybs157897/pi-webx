@@ -13,7 +13,6 @@ import path from 'node:path';
 import type { PiHost } from '../pi/host';
 import { HostError } from '../pi/host';
 import { listStoredSessions } from '../stored-sessions';
-import { BUILTIN_TOOL_NAMES } from '../../src/shared/tool-presets';
 import type { SessionSummary } from '../../src/shared/protocol';
 import type { WorkbenchStore } from '../workbench/store';
 import {
@@ -22,8 +21,8 @@ import {
   type ProfileLoadResult,
   type ResolvedAgentProfile,
 } from './contracts';
-import { createKnowledgeAccess, ensureBinding, readBinding } from './knowledge';
-import { moduleAgentDefinition, resolveToolNames } from './registry';
+import { assembleModuleAgent } from './assemble';
+import { readBinding } from './knowledge';
 
 /** 同一 requestId 的创建结果保留窗口：客户端重试落在窗口内得到同一份应答。 */
 const REQUEST_ID_TTL_MS = 5 * 60_000;
@@ -171,45 +170,9 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
     return host.create({ moduleAgent: assemble(agentId, profile) });
   }
 
-  /**
-   * 装配包：绑定解析在请求线程内完成，领域工具闭包绑定到该会话的 scope。
-   * `sharedReadBindings` 首版只支持其他 Agent 的逻辑绑定名（同名即其 home 库）。
-   */
+  /** 装配收敛到 assemble.ts：领域工具按配置 tools 过滤后才进会话。 */
   function assemble(agentId: AgentId, profile: ResolvedAgentProfile) {
-    const definition = moduleAgentDefinition(agentId);
-    if (definition === undefined) {
-      throw new HostError(503, `模块 Agent「${agentId}」尚未注册实现`);
-    }
-    const binding = ensureBinding(store, workspaceKey, agentId, profile.config.knowledge.homeBinding);
-    const sharedReadBaseIds = new Set(binding.sharedReadBaseIds);
-    for (const shared of profile.config.knowledge.sharedReadBindings) {
-      if (isAgentId(shared)) {
-        sharedReadBaseIds.add(
-          ensureBinding(store, workspaceKey, shared, shared).homeBaseId,
-        );
-      }
-    }
-    const access = createKnowledgeAccess(store, { ...binding, sharedReadBaseIds: [...sharedReadBaseIds] });
-    const customTools = definition.createTools({ knowledge: access, store, limits: profile.config.limits });
-    const resolved = resolveToolNames(agentId, profile.config.tools);
-    const customNames = new Set(customTools.map((tool) => tool.name));
-    for (const name of resolved) {
-      if (!customNames.has(name) && !BUILTIN_TOOL_NAMES.has(name)) {
-        throw new HostError(503, `模块 Agent「${agentId}」配置了未知工具：${name}`);
-      }
-    }
-    return {
-      scope: {
-        agentId,
-        workspaceKey,
-        profileRevision: profile.profileRevision,
-      },
-      profile,
-      customTools,
-      // SDK 的 tools 是注册白名单：领域工具名由装配线补入，这里只给内置子集。
-      allowedToolNames: resolved.filter((name) => BUILTIN_TOOL_NAMES.has(name)),
-      systemPromptAppend: [],
-    };
+    return assembleModuleAgent({ store, workspaceKey, agentId, profile });
   }
 
   return router;

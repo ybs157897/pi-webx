@@ -26,8 +26,8 @@ export interface KnowledgeAccess {
   update(id: string, patch: { title?: string; body?: string; tags?: string[] }): KnowledgeResult;
 }
 
-const OUT_OF_SCOPE = '知识条目不在本 Agent 可访问范围';
-const NOT_FOUND = '找不到该知识条目';
+/** 不存在与越界同文案：存在性探测不能靠两种报错区分出别库 id 是否真实存在。 */
+const NOT_FOUND_OR_OUT_OF_SCOPE = '找不到该知识条目或它不在本 Agent 可访问范围';
 
 function ensureTable(db: WorkbenchStore['sqlite']): void {
   db.exec(`
@@ -131,8 +131,8 @@ export function createKnowledgeAccess(store: WorkbenchStore, binding: KnowledgeB
 
     read(id) {
       const record = store.readKnowledge(id);
-      if (record === null) return { ok: false, error: NOT_FOUND };
-      if (!readable.has(String(record.knowledgeBaseId))) return { ok: false, error: OUT_OF_SCOPE };
+      if (record === null) return { ok: false, error: NOT_FOUND_OR_OUT_OF_SCOPE };
+      if (!readable.has(String(record.knowledgeBaseId))) return { ok: false, error: NOT_FOUND_OR_OUT_OF_SCOPE };
       return { ok: true, record };
     },
 
@@ -153,8 +153,8 @@ export function createKnowledgeAccess(store: WorkbenchStore, binding: KnowledgeB
 
     update(id, patch) {
       const record = store.readKnowledge(id);
-      if (record === null) return { ok: false, error: NOT_FOUND };
-      if (String(record.knowledgeBaseId) !== binding.homeBaseId) return { ok: false, error: OUT_OF_SCOPE };
+      if (record === null) return { ok: false, error: NOT_FOUND_OR_OUT_OF_SCOPE };
+      if (String(record.knowledgeBaseId) !== binding.homeBaseId) return { ok: false, error: NOT_FOUND_OR_OUT_OF_SCOPE };
       try {
         const updated = store.updateRecord('knowledge', id, {
           ...(patch.title === undefined ? {} : { title: patch.title }),

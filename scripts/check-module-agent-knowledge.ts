@@ -60,12 +60,14 @@ try {
   /* read 越界：不泄露标题，只回统一拒绝 */
   const crossRead = access.logs.read(sentinelDocs.codes.id);
   assert.ok(crossRead.ok === false, '跨库 read 应被拒');
-  if (!crossRead.ok) {
-    assert.match(crossRead.error, /可访问范围/);
+  const missingRead = access.logs.read('missing-id');
+  assert.ok(missingRead.ok === false, '不存在 id 应返回未找到');
+  if (!crossRead.ok && !missingRead.ok) {
+    // 存在性不泄露：越界与不存在必须是同一条文案，否则报错本身就成了探测器。
+    assert.equal(crossRead.error, missingRead.error, '越界与不存在须同文案');
     assert.ok(!crossRead.error.includes('哨兵'), '拒绝信息不得泄露目标标题');
   }
   assert.ok(access.logs.read(sentinelDocs.logs.id).ok === true, '本库 read 应可读');
-  assert.ok(access.logs.read('missing-id').ok === false, '不存在 id 应返回未找到');
 
   /* update 只允许 home；借 knowledgeBaseId 挪库被拒且记录不变 */
   const moved = access.logs.update(sentinelDocs.logs.id, {

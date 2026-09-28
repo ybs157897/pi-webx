@@ -7,6 +7,8 @@
  * 失败路径统一回收：会话 dispose、容量释放、孤儿团队丢弃、挂起的扩展弹窗全部
  * 以取消收尾。
  */
+import { rmSync } from 'node:fs';
+
 import type { Model } from '@earendil-works/pi-ai';
 import {
   type AgentSession,
@@ -368,6 +370,9 @@ export async function forkHostedSession(
       throw new HostError(400, `无法分叉该会话：${errorText(error)}`);
     }
     if (readModuleAgentEntry(sessionManager) !== undefined) {
+      // forkFrom 已把新文件写好：拒绝前把这个没人会引用的孤儿删掉。
+      const forkedFile = sessionManager.getSessionFile();
+      if (forkedFile !== undefined) rmSync(forkedFile, { force: true });
       throw new HostError(400, '模块 Agent 会话暂不支持分叉');
     }
 
