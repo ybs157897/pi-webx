@@ -1,0 +1,13 @@
+schemaVersion: 1
+id: codes
+enabled: false
+promptFile: ./prompts/codes.md
+skills: []
+tools: []
+mcp: []
+knowledge:
+  homeBinding: codes
+  sharedReadBindings: []
+limits:
+  maxRunningSessions: 1
+  maxToolOutputChars: 24000

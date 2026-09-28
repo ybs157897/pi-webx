@@ -17,9 +17,9 @@
     "typecheck": "tsc --noEmit",
     "check:workbench": "tsx scripts/check-workbench-sqlite.ts",
     "check:workbench-ui": "node --import ./scripts/check-bootstrap.mjs scripts/check-workbench-ui.ts",
-    "check:static": "tsx scripts/check-static-fallback.ts",
+    "check:static": "tsx scripts/check-static-fallback.ts && tsx scripts/check-module-agent-profiles.ts",
     "import:workbench-json": "tsx scripts/import-workbench-json.ts",
-    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && tsx scripts/check-session-recency.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts && tsx scripts/check-composer-images.ts && tsx scripts/check-tool-presets.ts && tsx scripts/check-agent-definitions.ts && tsx scripts/check-agent-definitions-api.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-agent-definitions-ui.ts && tsx scripts/check-subagent-tool.ts && tsx scripts/check-subagent-sdk.ts && tsx scripts/check-subagent-lifecycle.ts && tsx scripts/check-subagent-boundaries.ts && tsx scripts/check-agent-team.ts && tsx scripts/check-agent-team-journal.ts && tsx scripts/check-agent-team-inject.ts && tsx scripts/check-agent-team-windows-policy.ts && tsx scripts/check-agent-team-sandbox.ts && tsx scripts/check-agent-team-sandbox-windows.ts && tsx scripts/check-subagents-test-server.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-preset-menu.ts && tsx scripts/check-todos.ts && tsx scripts/check-todo-tool.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-task-panel.ts && tsx scripts/check-workbench-sqlite.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-workbench-ui.ts && tsx scripts/check-static-fallback.ts"
+    "check": "tsx scripts/check-transcript.ts && tsx scripts/check-ask-card.ts && tsx scripts/check-queue.ts && tsx scripts/check-journal.ts && tsx scripts/check-models-config.ts && tsx scripts/check-session-identity.ts && tsx scripts/check-failure-copy.ts && tsx scripts/check-session-status.ts && tsx scripts/check-session-recency.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-card.ts && tsx scripts/check-attachment-normalize.ts && tsx scripts/check-attachment-store.ts && tsx scripts/check-model-editor.ts && tsx scripts/check-image-transport.ts && tsx scripts/check-composer-images.ts && tsx scripts/check-tool-presets.ts && tsx scripts/check-agent-definitions.ts && tsx scripts/check-agent-definitions-api.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-agent-definitions-ui.ts && tsx scripts/check-subagent-tool.ts && tsx scripts/check-subagent-sdk.ts && tsx scripts/check-subagent-lifecycle.ts && tsx scripts/check-subagent-boundaries.ts && tsx scripts/check-agent-team.ts && tsx scripts/check-agent-team-journal.ts && tsx scripts/check-agent-team-inject.ts && tsx scripts/check-agent-team-windows-policy.ts && tsx scripts/check-agent-team-sandbox.ts && tsx scripts/check-agent-team-sandbox-windows.ts && tsx scripts/check-subagents-test-server.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-tool-preset-menu.ts && tsx scripts/check-todos.ts && tsx scripts/check-todo-tool.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-task-panel.ts && tsx scripts/check-workbench-sqlite.ts && node --import ./scripts/check-bootstrap.mjs scripts/check-workbench-ui.ts && tsx scripts/check-static-fallback.ts && tsx scripts/check-module-agent-profiles.ts"
   },
   "dependencies": {
     "@earendil-works/pi-ai": "^0.84.4",
@@ -44,7 +44,8 @@
     "sharp": "^0.35.4",
     "tsx": "^4.20.6",
     "typebox": "1.3.7",
-    "ws": "^8.21.3"
+    "ws": "^8.21.3",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

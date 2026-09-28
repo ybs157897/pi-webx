@@ -1,0 +1,31 @@
+schemaVersion: 1
+id: logs
+enabled: true
+promptFile: ./prompts/logs.md
+skills:
+  - ./skills/logs/log-analysis/SKILL.md
+tools:
+  - logs.search
+  - logs.read
+  - knowledge.search
+  - knowledge.read
+  - knowledge.create
+  - knowledge.update
+mcp:
+  - id: log-source
+    enabled: false
+    required: false
+    connection:
+      transport: streamable-http
+      url: https://logs.example.invalid/mcp # 占位地址，接入时替换
+      headerRefs:
+        Authorization: LOGS_MCP_AUTHORIZATION
+    tools: [search_logs, get_log]
+    resources: false
+    timeoutMs: 15000
+knowledge:
+  homeBinding: logs
+  sharedReadBindings: []
+limits:
+  maxRunningSessions: 1
+  maxToolOutputChars: 24000

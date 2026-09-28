@@ -1,0 +1,13 @@
+schemaVersion: 1
+id: requirements
+enabled: false
+promptFile: ./prompts/requirements.md
+skills: []
+tools: []
+mcp: []
+knowledge:
+  homeBinding: requirements
+  sharedReadBindings: []
+limits:
+  maxRunningSessions: 1
+  maxToolOutputChars: 24000
