@@ -5,10 +5,12 @@
 
 import type {
   CommandResponse,
+  CreateModuleAgentSessionRequest,
   CreateSessionRequest,
   CreateSessionResponse,
   ListSessionsResponse,
   ListStoredSessionsResponse,
+  ModuleAgentsResponse,
   PickDirectoryResponse,
   PiCommandEnvelope,
   PiRpcResponse,
@@ -84,6 +86,22 @@ export const api = {
 
   createSession(body: CreateSessionRequest): Promise<CreateSessionResponse> {
     return request<CreateSessionResponse>('/api/sessions', jsonInit(body));
+  },
+
+  /** 模块 Agent 的能力投影（脱敏，见 ModuleAgentCapability）。 */
+  moduleAgents(): Promise<ModuleAgentsResponse> {
+    return request<ModuleAgentsResponse>('/api/module-agents');
+  },
+
+  /** 模块 Agent 的唯一装配入口：requestId 幂等，sessionId 走已登记会话恢复。 */
+  createModuleAgentSession(
+    agentId: string,
+    body: CreateModuleAgentSessionRequest,
+  ): Promise<CreateSessionResponse> {
+    return request<CreateSessionResponse>(
+      `/api/module-agents/${encodeURIComponent(agentId)}/sessions`,
+      jsonInit(body),
+    );
   },
 
   team(idOrSessionId: string): Promise<TeamProjection> {

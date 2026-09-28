@@ -149,6 +149,9 @@
 | 模块注册表（createTools 工厂，目前仅 logs） | `server/module-agents/registry.ts` |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
 | 日志领域服务 / 领域工具（`logs_*`、`knowledge_*`） | `server/module-agents/logs/service.ts`、`logs/tools.ts` |
+| 装配纯函数（工具白名单过滤 + 校验） | `server/module-agents/assemble.ts`（router 与会话门禁共用） |
+| 前端会话 hook（懒创建、双存储恢复指针、requestId 幂等） | `src/workbench-app/agents/useModuleAgentChat.jsx` |
+| 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`AgentCapabilities.jsx`、`ModuleAgentPanel.css`（App.jsx 以 `agentPanel` 态与通用浮层互斥；`Logs.jsx` 的 `logs-agent-open` 入口） |
 | 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
 | Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |

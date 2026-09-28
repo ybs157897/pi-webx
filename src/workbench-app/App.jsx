@@ -31,6 +31,7 @@ import { parseTranscriptViewMode } from '../lib/transcript/presentation'
 import TopBar from './shell/TopBar.jsx'
 import SideNav from './shell/SideNav.jsx'
 import AIPanel, { nextAskState } from './shell/AIPanel.jsx'
+import ModuleAgentPanel from './agents/ModuleAgentPanel.jsx'
 import CommandPalette from './shell/CommandPalette.jsx'
 import SettingsSheet from './shell/SettingsSheet.jsx'
 import Dashboard from './modules/Dashboard.jsx'
@@ -109,6 +110,9 @@ export default function App() {
   const [prefs, setPref, replacePrefs] = usePrefs()
   // AI 对话是全屏浮层（不再是右侧常驻副驾），默认收起，由星星按钮 / tab / askAI 展开。
   const [panelOpen, setPanelOpen] = useState(false)
+  // 模块 Agent 面板与通用 AI 浮层互斥：同一时间只挂一个（hook 只活在面板里，
+  // 关闭即卸载、订阅断开，会话由服务端与恢复指针接续）。
+  const [agentPanel, setAgentPanel] = useState(null)
   const { chat, transcript, localRows, busy, modelName, status: piStatus, send, newConversation, retry, dialog, respondToDialog } = useWorkbenchPiChat()
   // 「问小台」本地草稿：pi 不可用时 send() 内部吞掉异常、只往面板丢一条底层报错，
   // 笔记标题 / 正文会整段消失。这里先落成 pending 用户消息，回显成功后撤掉。
@@ -355,12 +359,23 @@ export default function App() {
             empty={empty}
             onLoadDemo={loadDemo}
             askAI={askAI}
+            openAgent={(id) => { setAgentPanel(id); setPanelOpen(false) }}
           />
         </div>
       </main>
 
+      {agentPanel !== null && (
+        <ModuleAgentPanel
+          agentId={agentPanel}
+          themeMode={theme}
+          stepsMode={stepsMode}
+          onClose={() => setAgentPanel(null)}
+          onRefreshData={manualRefresh}
+        />
+      )}
+
       {/* 全屏居中的 AI 对话浮层：展开占据整屏，正文列与 /chat 同源；收起后右下角星星召回。 */}
-      {panelOpen && (
+      {panelOpen && agentPanel === null && (
         <AIPanel
           transcript={transcript}
           assistRows={assistRows}
@@ -381,7 +396,7 @@ export default function App() {
       )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
-      {panelOpen === false && (
+      {panelOpen === false && agentPanel === null && (
         <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>

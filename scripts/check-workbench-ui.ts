@@ -40,6 +40,7 @@ import Requirements from '../src/workbench-app/modules/Requirements.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
 import Knowledge from '../src/workbench-app/modules/Knowledge.jsx';
 import AIPanel, { nextAskState } from '../src/workbench-app/shell/AIPanel.jsx';
+import AgentCapabilities from '../src/workbench-app/agents/AgentCapabilities.jsx';
 import SettingsSheet from '../src/workbench-app/shell/SettingsSheet.jsx';
 import AssistantMarkdown from '../src/workbench-app/pi-webx/AssistantMarkdown.jsx';
 import { AssistantMessageItem } from '../src/components/MessageItem';
@@ -238,6 +239,7 @@ const data = fakeData();
   assert.equal(occurrences(markup, 'data-testid="log-row"'), 3, '日志行数应等于记录数');
   assert.ok(markup.includes('data-testid="logs-query-open"'), '日志缺「查询日志」入口');
   assert.ok(markup.includes('data-testid="logs-record-open"'), '日志缺「记录日志」入口');
+  assert.ok(markup.includes('data-testid="logs-agent-open"'), '日志缺「问日志 Agent」入口');
   assert.ok(!markup.includes('logs-query-form') && !markup.includes('logs-record-form'), '弹窗默认必须关闭（用户定调：对话框形式）');
   assert.ok(!markup.includes('logs-filter-bar'), '无筛选时不该画条件条');
   assertNoLeaks(markup, '日志');
@@ -503,7 +505,7 @@ console.log('workbench UI: 7 modules (widget board, capture, dual views, fix lis
 
   // 接线钉在 App 源码上（错误路径依赖 send 内部吞异常，SSR 不可达）。
   const appSource = sourceOf('../src/workbench-app/App.jsx');
-  assert.ok(appSource.includes('{panelOpen && ('), '浮层应按开合条件挂载');
+  assert.ok(appSource.includes('{panelOpen && agentPanel === null && ('), '浮层应按开合条件挂载（与模块 Agent 面板互斥）');
   assert.ok(appSource.includes('transcript={transcript}'), '浮层正文未接 transcript');
   assert.ok(appSource.includes('assistRows={assistRows}'), '浮层未接本地兜底行');
   assert.ok(appSource.includes('themeMode={theme}'), '浮层未随工作台主题切换');
@@ -755,3 +757,67 @@ console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + 
 }
 
 console.log('workbench UI: transcript work-details modes (compact/standard/detailed/verbose) + settings entry passed');
+
+/* ================================================== 11. 模块 Agent 面板：能力卡脱敏 + 外壳可选 props */
+
+{
+  // AgentCapabilities：fixture 故意带 headerRefs 名，断言脱敏（绝不进 DOM）。
+  const capability = {
+    id: 'logs', enabled: true, ok: true,
+    profileRevision: 'abcdef0123456789ff',
+    tools: ['logs.search', 'logs.read', 'knowledge.search'],
+    skills: [{ name: 'log-analysis', path: '/tmp/skills/log-analysis/SKILL.md' }],
+    mcp: [{
+      id: 'logs-mcp', enabled: false, transport: 'stdio', command: 'logs-mcp',
+      headerRefs: { authorization: 'LOGS_MCP_AUTHORIZATION' },
+    }],
+    knowledge: { homeBinding: 'logs', homeBaseId: 'kb-logs-01' },
+  };
+  const caps = renderToStaticMarkup(h(AgentCapabilities, { capability, error: '' }));
+  assert.ok(caps.includes('data-testid="module-agent-capabilities"'), '能力卡缺根 testid');
+  assert.ok(caps.includes('logs.search'), '能力卡应列出工具名');
+  assert.ok(caps.includes('log-analysis'), '能力卡应列出 Skill 名');
+  assert.ok(caps.includes('logs-mcp') && caps.includes('stdio'), '能力卡应列出 MCP id 与 transport');
+  assert.ok(caps.includes('abcdef012345'), '能力卡应展示 profileRevision 前 12 位');
+  assert.ok(caps.includes('kb-logs-01'), '能力卡应展示知识库 homeBaseId');
+  assert.ok(!caps.includes('LOGS_MCP_AUTHORIZATION'), '能力卡不得泄漏 headerRefs 值/环境变量名');
+  assert.ok(!caps.includes('authorization'), '能力卡不得泄漏 headerRefs 键名');
+
+  const capsError = renderToStaticMarkup(h(AgentCapabilities, { capability: null, error: '配置读取失败' }));
+  assert.ok(capsError.includes('data-testid="module-agent-capabilities-error"'), '能力卡错误态缺 testid');
+  assert.ok(capsError.includes('配置读取失败'), '能力卡应原样透出错误文案');
+
+  // AIPanel 可选 props：title 换名、emptyExtra 渲染在空态欢迎语下方，原 testid 不动。
+  const emptyTranscript = {
+    entries: [], streamingEntryId: null, running: false, compacting: false,
+    retrying: null, queued: { steering: [], followUp: [], pending: [] },
+    lastError: null, title: null, turnSeq: 0, activeTurn: null, turnProcesses: {},
+  };
+  const moduleMarkup = renderToStaticMarkup(h(AIPanel, {
+    transcript: emptyTranscript,
+    assistRows: [],
+    busy: false,
+    status: 'idle',
+    modelName: 'pi-webx',
+    themeMode: 'light',
+    title: '日志 Agent',
+    emptyExtra: h('div', { 'data-testid': 'module-agent-capabilities' }, '能力占位'),
+    onSend: () => {},
+    onNew: () => {},
+    onRetry: () => {},
+    onRefreshData: () => {},
+    onAction: () => {},
+    onClose: () => {},
+  }));
+  assert.ok(moduleMarkup.includes('日志 Agent'), 'title prop 未生效');
+  assert.ok(moduleMarkup.includes('能力占位'), 'emptyExtra 未渲染在空态下方');
+  assert.ok(moduleMarkup.includes('data-testid="ai-overlay"'), 'ai-overlay testid 不得移除');
+  assert.ok(moduleMarkup.includes('data-testid="chat-scroll"'), 'chat-scroll testid 不得移除');
+
+  // App 接线：模块面板与通用浮层互斥，openAgent 经 ModuleView 下传。
+  const appSource = sourceOf('../src/workbench-app/App.jsx');
+  assert.ok(appSource.includes('ModuleAgentPanel'), 'App 未接 ModuleAgentPanel');
+  assert.ok(appSource.includes('openAgent='), 'App 未把 openAgent 传给模块');
+}
+
+console.log('workbench UI: module agent panel (capabilities redaction, AIPanel optional props, App wiring) passed');

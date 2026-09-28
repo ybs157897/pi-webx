@@ -228,3 +228,7 @@
   .logs-group-head { padding-inline: var(--sp-3); }
   .logs-cond .logs-plain { margin-inline-start: 0; }
 }
+
+/* 「问日志 Agent」入口：与普通按钮同形，icon 上色标记是 AI 入口。 */
+.logs-agent-btn { color: var(--accent); }
+.logs-agent-btn:disabled { color: var(--text-3); }

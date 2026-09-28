@@ -160,6 +160,10 @@ function Composer({ busy, onSend }) {
 
 export default function AIPanel({
   transcript, assistRows, busy, status, modelName, themeMode, stepsMode, dialog, onRespondDialog, onSend, onNew, onRetry, onRefreshData, onAction, onClose,
+  // 模块 Agent 复用本外壳时的三个可选项：title 换掉「小台」名，subtitle 换掉
+  // live 状态行的「Pi Agent」前缀（如「日志 Agent · gpt-…」），emptyExtra
+  // 渲染在空态欢迎语下方（能力卡）。不传则与旧行为完全一致。
+  title, subtitle, emptyExtra,
 }) {
   // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
@@ -172,7 +176,7 @@ export default function AIPanel({
   }, [onClose])
 
   const statusText = status === 'live'
-    ? `Pi Agent · ${modelName}`
+    ? `${subtitle ?? 'Pi Agent'} · ${modelName}`
     : status === 'connecting' ? TEXT.connecting : status === 'idle' ? TEXT.idle : TEXT.retryHint
 
   const entries = Array.isArray(transcript?.entries) ? transcript.entries : []
@@ -187,7 +191,7 @@ export default function AIPanel({
         <header className="aside-head">
           <span className="aside-avatar"><IconSparkles size={17} /></span>
           <div className="grow">
-            <p className="aside-title">{TEXT.assistant}</p>
+            <p className="aside-title">{title ?? TEXT.assistant}</p>
             <p className="aside-sub">
               <span className={`status-dot ${status === 'live' ? '' : status === 'connecting' ? 'connecting' : 'off'}`} />
               {busy ? TEXT.thinking : statusText}
@@ -215,6 +219,7 @@ export default function AIPanel({
                   <p className="chat-empty-title">{TEXT.welcome}</p>
                   <p className="chat-empty-text">{TEXT.welcomeText}</p>
                 </div>
+                {emptyExtra}
                 <div className="suggest">
                   {TEXT.suggestions.map(question => (
                     <button type="button" className="suggest-item" key={question} onClick={() => onSend(question)}>

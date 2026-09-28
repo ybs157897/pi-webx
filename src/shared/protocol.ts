@@ -613,6 +613,41 @@ export interface CreateSessionResponse {
   session: SessionSummary;
 }
 
+/**
+ * `GET /api/module-agents` 的能力投影（脱敏）：MCP 只露 id/transport/地址，
+ * 不含 headerRefs/env 名与凭据值。
+ */
+export interface ModuleAgentCapability {
+  id: string;
+  enabled: boolean;
+  ok: boolean;
+  error?: string;
+  profileRevision?: string;
+  tools?: string[];
+  skills?: { name: string; path: string }[];
+  mcp?: {
+    id: string;
+    enabled: boolean;
+    transport: string;
+    command?: string;
+    url?: string;
+  }[];
+  model?: { provider: string; id: string };
+  knowledge?: { homeBinding: string; homeBaseId?: string };
+}
+
+export interface ModuleAgentsResponse {
+  workspaceKey: string;
+  agents: ModuleAgentCapability[];
+}
+
+export interface CreateModuleAgentSessionRequest {
+  /** 幂等键：同一 requestId 的重试得到同一份应答。 */
+  requestId: string;
+  /** 恢复已登记的模块会话。 */
+  sessionId?: string;
+}
+
 export interface ListSessionsResponse {
   sessions: SessionSummary[];
 }

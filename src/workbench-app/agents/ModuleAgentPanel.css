@@ -1,0 +1,48 @@
+/* 模块 Agent 面板与能力卡：令牌只取 styles.css。 */
+
+.agent-panel { display: contents; }
+
+.agent-capabilities {
+  margin-top: var(--sp-3);
+  padding: var(--sp-3);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  text-align: left;
+  max-width: 520px;
+  margin-inline: auto;
+}
+
+.agent-cap-list { display: flex; flex-direction: column; gap: var(--sp-2); margin: 0; }
+
+.agent-cap-row { display: flex; gap: var(--sp-2); align-items: baseline; font-size: var(--fs-sm); }
+
+.agent-cap-row dt { color: var(--text-3); flex-shrink: 0; min-width: 4.5em; }
+
+.agent-cap-row dd {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-2);
+  color: var(--text-2);
+}
+
+.agent-cap-row code {
+  font-size: var(--fs-xs);
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-1);
+}
+
+.agent-cap-chip {
+  font-size: var(--fs-xs);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 0 var(--sp-1);
+  color: var(--text-2);
+}
+
+.agent-cap-error { color: var(--danger); margin: 0; font-size: var(--fs-sm); }
+
+.agent-cap-muted { color: var(--text-3); margin: 0; font-size: var(--fs-sm); }

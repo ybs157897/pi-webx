@@ -8,7 +8,7 @@ function errorText(error) {
   return error instanceof Error ? error.message : String(error)
 }
 
-function toChatMessages(entries) {
+export function toChatMessages(entries) {
   const messages = []
   for (const entry of entries) {
     if (entry.kind === 'user') {

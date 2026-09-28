@@ -20,7 +20,7 @@ import { api } from '../api.mjs'
 import {
   Card, Chip, ChipButton, ConfirmDialog, Empty, Field, FieldGroup, FormModal, IconButton, Modal, Segmented,
 } from '../ui.jsx'
-import { IconChevronRight, IconLogs, IconPlus, IconSearch, IconTrash } from '../icons.jsx'
+import { IconChevronRight, IconLogs, IconPlus, IconSearch, IconSparkles, IconTrash } from '../icons.jsx'
 import { addDays, formatDay, formatTime, groupBy, relativeDay, todayISO } from '../util.mjs'
 import './Logs.css'
 
@@ -82,6 +82,8 @@ const TEXT = {
   added: '已记录日志',
   needContent: '先写点内容',
   rangeInvalid: '开始日期晚于结束日期',
+  askAgent: '问日志 Agent',
+  askAgentUnavailable: '日志 Agent 入口未接入（openAgent 未传入）',
 }
 
 /** 级别：颜色（色条与 chip 同源）、文案、分段控件选项都用这一份。 */
@@ -140,7 +142,7 @@ function stampText(stamp) {
   return `${formatDay(todayISO(date), 'md')} ${time}`
 }
 
-export default function Logs({ data, mutate, notify, empty = false, onLoadDemo }) {
+export default function Logs({ data, mutate, notify, empty = false, onLoadDemo, openAgent }) {
   const today = todayISO()
   const logs = Array.isArray(data?.logs) ? data.logs : []
 
@@ -289,8 +291,20 @@ export default function Logs({ data, mutate, notify, empty = false, onLoadDemo }
     setDemoBusy(false)
   }
 
+  const agentReady = typeof openAgent === 'function'
+
   const headActions = (
     <>
+      <button
+        type="button"
+        className="btn logs-agent-btn"
+        data-testid="logs-agent-open"
+        disabled={!agentReady}
+        title={agentReady ? TEXT.askAgent : TEXT.askAgentUnavailable}
+        onClick={() => { if (agentReady) openAgent('logs') }}
+      >
+        <IconSparkles size={16} /> {TEXT.askAgent}
+      </button>
       <button type="button" className="btn" data-testid="logs-query-open" onClick={openQuery}>
         <IconLogs size={16} /> {TEXT.query}
       </button>
