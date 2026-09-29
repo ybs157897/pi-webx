@@ -3,13 +3,13 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-29。工作台八个业务模块与现有后端领域字段/工具按业务目录归位，并新增左侧 Agent 配置页；原前端页面路径仅保留兼容 re-export。
+更新日期：2026-09-29。新增生活秘书：我的待办与今日规划共享事项和独立 life Agent；共九个导航入口，业务实现按模块目录归位。
 
 ## 总体架构
 
 ```
 浏览器
- ├─ /            工作台前端（src/workbench-app/，React，8 业务模块 + Agent 配置）
+ ├─ /            工作台前端（src/workbench-app/，React，8 业务入口 + Agent 配置）
  └─ /chat        聊天前端（src/App.tsx → src/app/，LobeHub 风格）
         │ SSE + POST
         ▼
@@ -151,7 +151,7 @@
 | 模块独立工作区（默认目录、自定义绑定、真实路径与重叠校验） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
-| 模块注册表（createTools 工厂，works + requirements + logs + codes） | `server/module-agents/registry.ts` |
+| 模块注册表（createTools 工厂，life + works + requirements + logs + codes） | `server/module-agents/registry.ts` |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
@@ -171,8 +171,8 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 模块导航定义（9 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / tasks 今日规划 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
-| 模块实现 | `src/workbench-app/modules/{dashboard,tasks,works,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；旧 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import |
+| 模块导航定义（9 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / life 生活秘书 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
+| 模块实现 | `src/workbench-app/modules/{dashboard,life,today,tasks,works,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；旧 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import |
 | Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker.ts`），`ModuleTabs.jsx` 模块卡片切换，`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
 | 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
@@ -194,6 +194,22 @@
 | 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
 | 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
 | 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/幂等；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖真实 SSR DOM |
+
+### 生活秘书：我的待办与今日规划
+
+产品契约与验收方法见 `docs/architecture/life-secretary.md`。
+
+| 功能 | 位置 |
+| --- | --- |
+| 生活秘书入口与两个内部页签 | `src/workbench-app/modules/life/index.jsx`、`LifeChat.jsx`；侧栏 life，内含 today/tasks 页签，切换不卸载对话 |
+| 业务记录导航 | `src/workbench-app/shell/navigation.mjs` 将 tasks 数据链接与 today 跳转映射到 life 的对应页签；保留需求来源筛选。`check-life-navigation.tsx` 验证父菜单与映射 |
+| 事项收集、编辑、完成、安排 | `src/workbench-app/modules/tasks/`；原 `Tasks.jsx` 继续 re-export |
+| 日期安排与未完成事项 | `src/workbench-app/modules/today/`；从 tasks.plannedDate 派生，截止日仍为 due |
+| 方案预览和显式确认 | `src/workbench-app/modules/life/PlanReview.jsx`；只展示当前 life 会话草稿 |
+| 生活秘书工具、草稿确认与排期校验 | `server/modules/life/`；通过工作台 router/store 接入事务、版本校验与持久化 |
+| 事项字段、草稿字段 | `server/modules/tasks/schema.mjs`、`server/modules/life/schema.mjs`；schema 聚合 lifePlans，纳入导出导入 |
+| 独立配置与提示词 | `config/agents/life.yaml`、`config/agents/prompts/life.md`；Agent 配置页独立编辑 |
+| 自动门禁与隔离浏览器服务 | `scripts/check-life-secretary.ts`、`check-life-secretary-ui.tsx`、`check-life-agent.ts`、`life-agent-browser-fixture.ts` |
 
 ### 工作助理 Agent 与时间安排
 
