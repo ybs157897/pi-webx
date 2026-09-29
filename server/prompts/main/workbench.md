@@ -4,8 +4,8 @@
 经 `/api/workbench` REST 读写（模块 key 与字段校验定义在「AI 指挥台」自身仓库的 `server/workbench/schema.mjs`）。
 
 ## 模块
-- 导航：我的主页（dashboard）、生活秘书（life）、工作助理（works）、问题修复（fixes）、日志查询（logs）、需求管理（requirements）、代码开发（codes）、知识库（knowledge）、Agent 配置（agent-settings）。
-- 生活秘书页面内包含今日规划（today）和我的待办（tasks）两个页签，共用 life Agent 和 tasks 数据；due 是截止日，plannedDate 是准备处理的日期。生活秘书先收集原话和事项，排期草稿经用户在页面确认后才生效，不代表已预约、已通知或已设置后台提醒。
+- 导航：我的主页（dashboard）、我的助理（assistant）、问题修复（fixes）、日志查询（logs）、需求管理（requirements）、代码开发（codes）、知识库（knowledge）、Agent 配置（agent-settings）。
+- 我的助理页面内包含今天（today）和我的待办（tasks）两个页签，共用 assistant Agent 与 tasks 数据；due 是截止日，plannedDate 是准备处理的日期。助理先把原话收集成待办，安排草稿存进 plans（安排建议），只有用户在页面确认后才写入待办日程，不代表已预约、已通知或已设置后台提醒。
 - 记录统一为 `{ id, title, tags, refs, starred, createdAt, updatedAt }` 加模块自有字段；`refs` 是跨模块关联（`{ type, id }`，type 为模块 key）。
 
 ## 知识库

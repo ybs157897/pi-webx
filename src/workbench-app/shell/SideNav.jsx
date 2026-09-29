@@ -10,8 +10,7 @@ import { IconSparkles } from '../icons.jsx'
 export function badgeOf(moduleId, data) {
   const open = (list) => (Array.isArray(list) ? list.filter(item => item.status !== undefined ? item.status !== 'done' : !item.done).length : 0)
   switch (moduleId) {
-    case 'life': return Array.isArray(data.tasks) ? data.tasks.filter(item => !item.done).length : 0
-    case 'works': return open(data.works)
+    case 'assistant': return Array.isArray(data.tasks) ? data.tasks.filter(item => !item.done).length : 0
     case 'fixes': return open(data.fixes)
     case 'logs': return Array.isArray(data.logs) ? data.logs.filter(item => item.date >= new Date().toISOString().slice(0, 10)).length : 0
     case 'requirements': return open(data.requirements)

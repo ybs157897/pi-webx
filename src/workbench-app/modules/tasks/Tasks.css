@@ -1,10 +1,13 @@
 /*
- * 我的待办模块样式：快速捕获条 + 按紧迫度分组的密集任务列表。
+ * 我的待办模块样式：快速捕获条 + 认知分组列表。
+ *
+ * 分组按「决策相关性」排：逾期 → 今天 → 稍后 → 已完成（默认折叠）。
+ * 行内元信息同序：优先级（仅高/低）→ 截止 → 安排/时长 → 标签/关联，跨语义块用 1px 竖线。
  *
  * 只消费 styles.css 的设计令牌（表面 / 文本 / 语义色 / 间距 / 字号 / 圆角），
  * 亮暗两套主题自动跟随，紧凑密度档也跟着 --sp-* 一起压。
- * 类名前缀：`tasks-` 模块级容器与分组，`task-` 行内元素。
- * 断点只有一个：≤480px 收起标签文字（保留色点），行内元素一律可折行，375px 不横向溢出。
+ * 类名前缀：`tasks-` 模块级容器与分组，`task-` 行内元素，`assistant-` 与今日视图共用的形态。
+ * 断点：≤480px 收起标签文字（保留色点）、行动作常显，行内元素一律可折行，375px 不横向溢出。
  */
 
 /* ================================================================ 容器与快速捕获 */
@@ -20,21 +23,20 @@
   background: var(--bg);
 }
 
-.tasks-capture-body { padding: var(--sp-3); }
-
+/* 去掉外层卡片壳：捕获条本身就是一行输入，不再嵌一层描边。 */
 .tasks-capture-form {
   display: flex;
   align-items: center;
   gap: var(--sp-2);
   min-height: 38px;
   padding: 0 var(--sp-2) 0 var(--sp-3);
-  border: 1px solid var(--line-2);
+  border: 1px solid var(--line-1);
   border-radius: var(--radius-md);
   background: var(--surface-1);
   transition: border-color .15s ease, background .15s ease;
 }
 
-.tasks-capture-form:focus-within { border-color: var(--accent); background: var(--surface-0); }
+.tasks-capture-form:focus-within { border-color: var(--accent); }
 
 .tasks-capture-icon { display: grid; place-items: center; flex: none; color: var(--text-3); }
 
@@ -79,7 +81,7 @@
 .tasks-mark.warn { background: var(--warn-soft); color: var(--warn); }
 .tasks-mark.danger { background: var(--danger-soft); color: var(--danger); }
 
-/* ================================================================ 范围条 */
+/* ================================================================ 来源筛选与范围条 */
 
 .tasks-source-filter {
   display: flex;
@@ -97,33 +99,23 @@
   overflow-wrap: anywhere;
 }
 
+/* 范围 + 搜索 + 总数同一排：搜索吃掉剩余宽度，总数靠右。 */
 .tasks-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.tasks-bar .tasks-search { flex: 1 1 200px; min-width: 0; }
+.tasks-bar-count { margin-inline-start: auto; color: var(--text-3); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.tasks-bar-count {
-  margin-inline-start: auto;
-  color: var(--text-3);
-  font-variant-numeric: tabular-nums;
-}
 .tasks-search input { width: 100%; min-height: 38px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius-md); background: var(--surface-0); color: var(--text-1); font: inherit; font-size: var(--fs-sm); }
 .tasks-search input:focus { border-color: var(--accent); outline: none; }
 
-/* ================================================================ 分组头 */
+/* ================================================================ 分组头（标注 ── 延展线 ── 计数药丸） */
 
 .tasks-groups { display: flex; flex-direction: column; gap: var(--sp-4); }
 .tasks-group { display: flex; flex-direction: column; gap: var(--sp-2); }
 
-.tasks-group-head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 2px; }
-
-.tasks-group-title {
-  color: var(--text-3);
-  font-size: var(--fs-xs);
-  font-weight: 650;
-  letter-spacing: .04em;
-}
-
-.tasks-group-title.danger { color: var(--danger); }
-
-.tasks-group-count {
+.assistant-group-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; padding: 0 2px; }
+.assistant-group-title { flex: none; color: var(--text-3); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; }
+.assistant-group-rule { flex: 1 1 auto; height: 1px; background: var(--line-1); }
+.assistant-group-count {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -132,12 +124,33 @@
   padding: 0 5px;
   border-radius: var(--radius-pill);
   background: var(--surface-2);
-  color: var(--text-3);
+  color: var(--text-2);
   font-size: var(--fs-xs);
   font-variant-numeric: tabular-nums;
 }
+.assistant-group-total { flex: none; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
 
-.tasks-group-count.danger { background: var(--danger-soft); color: var(--danger); }
+.tasks-group[data-tone="danger"] .assistant-group-title { color: var(--danger); }
+.tasks-group[data-tone="danger"] .assistant-group-count { background: var(--danger-soft); color: var(--danger-strong); }
+.tasks-group[data-tone="accent"] .assistant-group-title { color: var(--accent); }
+
+/* 已完成组：凹陷底 + 折叠头（形态与今日视图的折叠一致，自带一份不依赖别的模块的 CSS）。 */
+.tasks-group[data-group="done"] .assistant-group-head.assistant-fold-head {
+  min-height: var(--row-h-sm);
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  cursor: pointer;
+  transition: background .15s ease;
+}
+.tasks-group[data-group="done"] .assistant-group-head.assistant-fold-head:hover { background: var(--surface-2); }
+.tasks-group[data-group="done"] .assistant-fold-chevron { display: grid; place-items: center; flex: none; transition: transform .15s ease; }
+.tasks-group[data-group="done"] .assistant-group-head[aria-expanded="true"] .assistant-fold-chevron { transform: rotate(90deg); }
+.tasks-group[data-group="done"] .tasks-list { background: var(--surface-1); }
+.tasks-group[data-group="done"] .task-row { padding-block: var(--sp-1); }
+
+.tasks-list[hidden] { display: none; }
 
 /* ================================================================ 行 */
 
@@ -149,6 +162,7 @@
 }
 
 .task-row {
+  position: relative;
   display: flex;
   align-items: flex-start;
   gap: var(--sp-2);
@@ -159,6 +173,16 @@
 
 .task-row:last-child { border-bottom: 0; }
 .task-row:hover { background: var(--surface-1); }
+
+/* 行左缘 2px 竖条：逾期 > 置顶，一条就够（overdue 优先）。 */
+.task-row.is-overdue::before,
+.task-row.is-starred::before { content: ""; position: absolute; inset-block: 0; inset-inline-start: 0; width: 2px; }
+.task-row.is-overdue::before { background: var(--danger); }
+.task-row.is-starred::before { background: var(--warn); }
+
+/* 勾完一闪：--ok-soft 淡出，不做高度/位置动画。 */
+.task-row.is-done { animation: assistant-flash-ok .45s ease-out; }
+@keyframes assistant-flash-ok { from { background: var(--ok-soft); } to { background: transparent; } }
 
 /* 自绘勾选框：勾上是实心 ok 色块 + 反色对钩（--on-accent 在两主题下都够对比）。 */
 .task-check {
@@ -200,6 +224,18 @@
 
 .task-row.is-done .task-title { color: var(--text-3); text-decoration: line-through; }
 
+/* 备注只占一行：想读完点开详情，列表行不承担长文。 */
+.assistant-note {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-3);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
 .task-meta {
   display: flex;
   flex-wrap: wrap;
@@ -208,6 +244,8 @@
   color: var(--text-3);
   font-size: var(--fs-xs);
 }
+
+.assistant-meta-sep { flex: none; width: 1px; height: 11px; background: var(--line-2); }
 
 .task-dot {
   width: 6px;
@@ -226,8 +264,9 @@
 .task-due.accent { color: var(--accent); font-weight: 550; }
 .task-due.danger { color: var(--danger); font-weight: 550; }
 .task-due.plain { color: var(--text-2); }
-.task-due.muted { color: var(--text-3); }
+.task-due.muted { color: var(--text-2); }
 .task-scheduled { color: var(--accent); font-weight: 550; }
+.assistant-duration { color: var(--text-3); white-space: nowrap; }
 
 .task-tag { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-2); }
 
@@ -273,19 +312,41 @@
 .task-actions .icon-btn { width: 28px; height: 28px; }
 .task-actions .task-plan, .task-actions .task-details { white-space: nowrap; font-size: var(--fs-xs); }
 
+/* 桌面：动作收起来，hover / 键盘 focus-within 才现身；触摸或窄屏常显（下面还有一条兜底）。 */
+@media (hover: hover) and (min-width: 481px) {
+  .assistant-row-actions { opacity: 0; transition: opacity .15s ease; }
+  .assistant-row:hover .assistant-row-actions,
+  .assistant-row:focus-within .assistant-row-actions { opacity: 1; }
+}
+
 .task-star { color: var(--text-3); }
 .task-star.is-on { color: var(--warn); }
 .task-star.is-on svg { fill: currentColor; }
 
 .task-actions .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* ================================================================ 详情弹窗 */
+
 .tasks-detail-form { display: flex; flex-direction: column; gap: var(--sp-3); }
 .tasks-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
 .tasks-detail-grid .field { min-width: 0; }
 .tasks-detail-grid input, .tasks-detail-grid select { width: 100%; min-width: 0; }
 .tasks-detail-hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
-.tasks-original { padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); }
-.tasks-original span { color: var(--text-3); font-size: var(--fs-xs); }
-.tasks-original p { margin-top: var(--sp-1); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-sm); }
+
+/* 最初记录原样引用：左边一条竖线就是「这是用户原话」的全部装饰。 */
+.assistant-original {
+  padding-inline-start: var(--sp-3);
+  border-inline-start: 3px solid var(--line-2);
+}
+.assistant-original-label { display: block; color: var(--text-3); font-size: var(--fs-xs); }
+.assistant-original p {
+  margin-top: var(--sp-1);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
 
 /* ================================================================ 底部统计 */
 
@@ -305,7 +366,7 @@
 
 /* ================================================================ 小屏折叠 */
 
-/* ≤480px：标签只留色点（文字转 sr-only，读屏仍念得出来），动作按钮收一号。 */
+/* ≤480px：动作常显并独占一行，标签只留色点（文字转 sr-only，读屏仍念得出来）。 */
 @media (max-width: 480px) {
   .tasks-bar-count { flex-basis: 100%; margin-inline-start: 0; }
   .tasks-detail-grid { grid-template-columns: minmax(0, 1fr); }

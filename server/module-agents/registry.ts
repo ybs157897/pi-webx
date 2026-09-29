@@ -12,8 +12,7 @@ import type { AgentId } from './contracts';
 import type { KnowledgeAccess } from './knowledge';
 import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
 import { REQUIREMENTS_TOOL_NAMES, createRequirementsTools } from '../modules/requirements';
-import { WORKS_TOOL_NAMES, createWorksTools } from '../modules/works';
-import { LIFE_TOOL_NAMES, createLifeTools } from '../modules/life';
+import { ASSISTANT_TOOL_NAMES, createAssistantTools } from '../modules/assistant';
 
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
@@ -33,8 +32,7 @@ const definitions = new Map<AgentId, ModuleAgentDefinition>([
   ['codes', { id: 'codes', toolNameMap: {}, createTools: () => [] }],
   ['logs', { id: 'logs', toolNameMap: LOGS_TOOL_NAMES, createTools: createLogsTools }],
   ['requirements', { id: 'requirements', toolNameMap: REQUIREMENTS_TOOL_NAMES, createTools: createRequirementsTools }],
-  ['works', { id: 'works', toolNameMap: WORKS_TOOL_NAMES, createTools: createWorksTools }],
-  ['life', { id: 'life', toolNameMap: LIFE_TOOL_NAMES, createTools: createLifeTools }],
+  ['assistant', { id: 'assistant', toolNameMap: ASSISTANT_TOOL_NAMES, createTools: createAssistantTools }],
 ]);
 
 export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | undefined {

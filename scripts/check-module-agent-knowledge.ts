@@ -23,7 +23,7 @@ try {
     requirements: ensureBinding(store, 'default', 'requirements', 'requirements'),
     codes: ensureBinding(store, 'default', 'codes', 'codes'),
     logs: ensureBinding(store, 'default', 'logs', 'logs'),
-    works: ensureBinding(store, 'default', 'works', 'works'),
+    assistant: ensureBinding(store, 'default', 'assistant', 'assistant'),
   };
   const baseIds = new Set(Object.values(bindings).map((binding) => binding.homeBaseId));
   assert.equal(baseIds.size, 4, '四个 Agent 应绑定四个不同知识库');
@@ -40,7 +40,7 @@ try {
     requirements: createKnowledgeAccess(store, bindings.requirements),
     codes: createKnowledgeAccess(store, bindings.codes),
     logs: createKnowledgeAccess(store, bindings.logs),
-    works: createKnowledgeAccess(store, bindings.works),
+    assistant: createKnowledgeAccess(store, bindings.assistant),
   };
   const sentinelDocs: Record<string, { id: string }> = {};
   for (const [agent, api] of Object.entries(access)) {

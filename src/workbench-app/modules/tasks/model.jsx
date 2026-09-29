@@ -18,7 +18,7 @@ const TEXT = {
   scopeDone: '已完成',
   groupOverdue: '已逾期',
   groupToday: '今天',
-  groupLater: '以后',
+  groupLater: '稍后',
   groupDone: '已完成',
   emptyAll: '还没有待办',
   emptyAllHint: '在上面写一行，回车就记下了',
@@ -63,10 +63,10 @@ const PRIORITY_RANK = { high: 0, normal: 1, low: 2 }
 /** 星期词 → `Date.getDay()`：周一 1…周六 6、周日/周天 0。 */
 const WEEKDAY_WORDS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 六: 6, 日: 0, 天: 0 }
 
-/** 分组顺序：紧迫度从高到低，已完成垫底——勾掉一条不会让上面的组跳位。 */
+/** 分组顺序：紧迫度从高到低，已完成垫底——勾掉一条不会让上面的组跳位。tone 直接做组头的 data-tone。 */
 const GROUPS = [
   { key: 'overdue', label: TEXT.groupOverdue, tone: 'danger' },
-  { key: 'today', label: TEXT.groupToday, tone: '' },
+  { key: 'today', label: TEXT.groupToday, tone: 'accent' },
   { key: 'later', label: TEXT.groupLater, tone: '' },
   { key: 'done', label: TEXT.groupDone, tone: '' },
 ]
@@ -220,6 +220,20 @@ function dueLabel(task, today) {
   return { text: `${delta} 天后`, tone: 'plain' }
 }
 
+/** 时长人话：不足一小时按分钟说，超过按「H 小时 M 分」。今日视图与待办行共用同一口径。 */
+function durationText(value) {
+  const total = Math.max(0, Math.round(Number(value) || 0))
+  if (total < 60) return `${total} 分钟`
+  const hours = Math.floor(total / 60)
+  const rest = total % 60
+  return rest ? `${hours} 小时 ${rest} 分` : `${hours} 小时`
+}
+
+/** 有意义的预计时长（正整数分钟）；没填或填坏时返回 null，不臆造数字。 */
+function durationOf(task) {
+  return Number.isInteger(task.durationMinutes) && task.durationMinutes > 0 ? task.durationMinutes : null
+}
+
 /** 同一个标签永远同一个色点（字符和取模，不随机）。 */
 function tagTone(tag) {
   let sum = 0
@@ -252,22 +266,79 @@ function firstNavigableRef(task, modules) {
 
 /* ------------------------------------------------------------------ 行组件 */
 
-/** 一行任务：勾选 + 标题（双击或按钮进编辑）+ 优先级/截止日/标签/关联 + 星标、删除。 */
+/** 一行任务：勾选 + 标题（双击或按钮进编辑）+ 元信息（优先级/截止/安排/时长/标签/关联）+ 动作区。 */
 function TaskRow({
   task, today, modules, editing, pending, editRef,
   onToggle, onToggleStar, onStartEdit, onEditTitle, onCommitEdit, onCancelEdit, onDelete, onNavigate, onDetails, onPlan,
 }) {
   const done = task.done === true
   const priority = PRIORITY[task.priority] ?? PRIORITY.normal
+  // 只有「高/低」值得占一行字：普通优先级是默认态，画出来只是噪声。
+  const showPriority = task.priority === 'high' || task.priority === 'low'
   const due = dueLabel(task, today)
+  const duration = durationOf(task)
   const tag = typeof task.tag === 'string' ? task.tag.trim() : ''
+  const note = typeof task.note === 'string' ? task.note.trim() : ''
   const refCount = Array.isArray(task.refs) ? task.refs.length : 0
   const linked = firstNavigableRef(task, modules)
   const isEditing = editing !== null && editing.id === task.id
   const busy = pending === task.id
+  // 行左缘竖条只留一条：逾期比置顶更急着被看见。
+  const edge = !done && urgencyOf(task, today) === 'overdue' ? 'is-overdue' : (!done && task.starred === true ? 'is-starred' : '')
+
+  // 元信息顺序 = 决策相关性；同一语义块内靠间距，跨块才画 1px 竖线。
+  const metaItems = []
+  if (showPriority) {
+    metaItems.push(['priority', 'priority', <span className={`task-prio ${priority.tone}`} title={`${priority.label}优先级`} key="priority">
+      <span className="task-dot" aria-hidden="true" />
+      {priority.label}
+    </span>])
+  }
+  metaItems.push(['due', 'due', <span className={`task-due ${due.tone}`} key="due">{due.text}</span>])
+  if (task.plannedDate) {
+    metaItems.push(['plan', 'plan', <span className="task-scheduled" key="plan">安排 {formatDay(task.plannedDate)}{task.startTime ? ` ${task.startTime}` : ''}</span>])
+  }
+  if (duration !== null) {
+    metaItems.push(['plan', 'duration', <span className="assistant-duration" key="duration">约 {durationText(duration)}</span>])
+  }
+  if (tag !== '') {
+    metaItems.push(['tag', 'tag', <span className="task-tag" title={`#${tag}`} key="tag">
+      <span className="task-tag-dot" data-tone={tagTone(tag)} aria-hidden="true" />
+      <span className="task-tag-text">#{tag}</span>
+    </span>])
+  }
+  if (refCount > 0) {
+    metaItems.push(['tag', 'refs', linked === null
+      ? (
+        <span className="task-refs" title={`${TEXT.refs} ${refCount} 条`} key="refs">
+          <IconLink size={12} />
+          {refCount}
+        </span>
+      )
+      : (
+        <button
+          type="button"
+          className="task-refs is-link"
+          key="refs"
+          title={`${TEXT.refs} ${refCount} 条 · 去${linked.module.label}`}
+          data-testid={linked.ref.type === 'requirements' ? 'task-requirement-ref' : undefined}
+          onClick={() => onNavigate(linked.module.id, linked.ref.type === 'requirements' ? { selectedId: linked.ref.id } : undefined)}
+        >
+          <IconLink size={12} />
+          {refCount}
+        </button>
+      )])
+  }
+  const meta = []
+  metaItems.forEach(([block, key, node], index) => {
+    if (index > 0 && metaItems[index - 1][0] !== block) meta.push(<span className="assistant-meta-sep" aria-hidden="true" key={`sep-${key}`} />)
+    meta.push(node)
+  })
+
+  const rowClass = ['task-row', 'assistant-row', done ? 'is-done' : '', edge].filter(Boolean).join(' ')
 
   return (
-    <li className={`task-row ${done ? 'is-done' : ''}`} data-testid="task-row" data-done={done ? 'true' : 'false'}>
+    <li className={rowClass} data-testid="task-row" data-done={done ? 'true' : 'false'}>
       <button
         type="button"
         className="task-check"
@@ -307,42 +378,13 @@ function TaskRow({
             <p className="task-title" title={task.title} onDoubleClick={() => onStartEdit(task)}>{task.title}</p>
           )}
 
-        <div className="task-meta">
-          <span className={`task-prio ${priority.tone}`} title={`${priority.label}优先级`}>
-            <span className="task-dot" aria-hidden="true" />
-            {priority.label}
-          </span>
-          <span className={`task-due ${due.tone}`}>{due.text}</span>
-          {task.plannedDate && <span className="task-scheduled">安排 {formatDay(task.plannedDate, 'md')}{task.startTime ? ` · ${task.startTime}` : ''}</span>}
-          {tag !== '' && (
-            <span className="task-tag" title={`#${tag}`}>
-              <span className="task-tag-dot" data-tone={tagTone(tag)} aria-hidden="true" />
-              <span className="task-tag-text">#{tag}</span>
-            </span>
-          )}
-          {refCount > 0 && (linked === null
-            ? (
-              <span className="task-refs" title={`${TEXT.refs} ${refCount} 条`}>
-                <IconLink size={12} />
-                {refCount}
-              </span>
-            )
-            : (
-              <button
-                type="button"
-                className="task-refs is-link"
-                title={`${TEXT.refs} ${refCount} 条 · 去${linked.module.label}`}
-                data-testid={linked.ref.type === 'requirements' ? 'task-requirement-ref' : undefined}
-                onClick={() => onNavigate(linked.module.id, linked.ref.type === 'requirements' ? { selectedId: linked.ref.id } : undefined)}
-              >
-                <IconLink size={12} />
-                {refCount}
-              </button>
-            ))}
-        </div>
+        {/* 备注只留一行：完整内容在详情弹窗里看，列表行不承担长文阅读。 */}
+        {note !== '' && <p className="assistant-note" title={note}>{note}</p>}
+
+        <div className="task-meta assistant-meta">{meta}</div>
       </div>
 
-      <div className="task-actions">
+      <div className="task-actions assistant-row-actions">
         {onPlan && !done && <button type="button" className="btn btn-sm task-plan" data-testid="task-plan-today" disabled={busy || task.plannedDate === today} onClick={() => onPlan(task)}>{task.plannedDate === today ? '已安排' : '安排今天'}</button>}
         {onDetails && <button type="button" className="btn btn-sm task-details" data-testid="task-details-open" onClick={() => onDetails(task)}>详情</button>}
         <IconButton
@@ -370,6 +412,6 @@ export {
   TEXT, PRIORITY, PRIORITY_WORDS, PRIORITY_RANK, WEEKDAY_WORDS,
   GROUPS, SCOPE_OPTIONS, TAG_TONES, parseDueWord, hasMarks,
   dueWord, captureToast, urgencyOf, inScope, compareOpen,
-  compareDone, dueLabel, tagTone, createdDay, firstRefModule,
-  firstNavigableRef, TaskRow,
+  compareDone, dueLabel, durationText, durationOf, tagTone, createdDay,
+  firstRefModule, firstNavigableRef, TaskRow,
 }

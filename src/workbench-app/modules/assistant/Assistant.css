@@ -1,0 +1,203 @@
+/*
+ * 我的助理（assistant）：事项列（今天 / 待办）+ 对话列 + 方案确认卡。
+ * 只消费 styles.css 的既有令牌；类前缀 assistant-（.assistant-head / .assistant-timeline 等
+ * 也归本模块的视图用，由 modules/today 与 modules/tasks 渲染）。
+ * 分区：1 工作区与页签 2 对话列 3 方案确认卡 4 响应式 5 动效。
+ */
+
+/* ================================================================ 1. 工作区 */
+
+.main-inner.assistant-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; max-width: 1600px; padding-bottom: var(--sp-5); }
+.assistant-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
+
+.assistant-workspace { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 420px); gap: var(--sp-4); }
+
+.assistant-mobile-tabs { display: none; }
+
+.assistant-items { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+
+/* 视图标题行 .assistant-head* 由今天 / 待办视图在 Today.css 中渲染（日期步进等细节归视图）。 */
+
+/* 页签：分段控件形态（不是下边框导航）。 */
+.assistant-tabs {
+  display: inline-flex;
+  flex: none;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+
+.assistant-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+  font-weight: 550;
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.assistant-tab:hover { background: var(--surface-3); color: var(--text-1); }
+.assistant-tab[aria-selected="true"] { background: var(--surface-0); color: var(--text-1); box-shadow: var(--shadow-1); }
+.assistant-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.assistant-tab-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-3);
+  color: var(--text-2);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.assistant-tab[aria-selected="true"] .assistant-tab-count { background: var(--accent-soft); color: var(--accent); }
+
+.assistant-panel { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-2) var(--sp-5) 0; }
+
+/* ================================================================ 2. 对话列 */
+
+.assistant-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-0); overflow: hidden; }
+.assistant-chat-body { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.assistant-chat-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 240px; overflow: hidden; }
+.assistant-chat-panel > div { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.assistant-chat-panel .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
+.assistant-chat-panel .ai-overlay-surface { background: var(--surface-0); }
+.assistant-chat-panel .aside-head .grow { min-width: 0; }
+.assistant-chat-panel .aside-sub { overflow-wrap: anywhere; }
+.assistant-chat-panel .chat-empty { padding: var(--sp-4); width: min(100%, 560px); }
+.assistant-chat-panel .composer { padding: var(--sp-3); }
+.assistant-chat-guide { color: var(--text-3); font-size: var(--fs-xs); }
+
+/* dock 存在时消双线：分隔交给方案卡自己的上边框。 */
+.assistant-chat[data-plan="open"] .composer { border-top: 0; }
+
+.assistant-error { flex: none; padding: var(--sp-2) var(--sp-3); color: var(--danger); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.assistant-error .btn { margin-left: var(--sp-2); }
+
+/* 窄列防溢出：正文元件（表格 / 代码）自己横滚，长词断行。 */
+.assistant-chat .chat-scroll :where(table, pre) { max-width: 100%; overflow-x: auto; }
+.assistant-chat .chat-scroll :where(p, li) { overflow-wrap: anywhere; }
+
+/* ================================================================ 3. 方案确认卡 */
+
+.assistant-plan-dock {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3) var(--sp-3);
+  border-top: 1px solid var(--line-1);
+  background: var(--surface-0);
+  /* 无 → 有时播一次进场（keyframes 来自 styles.css）。 */
+  animation: pop-in .18s ease;
+}
+
+.assistant-plan-head { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.assistant-plan-shield { display: inline-flex; flex: none; color: var(--text-3); }
+.assistant-plan-title { flex: none; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
+.assistant-plan-meta { min-width: 0; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.assistant-plan-more,
+.assistant-plan-expand { min-height: 24px; padding: 0 var(--sp-1); border: 0; background: transparent; font: inherit; font-size: var(--fs-xs); cursor: pointer; }
+.assistant-plan-more { flex: none; color: var(--accent); }
+.assistant-plan-expand { display: inline-flex; align-items: center; gap: 2px; margin-inline-start: auto; color: var(--text-2); }
+.assistant-plan-more:hover, .assistant-plan-expand:hover { color: var(--text-1); }
+.assistant-plan-chevron { transition: transform .15s ease; }
+.assistant-plan-expand[aria-expanded="true"] .assistant-plan-chevron { transform: rotate(180deg); }
+
+.assistant-plan-sub, .assistant-plan-hint { color: var(--text-3); font-size: var(--fs-xs); }
+.assistant-plan-hint { text-align: end; }
+.assistant-plan-memo { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; overflow-wrap: anywhere; }
+
+.assistant-plan-body { max-height: min(48vh, 380px); overflow-y: auto; }
+.assistant-plan-day + .assistant-plan-day { margin-top: var(--sp-2); }
+.assistant-plan-day-head { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) 0; }
+.assistant-plan-day-title { color: var(--text-3); font-size: var(--fs-xs); font-weight: 650; letter-spacing: .04em; white-space: nowrap; }
+.assistant-plan-day-rule { flex: 1 1 auto; height: 1px; background: var(--line-1); }
+.assistant-plan-list { list-style: none; margin: 0; padding: 0; }
+.assistant-plan-entry { display: grid; grid-template-columns: 92px minmax(0, 1fr); column-gap: var(--sp-2); padding: var(--sp-2) 0; }
+.assistant-plan-entry + .assistant-plan-entry { border-top: 1px solid var(--line-1); }
+.assistant-plan-entry-time { padding-top: 1px; color: var(--accent); font-size: var(--fs-xs); font-weight: 550; font-variant-numeric: tabular-nums; }
+.assistant-plan-entry-time.is-anytime { color: var(--text-3); font-weight: 400; }
+.assistant-plan-entry-main { min-width: 0; }
+.assistant-plan-entry-title { display: flex; align-items: baseline; gap: var(--sp-2); color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; overflow-wrap: anywhere; }
+.assistant-plan-entry-duration { flex: none; margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-xs); font-weight: 400; font-variant-numeric: tabular-nums; }
+.assistant-plan-entry-reason { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); line-height: 1.6; overflow-wrap: anywhere; }
+
+.assistant-plan-actions { display: flex; justify-content: flex-end; gap: var(--sp-2); }
+
+.assistant-plan-applied,
+.assistant-plan-error { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-md); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.assistant-plan-applied { background: var(--ok-soft); color: var(--ok-strong); }
+.assistant-plan-error { background: var(--danger-soft); color: var(--danger-strong); }
+.assistant-plan-applied .btn,
+.assistant-plan-error .btn { flex: none; margin-inline-start: auto; }
+
+/* 移动端「待确认」细条：只在 ≤640px 的事项视图里立起来（见第 4 节）。 */
+.assistant-plan-peek { display: none; }
+
+/* ================================================================ 4. 响应式 */
+
+@media (max-width: 1000px) {
+  .assistant-workspace { display: flex; flex-direction: column; overflow-y: auto; }
+  .assistant-items { flex: none; overflow: visible; }
+  .assistant-panel { overflow: visible; }
+  .assistant-chat { flex: none; min-height: 520px; }
+}
+
+@media (max-width: 640px) {
+  .main-inner.assistant-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
+  .assistant-main-inner > .page-head { flex-direction: row; align-items: center; }
+  .assistant-main-inner .page-title { font-size: var(--fs-lg); }
+  .assistant-main-inner .page-desc { font-size: var(--fs-xs); }
+
+  .assistant-mobile-tabs { display: flex; gap: var(--sp-2); }
+  .assistant-mobile-tabs [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+
+  .assistant-workspace[data-mobile-view="chat"] .assistant-items { display: none; }
+  .assistant-workspace[data-mobile-view="chat"] .assistant-chat { flex: 1; min-height: 0; }
+  /* 事项视图：对话列整体收起，只留「待确认」细条。 */
+  .assistant-workspace[data-mobile-view="items"] .assistant-chat { flex: none; min-height: 0; border: 0; background: transparent; }
+  .assistant-workspace[data-mobile-view="items"] .assistant-chat-body { display: none; }
+  .assistant-workspace[data-mobile-view="items"] .assistant-plan-peek {
+    display: flex;
+    position: fixed;
+    inset-inline: var(--sp-3);
+    bottom: calc(64px + env(safe-area-inset-bottom));
+    z-index: var(--z-drawer);
+    align-items: center;
+    justify-content: center;
+    min-height: 44px;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-pill);
+    background: var(--surface-0);
+    color: var(--accent);
+    font-size: var(--fs-sm);
+    font-weight: 550;
+    box-shadow: var(--shadow-2);
+    cursor: pointer;
+  }
+
+  .assistant-tab { height: 34px; }
+  .assistant-plan-entry { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
+  .assistant-plan-entry-time { padding-top: 0; }
+  .assistant-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
+  .assistant-chat-panel .chat-empty { padding: var(--sp-3); }
+  .assistant-chat-panel .composer { padding: var(--sp-2); }
+}
+
+@media (max-width: 390px) {
+  .assistant-plan-dock { padding-inline: var(--sp-2); }
+  .assistant-plan-entry-duration { margin-inline-start: var(--sp-2); }
+}

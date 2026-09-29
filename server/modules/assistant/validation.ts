@@ -23,7 +23,7 @@ function slot(task: Task): { date: string; start: string; end: string } | null {
 }
 
 /** 只让未完成事项占据时段；仅有计划日期的事项可自由安排。 */
-export function assertLifeTaskSchedule(task: Task, peers: readonly Task[]): void {
+export function assertTaskSchedule(task: Task, peers: readonly Task[]): void {
   const current = slot(task);
   if (!current || task.done === true) return;
   for (const peer of peers) {
@@ -35,7 +35,7 @@ export function assertLifeTaskSchedule(task: Task, peers: readonly Task[]): void
   }
 }
 
-export function assertLifeTaskShape(task: Task): void {
+export function assertTaskShape(task: Task): void {
   const current = slot(task);
   if (task.kind === 'fixed' && task.plannedDate != null && current === null) {
     throw new WorkbenchInputError('固定安排需要填写开始时间和结束时间');

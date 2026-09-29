@@ -65,7 +65,7 @@ const TEXT = {
 /** 链接 / 来源徽章的模块名：镜像服务端 MODULE_LABELS（前端不 import 服务端代码）。 */
 const LINK_LABELS = {
   tasks: '我的待办',
-  works: '工作助理',
+  plans: '安排建议',
   fixes: '问题修复',
   logs: '日志查询',
   requirements: '需求管理',
@@ -75,7 +75,7 @@ const LINK_LABELS = {
 
 /** 客户端反链扫描范围：全部数组模块（与 store.links() 对齐）。 */
 const LINK_SCAN_MODULES = [
-  'tasks', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge',
+  'tasks', 'plans', 'fixes', 'logs', 'requirements', 'codes', 'knowledge',
 ]
 const SOURCE_NONE = '__none__'
 

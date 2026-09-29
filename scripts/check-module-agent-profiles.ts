@@ -57,8 +57,7 @@ try {
     'requirements.yaml': yaml('requirements'),
     'codes.yaml': yaml('codes'),
     'logs.yaml': yaml('logs'),
-    'works.yaml': yaml('works'),
-    'life.yaml': yaml('life'),
+    'assistant.yaml': yaml('assistant'),
   });
   const first = await loadAgentProfiles(good);
   assert.deepEqual(errors(first), [], '所有合法 YAML 都应加载成功');
@@ -171,11 +170,12 @@ try {
   /* 仓库内真实配置：config/agents 四份文件可加载 */
   const real = await loadAgentProfiles(defaultAgentsConfigRoot());
   for (const id of AGENT_IDS) assert.equal(real.get(id)?.ok, true, `config/agents/${id}.yaml 应可加载`);
-  const realWorks = real.get('works');
-  if (realWorks?.ok) {
-    assert.equal(realWorks.profile.config.knowledge.homeBinding, 'works');
-    assert.equal(realWorks.profile.config.model?.provider, 'cmdc');
-    assert.ok(realWorks.profile.promptText.includes('工作助理 Agent'));
+  const realAssistant = real.get('assistant');
+  assert.ok(realAssistant?.ok === true, 'config/agents/assistant.yaml 应可加载');
+  if (realAssistant!.ok) {
+    assert.equal(realAssistant!.profile.config.knowledge.homeBinding, 'assistant');
+    assert.equal(realAssistant!.profile.config.model, undefined, '我的助理沿用用户默认模型');
+    assert.ok(realAssistant!.profile.promptText.includes('我的助理'));
   }
   const realLogs = real.get('logs');
   assert.ok(realLogs?.ok === true, 'config/agents/logs.yaml 应可加载');

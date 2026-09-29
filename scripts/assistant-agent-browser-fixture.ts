@@ -1,4 +1,4 @@
-/** Isolated, restartable Life Agent acceptance server with a scripted model and real Pi SDK tools. */
+/** Isolated, restartable 我的助理（assistant）acceptance server with a scripted model and real Pi SDK tools. */
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { cp, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
@@ -25,13 +25,13 @@ import type { StoredSession } from '../src/shared/protocol';
 import { todayISO } from '../server/workbench/schema.mjs';
 import { memorySettings } from './subagent-check-fixtures';
 
-const fixtureRoot = process.env.PI_WEBX_LIFE_FIXTURE_DIR || join(tmpdir(), `pi-webx-life-agent-fixture-${process.getuid?.() ?? 'local'}`);
+const fixtureRoot = process.env.PI_WEBX_ASSISTANT_FIXTURE_DIR || join(tmpdir(), `pi-webx-assistant-agent-fixture-${process.getuid?.() ?? 'local'}`);
 const agentDir = join(fixtureRoot, 'agent');
 const sessionDir = join(fixtureRoot, 'sessions');
 const configRoot = join(fixtureRoot, 'config', 'agents');
 const workspaceRoot = join(fixtureRoot, 'workspaces');
 const dbPath = join(fixtureRoot, 'workbench.sqlite');
-const port = Number(process.env.PI_WEBX_LIFE_FIXTURE_PORT ?? 18880);
+const port = Number(process.env.PI_WEBX_ASSISTANT_FIXTURE_PORT ?? 18879);
 const tomorrow = todayISO(new Date(Date.now() + 86_400_000));
 const nextFriday = (() => {
   const day = new Date();
@@ -55,7 +55,7 @@ for (const file of (await readdir(configRoot)).filter(name => name.endsWith('.ya
   const workspace = join(workspaceRoot, id);
   await mkdir(workspace, { recursive: true });
   config.workspace = workspace;
-  config.enabled = id === 'life';
+  config.enabled = id === 'assistant';
   await writeFile(path, stringify(config), 'utf8');
 }
 
@@ -65,12 +65,12 @@ const runtime = await ModelRuntime.create({
 const model = runtime.getModels('deepseek')[0];
 assert.ok(model, 'fixture SDK catalogue needs an offline model');
 runtime.hasConfiguredAuth = () => true;
-runtime.streamSimple = () => { throw new Error('network is forbidden in Life fixture'); };
+runtime.streamSimple = () => { throw new Error('network is forbidden in Assistant fixture'); };
 
 const store = new WorkbenchStore(dbPath);
 const profiles = await loadAgentProfiles(configRoot);
-const life = profiles.get('life');
-assert.ok(life?.ok && life.profile.config.enabled, `life Agent config unavailable: ${life && !life.ok ? life.error : 'missing'}`);
+const assistant = profiles.get('assistant');
+assert.ok(assistant?.ok && assistant.profile.config.enabled, `assistant Agent config unavailable: ${assistant && !assistant.ok ? assistant.error : 'missing'}`);
 
 const host = new PiHost({
   definitions: { read: async () => ({ schemaVersion: 1, revision: 1, path: join(fixtureRoot, 'definitions.json'), agents: [] }) },
@@ -81,16 +81,16 @@ const host = new PiHost({
 const originalCreate = host.create.bind(host);
 host.create = async options => {
   const hosted = await originalCreate({ ...options, provider: model.provider, model: model.id });
-  hosted.session.agent.getApiKey = () => 'life-fixture-no-provider';
+  hosted.session.agent.getApiKey = () => 'assistant-fixture-no-provider';
   hosted.session.agent.streamFunction = (_model, context, options) => {
     const messages = context.messages;
     const users = messages.filter(message => message.role === 'user');
     const lastUserIndex = messages.findLastIndex(message => message.role === 'user');
     const userText = JSON.stringify(messages[lastUserIndex] ?? '');
     const sinceUser = messages.slice(lastUserIndex + 1);
-    const contextResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'life_context');
-    const captureResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'life_capture');
-    const proposalResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'life_propose_plan');
+    const contextResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'assistant_context');
+    const captureResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'assistant_capture');
+    const proposalResult = sinceUser.find(message => message.role === 'toolResult' && message.toolName === 'assistant_propose_plan');
     let content: AssistantMessage['content'];
     let stopReason: AssistantMessage['stopReason'] = 'stop';
     if (users.length < 2 && !['猫粮', '物业费', '洗牙'].every(word => userText.includes(word))) {
@@ -99,12 +99,12 @@ host.create = async options => {
       content = [{ type: 'text', text: '这个验收场景请接着说：安排一下明天。' }];
     } else if (!contextResult) {
       stopReason = 'toolUse';
-      content = [{ type: 'toolCall', id: `life-context-${Date.now()}`, name: 'life_context', arguments: {} }];
+      content = [{ type: 'toolCall', id: `assistant-context-${Date.now()}`, name: 'assistant_context', arguments: {} }];
     } else if (contextResult.isError) {
-      content = [{ type: 'text', text: '读取生活事项失败，请稍后重试。' }];
+      content = [{ type: 'text', text: '读取待办失败，请稍后重试。' }];
     } else if (users.length < 2 && !captureResult) {
       stopReason = 'toolUse';
-      content = [{ type: 'toolCall', id: `life-capture-${Date.now()}`, name: 'life_capture', arguments: {
+      content = [{ type: 'toolCall', id: `assistant-capture-${Date.now()}`, name: 'assistant_capture', arguments: {
         entries: [
           { entryKey: 'cat-food', originalText: '买猫粮', title: '买猫粮', tag: '购物' },
           { entryKey: 'property-fee', originalText: '周五前交物业费', title: '交物业费', due: nextFriday, tag: '缴费' },
@@ -113,18 +113,18 @@ host.create = async options => {
       } }];
     } else if (users.length < 2) {
       content = [{ type: 'text', text: captureResult?.isError
-        ? '收集事项失败，请重试。'
-        : `已记下买猫粮、${nextFriday} 前交物业费和预约洗牙。买猫粮与洗牙没有截止日。你可以告诉我哪天有空，我会拟一份安排供你确认。` }];
+        ? '收集待办失败，请重试。'
+        : `已记下买猫粮、${nextFriday} 前交物业费和预约洗牙；没有日期的两项保持未定。你可以告诉我哪天有空，我会拟一份安排草稿供你确认。` }];
     } else if (!proposalResult) {
       const data = toolData(contextResult);
       const tasks = Array.isArray(data.tasks) ? data.tasks : [];
       const cat = tasks.find((item: any) => item.title === '买猫粮');
       const fee = tasks.find((item: any) => item.title === '交物业费');
       if (!cat || !fee) {
-        content = [{ type: 'text', text: '待办中还没有找到买猫粮和交物业费，请先告诉我这两件事。' }];
+        content = [{ type: 'text', text: '待办中还没有买猫粮和交物业费，请先告诉我这两件事。' }];
       } else {
         stopReason = 'toolUse';
-        content = [{ type: 'toolCall', id: `life-propose-${Date.now()}`, name: 'life_propose_plan', arguments: {
+        content = [{ type: 'toolCall', id: `assistant-propose-${Date.now()}`, name: 'assistant_propose_plan', arguments: {
           planKey: 'fixture-next-day',
           note: '留出路程、休息与临时事项的余量；点击确认后才正式安排。',
           entries: [
@@ -138,7 +138,7 @@ host.create = async options => {
     } else {
       content = [{ type: 'text', text: proposalResult.isError
         ? '安排草稿保存失败，请稍后重试。'
-        : `我拟了一份 ${tomorrow} 的安排：09:00 交物业费，10:00 买猫粮，中间留半小时余量。请在今日规划中确认或调整；现在还没有正式排期。` }];
+        : `我拟了一份 ${tomorrow} 的安排：09:00 交物业费，10:00 买猫粮，中间留半小时余量。请在「我的助理」里预览并确认；现在还没有正式排期。` }];
     }
     const message: AssistantMessage = {
       role: 'assistant', content, api: model.api, provider: model.provider, model: model.id,
@@ -190,8 +190,11 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 const server = app.listen(port, '127.0.0.1');
 await once(server, 'listening');
 const detach = attachWebSocketGateway(server, host);
-console.log(`Life Agent fixture: http://127.0.0.1:${(server.address() as { port: number }).port}`);
-console.log(`Data: ${fixtureRoot}; try "买猫粮、周五前交物业费、找时间预约洗牙" then "安排一下明天"`);
+console.log(`Assistant Agent fixture: http://127.0.0.1:${(server.address() as { port: number }).port}`);
+console.log(`Data: ${fixtureRoot}`);
+console.log(`验收步骤：先在「我的助理」输入“买猫粮、${nextFriday} 前交物业费、找时间预约洗牙”，再输入“安排一下明天”。`);
+console.log(`预期：两条无日期事项保持未定；第二轮只生成 ${tomorrow} 09:00-09:30 / 10:00-10:30 的草稿，点确认前待办排期不变。`);
+console.log('只启用了 assistant 一份 Agent 配置；模型回合由脚本扮演，不会访问网络。');
 let closing = false;
 const close = async () => {
   if (closing) return;

@@ -2,7 +2,7 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { WorkbenchInputError, WorkbenchStore } from './store';
 import { importRequirementTasks } from '../modules/requirements/import-tasks';
-import { applyLifePlan, discardLifePlan } from '../modules/life/service';
+import { applyAssistantPlan, discardAssistantPlan } from '../modules/assistant/service';
 
 function param(request: Request, key: string): string {
   const value = request.params[key];
@@ -15,7 +15,7 @@ function assertNoSessionClaim(module: string, fields: unknown): void {
   }
   if (module === 'tasks' && fields !== null && typeof fields === 'object'
     && ['captureSessionId', 'captureEntryKey', 'captureFingerprint'].some(key => Object.hasOwn(fields, key))) {
-    throw new WorkbenchInputError('待办收集来源只能由生活秘书记录');
+    throw new WorkbenchInputError('待办收集来源只能由我的助理记录');
   }
 }
 
@@ -73,31 +73,31 @@ export function createWorkbenchRouter(store: WorkbenchStore): Router {
     response.json(importRequirementTasks(store, param(request, 'id'), request.body));
   });
 
-  router.post('/life/plans/:id/apply', (request, response) => {
-    response.json(applyLifePlan(store, param(request, 'id'), request.body));
+  router.post('/plans/:id/apply', (request, response) => {
+    response.json(applyAssistantPlan(store, param(request, 'id'), request.body));
   });
 
-  router.delete('/life/plans/:id', (request, response) => {
-    response.json(discardLifePlan(store, param(request, 'id')));
+  router.delete('/plans/:id', (request, response) => {
+    response.json(discardAssistantPlan(store, param(request, 'id')));
   });
 
   router.post('/:module', (request, response) => {
     const module = param(request, 'module');
-    if (module === 'lifePlans') throw new WorkbenchInputError('生活安排建议只能由生活秘书生成');
+    if (module === 'plans') throw new WorkbenchInputError('安排建议只能由我的助理生成');
     assertNoSessionClaim(module, request.body);
     response.json({ record: store.addRecord(module, request.body) });
   });
 
   router.patch('/:module/:id', (request, response) => {
     const module = param(request, 'module');
-    if (module === 'lifePlans') throw new WorkbenchInputError('生活安排建议只能通过确认接口应用');
+    if (module === 'plans') throw new WorkbenchInputError('安排建议只能通过确认接口应用');
     assertNoSessionClaim(module, request.body);
     response.json({ record: store.updateRecord(module, param(request, 'id'), request.body) });
   });
 
   router.delete('/:module/:id', (request, response) => {
     const module = param(request, 'module');
-    if (module === 'lifePlans') throw new WorkbenchInputError('生活安排建议只能通过取消接口删除');
+    if (module === 'plans') throw new WorkbenchInputError('安排建议只能通过取消接口删除');
     store.removeRecord(module, param(request, 'id'));
     response.json({ ok: true });
   });

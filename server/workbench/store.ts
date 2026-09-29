@@ -4,8 +4,7 @@ import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ARRAY_MODULES, emptyState, demoState, validateFields } from './schema.mjs';
-import { assertWorkScheduleRecord } from '../modules/works/validation';
-import { assertLifeTaskSchedule, assertLifeTaskShape } from '../modules/life/validation';
+import { assertTaskSchedule, assertTaskShape } from '../modules/assistant/validation';
 
 type ArrayModule = typeof ARRAY_MODULES[number];
 type RecordRow = Record<string, unknown> & { id: string };
@@ -56,6 +55,37 @@ function parseRecord(payload: string): RecordRow {
   return JSON.parse(payload) as RecordRow;
 }
 
+/**
+ * 旧 works 记录 → tasks 记录：排期并入计划字段（有完整时段视为固定安排），
+ * 状态映射到 done，其余字段按待办默认值补齐。转换结果仍走 tasks 校验。
+ */
+function legacyWorkToTask(work: RecordRow): RecordRow {
+  const start = typeof work.startTime === 'string' && work.startTime !== '' ? work.startTime : null;
+  const end = typeof work.endTime === 'string' && work.endTime !== '' ? work.endTime : null;
+  const done = work.status === 'done';
+  const updatedAt = typeof work.updatedAt === 'string' ? work.updatedAt : new Date().toISOString();
+  const createdAt = typeof work.createdAt === 'string' ? work.createdAt : updatedAt;
+  const tags = Array.isArray(work.tags) ? work.tags : [];
+  const clean = input(() => validateFields('tasks', {
+    title: typeof work.title === 'string' && work.title.trim() !== '' ? work.title : '旧工作记录',
+    note: typeof work.note === 'string' ? work.note : '',
+    done,
+    due: null,
+    plannedDate: typeof work.scheduledDate === 'string' ? work.scheduledDate : null,
+    startTime: start,
+    endTime: end,
+    kind: start !== null && end !== null ? 'fixed' : 'flexible',
+    durationMinutes: 30,
+    priority: 'normal',
+    tag: typeof tags[0] === 'string' ? tags[0] : '',
+    originalText: '',
+    refs: Array.isArray(work.refs) ? work.refs : [],
+    starred: work.starred === true,
+    tags: [],
+  }));
+  return { id: work.id, ...clean, createdAt, updatedAt, doneAt: done ? updatedAt : null };
+}
+
 function normalizeImport(raw: unknown): WorkbenchState {
   if (!isObject(raw)) throw new WorkbenchInputError('文件不是工作台数据对象');
   const source = isObject(raw.data) ? raw.data : raw;
@@ -87,10 +117,42 @@ function normalizeImport(raw: unknown): WorkbenchState {
     });
   }
 
-  for (const work of state.works) assertWorkScheduleRecord(work, state.works);
+  // 旧导出兼容：works 数组并入 tasks，lifePlans 数组改挂 plans；两个旧键都只是
+  // 键名不同，记录本身仍是同一套字段，因此只做映射，不做双写。
+  const legacyWorks = source.works;
+  if (legacyWorks !== undefined && !Array.isArray(legacyWorks)) throw new WorkbenchInputError('缺少 works 记录数组');
+  const legacyPlans = source.lifePlans;
+  if (legacyPlans !== undefined && !Array.isArray(legacyPlans)) throw new WorkbenchInputError('缺少 lifePlans 记录数组');
+
+  const taskIds = new Set(state.tasks.map(task => task.id));
+  const workIds = new Set<string>();
+  for (const value of (legacyWorks ?? []) as unknown[]) {
+    if (!isObject(value) || typeof value.id !== 'string' || workIds.has(value.id)) {
+      throw new WorkbenchInputError('works 含有无效或重复的记录 ID');
+    }
+    workIds.add(value.id);
+    const task = legacyWorkToTask({ ...value, id: value.id });
+    if (taskIds.has(task.id)) task.id = randomUUID();
+    taskIds.add(task.id);
+    state.tasks.push(task);
+  }
+
+  const planIds = new Set(state.plans.map(plan => plan.id));
+  for (const plan of (legacyPlans ?? []) as unknown[]) {
+    if (!isObject(plan) || typeof plan.id !== 'string' || planIds.has(plan.id)) {
+      throw new WorkbenchInputError('plans 含有无效或重复的记录 ID');
+    }
+    input(() => validateFields('plans', plan));
+    planIds.add(plan.id);
+    const row = structuredClone(plan) as RecordRow;
+    if (typeof row.createdAt !== 'string') row.createdAt = new Date().toISOString();
+    if (typeof row.updatedAt !== 'string') row.updatedAt = row.createdAt;
+    state.plans.push(row);
+  }
+
   for (const task of state.tasks) {
-    assertLifeTaskShape(task);
-    assertLifeTaskSchedule(task, state.tasks);
+    assertTaskShape(task);
+    assertTaskSchedule(task, state.tasks);
   }
   const captures = new Set<string>();
   for (const task of state.tasks) {
@@ -152,6 +214,7 @@ export class WorkbenchStore {
       CREATE INDEX IF NOT EXISTS workbench_records_module_seq ON workbench_records(module, seq);
     `);
     this.migrateLegacyKnowledge();
+    this.migrateLegacyModules();
   }
 
   private getArrayRecord(module: string, id: string): RecordRow | null {
@@ -176,6 +239,31 @@ export class WorkbenchStore {
       const baseId = this.ensureLegacyBase();
       const update = this.db.prepare('UPDATE workbench_records SET payload = ? WHERE module = ? AND id = ?');
       for (const row of legacy) update.run(JSON.stringify({ ...row.record, knowledgeBaseId: baseId, folderId: '' }), 'knowledge', row.id);
+    })();
+  }
+
+  /**
+   * works / lifePlans 两个旧模块合并进 tasks / plans：works 记录逐条转成待办，
+   * lifePlans 只改模块键，最后删掉旧键与 works 的幂等绑定表。全部步骤在同一个
+   * sqlite 事务里，任何一条失败整体回滚；数据已经迁移过时三步都是空操作。
+   */
+  private migrateLegacyModules(): void {
+    const works = this.db.prepare("SELECT id, payload FROM workbench_records WHERE module = 'works'").all() as Array<{ id: string; payload: string }>;
+    const legacyPlans = this.db.prepare("SELECT count(*) AS total FROM workbench_records WHERE module = 'lifePlans'").get() as { total: number };
+    const bindings = this.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'works_schedule_entries'").get() as { name: string } | undefined;
+    if (works.length === 0 && legacyPlans.total === 0 && bindings === undefined) return;
+    this.db.transaction(() => {
+      const insert = this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)');
+      const taskIds = new Set((this.db.prepare("SELECT id FROM workbench_records WHERE module = 'tasks'").all() as Array<{ id: string }>).map(row => row.id));
+      for (const row of works) {
+        const task = legacyWorkToTask(parseRecord(row.payload));
+        if (taskIds.has(task.id)) task.id = randomUUID();
+        taskIds.add(task.id);
+        insert.run('tasks', task.id, JSON.stringify(task));
+      }
+      this.db.prepare("UPDATE workbench_records SET module = 'plans' WHERE module = 'lifePlans'").run();
+      this.db.prepare("DELETE FROM workbench_records WHERE module = 'works'").run();
+      this.db.exec('DROP TABLE IF EXISTS works_schedule_entries');
     })();
   }
 
@@ -315,10 +403,9 @@ export class WorkbenchStore {
     if (module === 'knowledge' && isObject(fields) && typeof fields.body === 'string') {
       record.refs = this.knowledgeRefs(fields.body, record.id, String(record.knowledgeBaseId), refsOf(record));
     }
-    if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
     if (module === 'tasks') {
-      assertLifeTaskShape(record);
-      assertLifeTaskSchedule(record, this.listRecords('tasks'));
+      assertTaskShape(record);
+      assertTaskSchedule(record, this.listRecords('tasks'));
     }
     this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
       .run(module, record.id, JSON.stringify(record));
@@ -339,10 +426,9 @@ export class WorkbenchStore {
     if (module === 'knowledge' && (typeof clean.body === 'string' || typeof clean.knowledgeBaseId === 'string')) {
       record.refs = this.knowledgeRefs(String(record.body ?? ''), id, String(record.knowledgeBaseId), refsOf(record));
     }
-    if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
     if (module === 'tasks') {
-      assertLifeTaskShape(record);
-      assertLifeTaskSchedule(record, this.listRecords('tasks'));
+      assertTaskShape(record);
+      assertTaskSchedule(record, this.listRecords('tasks'));
     }
     if (module === 'tasks' && clean.done !== undefined) record.doneAt = clean.done ? new Date().toISOString() : null;
     if (STAMPED_MODULES.has(module)) {
@@ -410,7 +496,7 @@ export class WorkbenchStore {
       "SELECT module, payload FROM workbench_records WHERE payload LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?",
     ).all(like, limit * 2) as RecordPayloadRow[];
     for (const row of rows) {
-      if (row.module === 'lifePlans') continue;
+      if (row.module === 'plans') continue;
       const record = parseRecord(row.payload);
       hits.push(hitOf(row.module, record));
     }
@@ -471,14 +557,14 @@ export class WorkbenchStore {
   /**
    * 合并写界面偏好（白名单键，防止把任意 JSON 塞进 meta 表）。
    * 键清单与前端模块一一对齐：theme / density 全局外观，transcriptView AI 对话的工作
-   * 步骤展示模式，panelOpen AI 面板默认开合，worksView / tasksScope 两个模块的视图，
+   * 步骤展示模式，panelOpen AI 面板默认开合，tasksScope 模块的视图，
    * kbSelectedId / kbView 知识库的选中条目与编辑/预览视图——后两个漏在白名单外会被静默
    * 丢弃，用户刷新后必然丢状态。
    */
   writePrefs(patch: unknown): Record<string, unknown> {
     if (!isObject(patch)) throw new WorkbenchInputError('偏好需要是对象');
     const allowed = new Set([
-      'theme', 'density', 'transcriptView', 'panelOpen', 'worksView', 'tasksScope', 'kbSelectedId', 'kbView', 'kbBaseId', 'kbStage',
+      'theme', 'density', 'transcriptView', 'panelOpen', 'tasksScope', 'kbSelectedId', 'kbView', 'kbBaseId', 'kbStage',
     ]);
     const merged = { ...this.readPrefs() };
     for (const [key, value] of Object.entries(patch)) {

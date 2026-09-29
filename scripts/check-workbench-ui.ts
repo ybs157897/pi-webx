@@ -1,5 +1,5 @@
 /**
- * 工作台界面验收（v2，2026-09 重塑版）：把七个模块 + AI 面板正文渲染钉在 SSR 产物上。
+ * 工作台界面验收（v2，2026-09 重塑版）：把八个模块 + AI 面板正文渲染钉在 SSR 产物上。
  *
  * 写法照 `scripts/check-task-panel.ts`：真实组件进 `renderToStaticMarkup`，喂构造好的假数据，
  * 断言只认 DOM 证据。与 v1 的差别：模块们各自 `import './X.css'`（模块样式私有化），
@@ -8,8 +8,8 @@
  *
  * 覆盖（对应 docs/workbench-redesign.md 第 4 节逐模块规格）：
  *   1. 我的主页是指挥台 widget 板：`data-widget` 六件套 + 空库引导只走 `welcome`；
- *   2. 我的待办：无默认截止日的捕获 + 全量/未安排/到期/完成筛选；生活规划另有门禁；
- *   3. 工作助理：独立规划对话和排期；原看板与列表保留为工作清单；
+ *   2. 我的待办：无默认截止日的捕获 + 全量/未安排/到期/完成筛选；时间轴与认知分组另有门禁；
+ *   3. 我的助理：今天 / 待办两页签 + 常驻独立 Agent，待办按紧迫度分组（已逾期/今天/稍后/已完成）；
  *   4. 问题修复是列表（用户定调）：密集表格 + 行内状态 + 关联回链；
  *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
  *   6. 需求管理默认中央对话，历史记录保留两栏列表和 markdown 阅读区；
@@ -32,9 +32,9 @@ import { createElement as h } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import Dashboard from '../src/workbench-app/modules/Dashboard.jsx';
-import Tasks from '../src/workbench-app/modules/Tasks.jsx';
-import Works from '../src/workbench-app/modules/Works.jsx';
-import WorkRecords from '../src/workbench-app/modules/works/Records.jsx';
+import Tasks from '../src/workbench-app/modules/tasks/index.jsx';
+import AssistantWorkspace from '../src/workbench-app/modules/assistant/index.jsx';
+import AssistantChat from '../src/workbench-app/modules/assistant/AssistantChat.jsx';
 import Fixes from '../src/workbench-app/modules/Fixes.jsx';
 import Logs from '../src/workbench-app/modules/Logs.jsx';
 import Requirements from '../src/workbench-app/modules/Requirements.jsx';
@@ -55,9 +55,7 @@ import { todayISO } from '../src/workbench-app/util.mjs';
 import './check-capability-tools';
 import './check-module-agent-settings-ui';
 import './check-requirements-ui';
-import './check-works-planning-ui';
-import './check-life-secretary-ui';
-import './check-life-navigation';
+import './check-assistant-ui.tsx';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
@@ -123,11 +121,7 @@ function fakeData(): Record<string, unknown> {
       { id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', title: '评审交互稿', done: false, due: TOMORROW, priority: 'normal', tag: 'AI', tags: ['AI'], refs: [{ type: 'requirements', id: REQ_B }], createdAt: `${YESTERDAY}T09:00:00.000Z` },
       { id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', title: '清理 dist', done: true, due: TODAY, priority: 'low', tag: '杂务', tags: [], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z` },
     ],
-    works: [
-      { id: 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', title: '指挥台外壳重构', note: '顶栏 + 左导航 + AI 副驾 + 命令面板', status: 'doing', tags: ['前端'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T10:00:00.000Z` },
-      { id: 'ffffffff-ffff-4fff-8fff-ffffffffffff', title: 'SQLite 关联字段落地', note: 'tags / refs / starred 与搜索端点', status: 'done', tags: ['后端'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:30:00.000Z` },
-      { id: '12121212-1212-4212-8212-121212121212', title: '模块逐个重塑验收', note: '7 个模块过一遍 ego 截图', status: 'todo', tags: ['验收'], refs: [{ type: 'fixes', id: FIX_A }], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
-    ],
+    plans: [],
     fixes: [
       { id: FIX_A, title: 'AI 面板断线后不会自愈', priority: 'high', status: 'doing', note: '旧 session 失效后自动开新会话', tags: ['bug', 'AI'], refs: [{ type: 'tasks', id: TASK_A }], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${TODAY}T08:00:00.000Z` },
       { id: '13131313-1313-4313-8313-131313131313', title: '侧栏品牌名连写', priority: 'normal', status: 'done', note: '', tags: ['界面'], refs: [], createdAt: `${YESTERDAY}T09:00:00.000Z`, updatedAt: `${YESTERDAY}T09:00:00.000Z` },
@@ -171,7 +165,7 @@ const data = fakeData();
 
   // 空库判定是双条件（empty 标志 + 确无记录），传真空数据才该出引导。
   const blank: Record<string, unknown> = {
-    tasks: [], works: [], fixes: [], logs: [], requirements: [], codes: [],
+    tasks: [], plans: [], fixes: [], logs: [], requirements: [], codes: [],
   };
   const emptyMarkup = render(Dashboard, blank, { empty: true, onLoadDemo: async () => {} });
   assert.ok(emptyMarkup.includes('data-widget="welcome"'), '空库应只出引导 widget');
@@ -203,33 +197,34 @@ const data = fakeData();
     '快速捕获语法解析未落地');
 }
 
-/* ================================================== 3. 工作助理：看板 / 列表双视图 */
+/* ================================================== 3. 我的助理：今天 / 待办两页签 + 常驻对话 */
 
 {
-  const planner = render(Works, data);
-  assert.ok(planner.includes('data-testid="works-agent-chat"') && planner.includes('data-agent-id="works"'), '工作助理应直接打开独立规划 Agent');
-  assert.ok(planner.includes('data-testid="works-agenda"'), '规划对话应显示真实工作安排');
-  assert.ok(planner.includes('data-testid="works-records-tab"'), '应保留旧工作清单入口');
-  const kanban = render(WorkRecords, data);
-  assert.ok(kanban.includes('data-module="works"'), '助理缺 data-module');
-  assert.ok(kanban.includes('data-testid="works-board"'), '默认应是看板');
-  assert.equal(occurrences(kanban, 'data-testid="works-col"'), 3, '看板应三列');
-  assert.equal(occurrences(kanban, 'data-testid="work-card"'), 3, '看板卡数应等于记录数');
-  assert.ok(kanban.includes('draggable="true"'), '卡片应可拖动改状态');
-  assertNoLeaks(kanban, '助理看板');
+  // 对话列由 App 以 `chat` 节点注入，这里把真实 AssistantChat 塞进去，钉住 App 的接线方式。
+  const chat = h(AssistantChat, { data, themeMode: 'light', stepsMode: 'compact', refresh: async () => {}, mutate, notify });
+  const today = render(AssistantWorkspace, data, { chat });
+  assert.ok(today.includes('data-testid="assistant-workspace"'), '助理缺工作区根');
+  assert.ok(today.includes('data-testid="assistant-agent-chat"') && today.includes('data-agent-id="assistant"'), '我的助理应直接打开独立 Agent');
+  assert.ok(today.includes('data-testid="assistant-tab-today"') && today.includes('data-testid="assistant-tab-tasks"') && today.includes('data-testid="assistant-panel"'), '助理缺今天 / 待办页签或内容面板');
+  assert.ok(today.includes('data-testid="assistant-tab-today" aria-selected="true"'), '默认页签应是今天的安排');
+  assert.ok(today.includes('data-testid="today-planner"') && today.includes('data-testid="today-date"'), '今天页签缺今日安排与日期切换');
+  assertNoLeaks(today, '我的助理');
 
-  const list = render(WorkRecords, data, { prefs: { worksView: 'list' } });
-  assert.ok(list.includes('data-testid="works-table"'), 'list 偏好应是表格视图');
-  assert.ok(!list.includes('data-testid="works-board"'), 'list 视图不该渲染看板');
-  assert.equal(occurrences(list, 'data-testid="work-row"'), 3, '列表行数应等于记录数');
+  const tasks = render(AssistantWorkspace, data, { chat, navigationTarget: { view: 'tasks' } });
+  assert.ok(tasks.includes('data-testid="assistant-tab-tasks" aria-selected="true"'), 'navigationTarget 应落到待办页签');
+  assert.ok(tasks.includes('data-testid="tasks-capture"'), '待办页签缺快速捕获条');
+  assert.equal(occurrences(tasks, 'data-testid="task-row"'), 4, '待办页签应显示全部 4 条事项');
+  assert.equal(occurrences(tasks, 'data-testid="task-row" data-done="true"'), 1, '完成行应带 data-done');
+  for (const group of ['已逾期', '今天', '稍后', '已完成']) assert.ok(tasks.includes(group), `待办缺分组：「${group}」`);
 
-  const worksSource = sourceOf('../src/workbench-app/modules/works/Records.jsx')
-    + sourceOf('../src/workbench-app/modules/works/model.jsx');
-  assert.ok(worksSource.includes('onDragStart') && worksSource.includes('onDrop'), '看板缺拖拽接线');
-  assert.ok(worksSource.includes("api.patchRecord('works'"), '拖拽落库未接线');
-
-  const emptyWorks = render(WorkRecords, { ...fakeData(), works: [] }, { empty: true });
-  assert.ok(emptyWorks.includes('data-testid="works-load-demo"'), '空库缺演示数据入口');
+  const tasksSource = sourceOf('../src/workbench-app/modules/tasks/index.jsx')
+    + sourceOf('../src/workbench-app/modules/tasks/model.jsx');
+  assert.ok(tasksSource.includes('parseQuickAdd'), '快速捕获语法解析未落地');
+  assert.ok(tasksSource.includes("api.patchRecord('tasks'"), '待办行内写入未接后端');
+  const assistantSource = sourceOf('../src/workbench-app/modules/assistant/index.jsx')
+    + sourceOf('../src/workbench-app/modules/assistant/AssistantChat.jsx');
+  assert.ok(assistantSource.includes("useModuleAgentChat('assistant')"), '助理对话必须使用 assistant 模块 Agent');
+  assert.ok(assistantSource.includes('PlanReview'), '方案确认卡未挂进对话列');
 }
 
 /* ================================================== 4. 问题修复：列表（用户定调） */
@@ -464,7 +459,7 @@ const data = fakeData();
 }
 
 console.log('workbench UI: knowledge bases, folders, document list, reading and links passed')
-console.log('workbench UI: 7 modules (widget board, capture, dual views, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
+console.log('workbench UI: 8 modules (widget board, assistant todos+today, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
 
 /* ================================================== 10. AI 对话浮层：全屏居中 + 正文同源 + 「问小台」失败兜底 */
 

@@ -55,15 +55,15 @@ try {
   const logs = await unbound('logs');
   const codes = await unbound('codes');
   const requirements = await unbound('requirements');
-  const works = await unbound('works');
+  const assistant = await unbound('assistant');
   assert.equal(logs.status, 200);
   assert.equal(logs.body.workspace, null);
   assert.equal(logs.body.workspacePath, join(temp, 'defaults/logs'));
   assert.equal(logs.body.workspaceDefaultPath, logs.body.workspacePath);
   assert.equal(codes.body.workspacePath, join(temp, 'defaults/codes'));
   assert.equal(requirements.body.workspacePath, join(temp, 'defaults/requirements'));
-  assert.equal(works.body.workspacePath, join(temp, 'defaults/works'));
-  assert.equal(new Set([logs.body.workspacePath, codes.body.workspacePath, requirements.body.workspacePath, works.body.workspacePath]).size, 4);
+  assert.equal(assistant.body.workspacePath, join(temp, 'defaults/assistant'));
+  assert.equal(new Set([logs.body.workspacePath, codes.body.workspacePath, requirements.body.workspacePath, assistant.body.workspacePath]).size, 4);
 
   const custom = join(temp, 'custom-logs');
   await mkdir(join(custom, 'nested'), { recursive: true });

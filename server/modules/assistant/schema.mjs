@@ -40,8 +40,8 @@ export function normalizePlanEntries(value) {
 }
 
 export const schema = {
-  lifePlans: {
-    title: { ...FIELDS.title, default: '生活安排建议' },
+  plans: {
+    title: { ...FIELDS.title, default: '安排建议' },
     sourceSessionId: { check: value => typeof value === 'string' && value.length > 0 && value.length <= 128, cast: value => value, required: true, message: '来源会话不合法' },
     planKey: { check: value => typeof value === 'string' && KEY_RE.test(value), cast: value => value, required: true, message: '规划标识不合法' },
     entries: { check: value => { try { normalizePlanEntries(value); return true } catch { return false } }, cast: normalizePlanEntries, required: true, message: '规划条目不合法' },

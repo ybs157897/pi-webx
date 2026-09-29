@@ -3,13 +3,13 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-29。新增生活秘书：我的待办与今日规划共享事项和独立 life Agent；共九个导航入口，业务实现按模块目录归位。
+更新日期：2026-09-29。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共八个导航入口，业务实现按模块目录归位。
 
 ## 总体架构
 
 ```
 浏览器
- ├─ /            工作台前端（src/workbench-app/，React，8 业务入口 + Agent 配置）
+ ├─ /            工作台前端（src/workbench-app/，React，7 业务入口 + Agent 配置）
  └─ /chat        聊天前端（src/App.tsx → src/app/，LobeHub 风格）
         │ SSE + POST
         ▼
@@ -17,7 +17,7 @@
  ├─ server/routes.ts            HTTP 面（提交门禁冻结，尽量别动）
  ├─ server/ws.ts                WebSocket
  ├─ server/pi/                  pi 会话宿主（进程内 SDK）
- ├─ server/modules/             工作台领域字段与日志/知识工具
+ ├─ server/modules/             工作台领域字段与模块工具（tasks / plans / requirements / logs / knowledge …）
  ├─ server/module-agents/        Agent 公共装配与作用域机制
  ├─ server/agent-team/          多智能体团队运行时
  ├─ server/agent-definitions/   用户子智能体定义存储
@@ -151,7 +151,7 @@
 | 模块独立工作区（默认目录、自定义绑定、真实路径与重叠校验） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
-| 模块注册表（createTools 工厂，life + works + requirements + logs + codes） | `server/module-agents/registry.ts` |
+| 模块注册表（createTools 工厂，assistant + requirements + logs + codes） | `server/module-agents/registry.ts` |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
@@ -167,13 +167,13 @@
 | 门禁 | `scripts/check-data-source-adapters.ts`（异构接口与插件）、`check-module-agent-http.ts`（幂等/并发/快照恢复）、`scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用）、`check-module-agent-mcp.ts`（A03/A04 服务端，stdio fixture 子进程） |
 | 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
 
-### 工作台（/，9 个导航入口）
+### 工作台（/，8 个导航入口）
 
 | 功能 | 位置 |
 | --- | --- |
-| 模块导航定义（9 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / life 生活秘书 / works 工作助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
-| 模块实现 | `src/workbench-app/modules/{dashboard,life,today,tasks,works,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；旧 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import |
-| Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker.ts`），`ModuleTabs.jsx` 模块卡片切换，`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
+| 模块导航定义（8 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / assistant 我的助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
+| 模块实现 | `src/workbench-app/modules/{dashboard,assistant,today,tasks,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；today / tasks 是 assistant 页签的内容组件；其余 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import。旧 `modules/{Tasks,Works}.jsx` 与 `modules/{life,works}/` 已随合并退役 |
+| Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker.ts`），`ModuleTabs.jsx` 模块卡片切换（四份注册 Agent：assistant / logs / requirements / codes，assistant 首位），`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
 | 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
@@ -192,37 +192,25 @@
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览需求与待办、编辑/勾选、键盘焦点和错误反馈 |
 | 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复 |
 | 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
-| 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
+| 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`shell/navigation.mjs`（tasks → assistant 的「待办」页签）、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
 | 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/幂等；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖真实 SSR DOM |
 
-### 生活秘书：我的待办与今日规划
+### 我的助理：待办与今天
 
-产品契约与验收方法见 `docs/architecture/life-secretary.md`。
-
-| 功能 | 位置 |
-| --- | --- |
-| 生活秘书入口与两个内部页签 | `src/workbench-app/modules/life/index.jsx`、`LifeChat.jsx`；侧栏 life，内含 today/tasks 页签，切换不卸载对话 |
-| 业务记录导航 | `src/workbench-app/shell/navigation.mjs` 将 tasks 数据链接与 today 跳转映射到 life 的对应页签；保留需求来源筛选。`check-life-navigation.tsx` 验证父菜单与映射 |
-| 事项收集、编辑、完成、安排 | `src/workbench-app/modules/tasks/`；原 `Tasks.jsx` 继续 re-export |
-| 日期安排与未完成事项 | `src/workbench-app/modules/today/`；从 tasks.plannedDate 派生，截止日仍为 due |
-| 方案预览和显式确认 | `src/workbench-app/modules/life/PlanReview.jsx`；只展示当前 life 会话草稿 |
-| 生活秘书工具、草稿确认与排期校验 | `server/modules/life/`；通过工作台 router/store 接入事务、版本校验与持久化 |
-| 事项字段、草稿字段 | `server/modules/tasks/schema.mjs`、`server/modules/life/schema.mjs`；schema 聚合 lifePlans，纳入导出导入 |
-| 独立配置与提示词 | `config/agents/life.yaml`、`config/agents/prompts/life.md`；Agent 配置页独立编辑 |
-| 自动门禁与隔离浏览器服务 | `scripts/check-life-secretary.ts`、`check-life-secretary-ui.tsx`、`check-life-agent.ts`、`life-agent-browser-fixture.ts` |
-
-### 工作助理 Agent 与时间安排
-
-流程、工具边界和验收方法见 `docs/architecture/works-agent-planning.md`。
+产品契约、合并决策与验收方法见 `docs/architecture/assistant.md`。
 
 | 功能 | 位置 |
 | --- | --- |
-| 规划对话和时间表入口 | `src/workbench-app/modules/works/index.jsx`、`WorksChat.jsx`、`Agenda.jsx`、`Planning.css`；桌面并列，窄屏切换对话/安排 |
-| 原看板/列表与手动改期 | `modules/works/Records.jsx`、`RecordDialogs.jsx`、`ScheduleFields.jsx`、`model.jsx`；保留已有 `works-*` testid，`schedule.mjs` 负责排期投影 |
-| 独立身份与提示词 | `config/agents/works.yaml`、`config/agents/prompts/works.md`；Agent 配置页可独立编辑，独立会话/工作目录/知识库沿用公共装配机制 |
-| 待办读取与排期工具 | `server/modules/works/tools.ts`、`schedule.ts`；`works_context` 返回本地时间、时区、未完成待办与已有安排，`works_schedule` 原子保存日期和时段、关联待办但不修改待办 |
-| 排期字段与校验 | `server/modules/works/schema.mjs`、`validation.ts`；`scheduledDate` / `startTime` / `endTime` 同组维护；HTTP、导入和 Agent 共用有效日期/时段/冲突校验 |
-| 门禁与隔离浏览器服务 | `scripts/check-works-agent.ts`、`check-works-planning-ui.tsx`；`npm run dev:works-fixture` 运行离线模型流但真实 SDK 工具和 SQLite 的隔离验收服务 |
+| 入口壳层与「今天 / 待办」两页签 | `src/workbench-app/modules/assistant/index.jsx`（`AssistantWorkspace`）：页签、计数徽章与 tablist 键盘导航；对话列由 `App.jsx` 以 `chat` 节点注入，切换不卸载会话。`mobile-view.jsx` 是窄屏「事项 / 对话」切换的 context 通道 |
+| 常驻对话列 | `modules/assistant/AssistantChat.jsx`：`useModuleAgentChat('assistant')` + `AIPanel` 的 embedded 形态，`assistant-agent-chat` / `data-agent-id="assistant"`；写入工具指纹变化后回读数据 |
+| 方案确认卡 | `modules/assistant/PlanReview.jsx`：挂在输入框上方的 dock，只展示本会话草稿；确认 `POST /api/workbench/plans/:id/apply`（带 `expectedUpdatedAt`，409 → 重新确认），取消 `DELETE /api/workbench/plans/:id`；展开区 `PlanEntries` 按天分组 |
+| 待办视图（收集 / 分组 / 筛选） | `src/workbench-app/modules/tasks/`：`index.jsx` 页面，`model.jsx` 快速捕获语法 `parseQuickAdd` 与认知分组（已逾期 / 今天 / 稍后 / 已完成）；`server/modules/tasks/schema.mjs` 是待办字段真相源 |
+| 今天视图（时间轴） | `src/workbench-app/modules/today/index.jsx`：有 `startTime` 的事项按时间进轴，`fixed` / `flexible` 只分节点符号；≥45 分钟空档画呼吸缝；「今天，时间待定」小节、遗留与候选默认折叠、概览三格同源派生 |
+| 业务记录导航 | `src/workbench-app/shell/navigation.mjs` 把 tasks / today 数据链接折算到 assistant 的对应页签并保留需求来源筛选；`recordNavigationLabel('tasks')` = 「我的待办」。UI 门禁 `scripts/check-assistant-ui.tsx` 验证侧栏单入口与映射 |
+| 独立身份与提示词 | `config/agents/assistant.yaml`、`config/agents/prompts/assistant.md`；工具白名单恰为 `assistant_context` / `assistant_capture` / `assistant_propose_plan`，无 bash/read/edit，独立会话、工作目录与知识库沿用公共装配机制 |
+| 工具、草稿确认与排期校验 | `server/modules/assistant/{tools,service,validation}.ts`、`schema.mjs`：生成草稿不改待办，确认时事务内整批校验并写入（时段成对、结束晚于开始、固定安排需完整时段、未完成事项不重叠）；`plans` 只能经确认接口应用或取消 |
+| 旧数据迁移与兼容 | `server/workbench/store.ts`：`works` 记录（`scheduledDate → plannedDate`、`status === 'done' → done`）、`lifePlans → plans`、`works_schedule_entries` 绑定表在启动迁移中并入，可重复执行；旧导出 JSON 同键兼容；旧 life / works 会话不迁移 |
+| 门禁与隔离浏览器服务 | `scripts/check-assistant-plans.ts`（服务端全链路与迁移）、`check-assistant-agent.ts`（真实 SDK 装配、works/life HTTP 404）、`check-assistant-ui.tsx`（SSR DOM）；`npm run dev:assistant-fixture` 起离线模型 + 真实 SDK/SQLite 的隔离验收服务 |
 
 ### 代码开发 IDE 与固定对话
 
@@ -254,6 +242,7 @@
 | `scripts/check-agent-definitions-ui.ts` | 读 `AgentDefinitionsSection.tsx` 源码：表单字段（COPY.*）顺序、隐藏字段禁现、无 `type="number"`；读其 `.module.css` 断言窄屏断点 |
 | `scripts/check-agent-team-journal.ts` | `team-journal.ts`、`team-runtime.ts` 及 `team-ops-*` 新文件源码**不得含 "durable"** 一词 |
 | `scripts/check-task-panel.ts` | 读 `TaskPanel.tsx` 源码与图标 path |
+| `scripts/check-assistant-ui.tsx` | 读 `modules/assistant/PlanReview.jsx` 源码：确认动作带 `expectedUpdatedAt`、409 映射成「重新确认」；DOM 侧钉 assistant-* / today-* / tasks-* / task-* testid 与折叠默认态 |
 | `scripts/check-agent-team-browser.mjs` | 带扩展名 import `team-runtime.ts` → 该文件不能改成目录 |
 | `src/ui/primitives/Menu.tsx` 等 | 带扩展名 import `icons/index.tsx` → barrel 必须留在这个路径 |
 | 所有 `scripts/check-*.ts` | 按旧路径 import 业务模块仍可用；源码文本断言应读取新目录的真实实现文件，不能只读兼容 re-export |
@@ -269,6 +258,7 @@
 ## 相关文档
 
 - 根 `AGENTS.md` — 必跑门禁与硬规则
+- `docs/architecture/assistant.md` — 我的助理（待办与今天）的契约、合并决策与验收
 - `docs/workbench-knowledge-protocol.md` — 知识库写入契约与读/写口子
 - `docs/workbench-ai-chat-compact-mode.md` — AI 对话全屏浮层形态与简洁模式输出规范
 - `docs/system-prompt-design.md` — 提示词分层设计

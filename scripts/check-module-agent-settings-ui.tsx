@@ -58,12 +58,12 @@ for (const testid of [
 assert.ok(markup.includes('readOnly=""') && markup.includes('选择文件夹'), '工作区路径仅供读取，必须使用系统文件夹选择器');
 assert.ok(markup.indexOf('data-testid="agent-settings-workspace-section"') < markup.indexOf('data-testid="agent-settings-prompt-section"'), '工作区应在提示词之前');
 assert.ok(markup.includes('/tmp/agent-workspaces/logs') && markup.includes('工作区变更仅对新对话生效'));
-assert.ok(markup.includes('role="tablist"') && (markup.match(/role="tab"/g) ?? []).length === 5,
-  '模块应呈现五个可访问的卡片 Tab');
-assert.equal((markup.match(/data-testid="agent-settings-tab"/g) ?? []).length, 5, '每个模块切换按钮应有 DOM 门禁标识');
+assert.ok(markup.includes('role="tablist"') && (markup.match(/role="tab"/g) ?? []).length === 4,
+  '模块应呈现四个可访问的卡片 Tab');
+assert.equal((markup.match(/data-testid="agent-settings-tab"/g) ?? []).length, 4, '每个模块切换按钮应有 DOM 门禁标识');
 assert.ok(markup.includes('role="tabpanel"') && markup.includes('aria-selected="true"'));
 for (const copy of [
-  '工作助理', '日志', '需求', '代码', '已禁用', '已实现', '系统提示词', '日志 Agent 提示词',
+  '我的助理', '日志', '需求', '代码', '已禁用', '已实现', '系统提示词', '日志 Agent 提示词',
   '跟随默认模型', 'Fixture Provider', 'Model A', own.name, own.description,
   shared.name, shared.description, '已选用', '未选用', '保存后用于新对话，已有对话保持原配置。',
 ]) assert.ok(markup.includes(copy), `真实编辑器缺少「${copy}」`);
@@ -92,16 +92,12 @@ assert.ok(missing.includes('role="alertdialog"'), '确认区应有语义角色')
 assert.ok(missing.includes('data-testid="agent-settings-keep-editing"'), '确认区应可回到编辑');
 assert.ok(missing.includes('data-testid="agent-settings-discard"'), '确认区应可明确放弃');
 assert.ok(render({ dirty: true, pending: { kind: 'switch', id: 'codes' } }).includes('切换 Agent'), '切换 Agent 应显示草稿确认');
-const worksView = { ...view, id: 'works', enabled: true, prompt: '工作助理独立提示词',
-  workspacePath: '/tmp/agent-workspaces/works', workspaceDefaultPath: '/tmp/agent-workspaces/works', skills: [] };
-const worksMarkup = render({ id: 'works', view: worksView, draft: copyDraft(worksView) });
-assert.ok(worksMarkup.includes('agent-settings-tab-works') && worksMarkup.includes('工作助理独立提示词'));
-assert.ok(worksMarkup.includes('/tmp/agent-workspaces/works') && worksMarkup.includes('已启用'));
-const lifeView = { ...view, id: 'life', enabled: true, prompt: '生活秘书独立提示词',
-  workspacePath: '/tmp/agent-workspaces/life', workspaceDefaultPath: '/tmp/agent-workspaces/life', skills: [] };
-const lifeMarkup = render({ id: 'life', view: lifeView, draft: copyDraft(lifeView) });
-assert.ok(lifeMarkup.includes('agent-settings-tab-life') && lifeMarkup.includes('生活秘书独立提示词'));
-assert.ok(lifeMarkup.includes('/tmp/agent-workspaces/life'), '生活秘书应展示独立工作目录');
+const assistantView = { ...view, id: 'assistant', enabled: true, prompt: '我的助理独立提示词',
+  workspacePath: '/tmp/agent-workspaces/assistant', workspaceDefaultPath: '/tmp/agent-workspaces/assistant', skills: [] };
+const assistantMarkup = render({ id: 'assistant', view: assistantView, draft: copyDraft(assistantView) });
+assert.ok(assistantMarkup.includes('agent-settings-tab-assistant') && assistantMarkup.includes('我的助理独立提示词'));
+assert.ok(assistantMarkup.includes('/tmp/agent-workspaces/assistant'), '我的助理应展示独立工作目录');
+assert.ok(assistantMarkup.indexOf('>我的助理<') < assistantMarkup.indexOf('>日志<'), '我的助理应是首位模块 Tab');
 const invalid = render({ errors: { prompt: '提示词不能为空。' }, dirty: true });
 assert.ok(invalid.includes('aria-invalid="true"') && invalid.includes('提示词不能为空。'));
 const customWorkspace = render({ view: { ...view, workspace: '/tmp/custom-agent', workspacePath: '/tmp/custom-agent' },
@@ -149,7 +145,7 @@ assert.ok(!sheet.includes('settings-open-agent-settings') && !sheet.includes('�
 const appSource = readFileSync(new URL('../src/workbench-app/App.jsx', import.meta.url), 'utf8');
 assert.ok(appSource.includes("id: 'agent-settings', label: 'Agent 配置'") && appSource.includes('Component: AgentSettingsPage'), 'App.MODULES 应注册配置页面');
 const modules = [
-  ...['dashboard', 'life', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge']
+  ...['dashboard', 'assistant', 'fixes', 'logs', 'requirements', 'codes', 'knowledge']
     .map(id => ({ id, label: id, desc: id, icon: () => h('svg') })),
   { id: 'agent-settings', label: 'Agent 配置', desc: '配置模块 Agent', icon: () => h('svg') },
 ];
@@ -160,7 +156,7 @@ assert.ok(nav.includes('Agent 配置') && nav.includes('aria-current="page"'), '
 const palette = renderToStaticMarkup(h(CommandPalette, {
   modules, theme: 'light', onNavigate: () => {}, onOpenSettings: () => {}, onToggleTheme: () => {}, onClose: () => {},
 }));
-assert.ok(palette.includes('Agent 配置'), '命令面板必须显示第九个模块');
+assert.ok(palette.includes('Agent 配置'), '命令面板必须显示第八个模块');
 assert.ok(appSource.includes('registerNavigationGuard={registerNavigationGuard}') && appSource.includes('navigationGuard.current?.(id)'), 'App 导航须经过配置页 guard');
 assert.ok(appSource.includes('openModule(MODULES[Number(event.key) - 1].id)'), '数字快捷键须经过统一导航');
 assert.ok(appSource.indexOf('setDrawerOpen(false)', appSource.indexOf('const openModule')) < appSource.indexOf('navigationGuard.current?.(id)'), '抽屉须在显示离页确认前关闭');

@@ -1,15 +1,15 @@
 schemaVersion: 1
-id: life
+id: assistant
 enabled: true
-promptFile: ./prompts/life.md
+promptFile: ./prompts/assistant.md
 skills: []
 tools:
-  - life.context
-  - life.capture
-  - life.proposePlan
+  - assistant.context
+  - assistant.capture
+  - assistant.proposePlan
 mcp: []
 knowledge:
-  homeBinding: life
+  homeBinding: assistant
   sharedReadBindings: []
 limits:
   maxRunningSessions: 1

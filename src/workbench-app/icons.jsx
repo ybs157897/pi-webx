@@ -45,14 +45,6 @@ export const IconTasks = icon(
   </>,
 )
 
-export const IconWorks = icon(
-  <>
-    <rect x="3.4" y="7.4" width="17.2" height="12.2" rx="3.2" />
-    <path d="M9 7.4V6a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v1.4" />
-    <path d="M3.4 12.4h17.2" />
-  </>,
-)
-
 export const IconTrend = icon(
   <>
     <path d="M3.6 15.8 9.2 10.2l3.6 3.6 7.6-7.6" />

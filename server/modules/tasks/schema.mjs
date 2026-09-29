@@ -7,7 +7,7 @@ export const schema = {
     due: { ...FIELDS.optionalDate, default: null, nullable: true },
     note: { ...FIELDS.note, default: '' },
     originalText: { ...FIELDS.note, default: '' },
-    // 生活秘书收集的幂等来源随任务导出；HTTP 通用写入口禁止客户端伪造。
+    // 我的助理收集的幂等来源随任务导出；HTTP 通用写入口禁止客户端伪造。
     captureSessionId: { check: value => typeof value === 'string' && value.length > 0 && value.length <= 128, cast: value => value, message: '收集会话不合法' },
     captureEntryKey: { check: value => typeof value === 'string' && /^[\w.:-]{1,80}$/.test(value), cast: value => value, message: '收集标识不合法' },
     captureFingerprint: { check: value => typeof value === 'string' && /^[0-9a-f]{64}$/.test(value), cast: value => value, message: '收集指纹不合法' },

@@ -5,7 +5,7 @@
  */
 
 /** 数组型模块 key（记录直接挂在 state 下）。 */
-export const ARRAY_MODULES = ['tasks', 'lifePlans', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders']
+export const ARRAY_MODULES = ['tasks', 'plans', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders']
 
 /** 全部模块 key。 */
 export const MODULES = [...ARRAY_MODULES]
@@ -13,8 +13,7 @@ export const MODULES = [...ARRAY_MODULES]
 /** 模块中文名（AI 工具与提示共用）。 */
 export const MODULE_LABELS = {
   tasks: '我的待办',
-  lifePlans: '生活安排建议',
-  works: '工作助理',
+  plans: '安排建议',
   fixes: '问题修复',
   logs: '日志查询',
   requirements: '需求管理',
@@ -26,8 +25,7 @@ export const MODULE_LABELS = {
 
 /** 各领域字段定义的聚合入口，公共字段校验由 schema-fields.mjs 提供。 */
 import { schema as tasksSchema } from '../modules/tasks/schema.mjs'
-import { schema as lifeSchema } from '../modules/life/schema.mjs'
-import { schema as worksSchema } from '../modules/works/schema.mjs'
+import { schema as plansSchema } from '../modules/assistant/schema.mjs'
 import { schema as fixesSchema } from '../modules/fixes/schema.mjs'
 import { schema as logsSchema } from '../modules/logs/schema.mjs'
 import { schema as requirementsSchema } from '../modules/requirements/schema.mjs'
@@ -38,8 +36,7 @@ export { todayISO } from './schema-fields.mjs'
 
 const MODULE_SCHEMA = {
   ...tasksSchema,
-  ...lifeSchema,
-  ...worksSchema,
+  ...plansSchema,
   ...fixesSchema,
   ...logsSchema,
   ...requirementsSchema,
@@ -136,12 +133,6 @@ export function demoState(now = new Date()) {
     { id: id('22b'), title: '评审「AI 帮记任务」的交互稿', done: false, due: today, priority: 'normal', tag: 'AI', tags: ['AI'], refs: [{ type: 'requirements', id: id('11b') }] },
     { id: id('22c'), title: '写周报：本周工作台进展', done: false, due: yesterday, priority: 'high', tag: '汇报', tags: ['汇报'] },
     { id: id('22d'), title: '清理 dist 目录的旧产物', done: true, due: yesterday, priority: 'low', tag: '杂务', tags: ['杂务'] },
-  ]
-
-  state.works = [
-    { id: id('33a'), title: '指挥台外壳重构', note: '顶栏 + 左导航 + AI 副驾 + 命令面板', status: 'doing', tags: ['前端'], refs: [] },
-    { id: id('33b'), title: 'SQLite 关联字段落地', note: 'tags / refs / starred 与搜索端点', status: 'done', tags: ['后端'], refs: [] },
-    { id: id('33c'), title: '模块逐个重塑验收', note: '7 个模块按新规格过一遍 ego 截图', status: 'todo', tags: ['验收'], refs: [] },
   ]
 
   state.fixes = [

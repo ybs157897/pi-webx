@@ -1,12 +1,10 @@
 import { logsAgentPanel } from '../modules/logs/index.jsx'
 import { requirementsAgentPanel } from '../modules/requirements/RequirementsChat.jsx'
-import { worksAgentPanel } from '../modules/works/WorksChat.jsx'
-import { lifeAgentPanel } from '../modules/life/LifeChat.jsx'
+import { assistantAgentPanel } from '../modules/assistant/AssistantChat.jsx'
 
 const panels = {
   requirements: requirementsAgentPanel,
-  works: worksAgentPanel,
-  life: lifeAgentPanel,
+  assistant: assistantAgentPanel,
   codes: { id: 'codes', title: '代码 Agent' },
   logs: logsAgentPanel,
 }

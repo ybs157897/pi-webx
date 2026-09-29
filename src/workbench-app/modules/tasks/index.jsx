@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import './Tasks.css'
 import { api } from '../../api.mjs'
 import { Card, ConfirmDialog, Empty, Segmented } from '../../ui.jsx'
-import { IconFlame, IconPlus, IconTasks } from '../../icons.jsx'
+import { IconChevronRight, IconFlame, IconPlus, IconTasks } from '../../icons.jsx'
 import { streakDays, todayISO } from '../../util.mjs'
 import TaskDetails from './TaskDetails.jsx'
 
@@ -22,9 +22,14 @@ import {
   compareOpen,
   compareDone,
   createdDay,
+  durationOf,
+  durationText,
   TaskRow
 } from './model.jsx'
 export { parseQuickAdd } from './model.jsx'
+
+/** 已完成有专门的组和默认折叠，不再占一个筛选档位（SCOPE_OPTIONS 的导出值保持不变）。 */
+const SCOPE_FILTERS = SCOPE_OPTIONS.filter(option => option.value !== 'done')
 
 export default function Tasks({
   data, mutate, notify, modules, navigate, navigationTarget, prefs, setPref, empty, onLoadDemo,
@@ -38,6 +43,7 @@ export default function Tasks({
   const [details, setDetails] = useState(null)
   const [query, setQuery] = useState('')
   const [pending, setPending] = useState('')
+  const [doneOpen, setDoneOpen] = useState(false)
   const [localScope, setLocalScope] = useState('all')
   const [scopeOverride, setScopeOverride] = useState(navigationTarget?.scope === 'all' ? 'all' : null)
   const [sourceRequirementId, setSourceRequirementId] = useState(typeof navigationTarget?.requirementId === 'string' ? navigationTarget.requirementId : '')
@@ -212,45 +218,43 @@ export default function Tasks({
   return (
     <div className="tasks" data-module="tasks">
       <div className="tasks-capture">
-        <Card bodyClassName="tasks-capture-body">
-          <form className="tasks-capture-form" data-testid="tasks-capture" onSubmit={submitCapture}>
-            <span className="tasks-capture-icon" aria-hidden="true"><IconPlus size={16} /></span>
-            <input
-              className="tasks-capture-input"
-              value={capture}
-              placeholder={TEXT.addPlaceholder}
-              aria-label={TEXT.addPlaceholder}
-              onChange={event => setCapture(event.target.value)}
-              onKeyDown={event => {
-                // 输入法组词中的回车只用来选字，别顺手把半截标题提交了。
-                if (event.key === 'Enter' && event.nativeEvent?.isComposing === true) event.preventDefault()
-              }}
-            />
-            <button type="submit" className="btn btn-primary btn-sm" disabled={pending === 'capture'}>
-              {TEXT.addButton}
-            </button>
-          </form>
-          <p className="tasks-capture-hint">
-            {hasMarks(parsedCapture)
-              ? (
-                <>
-                  <span className="tasks-capture-lead">{TEXT.marks}</span>
-                  {parsedCapture.matched.priority && (
-                    <span className={`tasks-mark ${PRIORITY[parsedCapture.priority].tone}`}>
-                      {PRIORITY[parsedCapture.priority].label}优先级
-                    </span>
-                  )}
-                  {parsedCapture.matched.tag && <span className="tasks-mark accent">#{parsedCapture.tag}</span>}
-                  {parsedCapture.matched.due && (
-                    <span className={`tasks-mark ${parsedCapture.due < today ? 'danger' : 'plain'}`}>
-                      {dueWord(parsedCapture.due, today)}
-                    </span>
-                  )}
-                </>
-              )
-              : TEXT.hint}
-          </p>
-        </Card>
+        <form className="tasks-capture-form" data-testid="tasks-capture" onSubmit={submitCapture}>
+          <span className="tasks-capture-icon" aria-hidden="true"><IconPlus size={16} /></span>
+          <input
+            className="tasks-capture-input"
+            value={capture}
+            placeholder={TEXT.addPlaceholder}
+            aria-label={TEXT.addPlaceholder}
+            onChange={event => setCapture(event.target.value)}
+            onKeyDown={event => {
+              // 输入法组词中的回车只用来选字，别顺手把半截标题提交了。
+              if (event.key === 'Enter' && event.nativeEvent?.isComposing === true) event.preventDefault()
+            }}
+          />
+          <button type="submit" className="btn btn-primary btn-sm" disabled={pending === 'capture'}>
+            {TEXT.addButton}
+          </button>
+        </form>
+        <p className="tasks-capture-hint">
+          {hasMarks(parsedCapture)
+            ? (
+              <>
+                <span className="tasks-capture-lead">{TEXT.marks}</span>
+                {parsedCapture.matched.priority && (
+                  <span className={`tasks-mark ${PRIORITY[parsedCapture.priority].tone}`}>
+                    {PRIORITY[parsedCapture.priority].label}优先级
+                  </span>
+                )}
+                {parsedCapture.matched.tag && <span className="tasks-mark accent">#{parsedCapture.tag}</span>}
+                {parsedCapture.matched.due && (
+                  <span className={`tasks-mark ${parsedCapture.due < today ? 'danger' : 'plain'}`}>
+                    {dueWord(parsedCapture.due, today)}
+                  </span>
+                )}
+              </>
+            )
+            : TEXT.hint}
+        </p>
       </div>
 
       {sourceFiltered && (
@@ -261,10 +265,10 @@ export default function Tasks({
       )}
 
       <div className="tasks-bar">
-        <Segmented options={SCOPE_OPTIONS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
-        <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 条 · 待办 {counts.open}</p>
+        <Segmented options={SCOPE_FILTERS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
+        <label className="tasks-search"><span className="sr-only">搜索待办</span><input type="search" data-testid="tasks-search" placeholder="搜索事项、标签或备注" value={query} onChange={event => setQuery(event.target.value)} /></label>
+        <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 件 · 待办 {counts.open}</p>
       </div>
-      <label className="tasks-search"><span className="sr-only">搜索待办</span><input type="search" data-testid="tasks-search" placeholder="搜索事项、标签或备注" value={query} onChange={event => setQuery(event.target.value)} /></label>
 
       {groups.length === 0
         ? (
@@ -285,37 +289,50 @@ export default function Tasks({
         )
         : (
           <div className="tasks-groups">
-            {groups.map(group => (
-              <section className="tasks-group" key={group.key}>
-                <header className="tasks-group-head">
-                  <span className={`tasks-group-title ${group.tone}`}>{group.label}</span>
-                  <span className={`tasks-group-count ${group.tone}`}>{group.tasks.length}</span>
-                </header>
-                <ul className="tasks-list">
-                  {group.tasks.map(task => (
-                    <TaskRow
-                      key={task.id}
-                      task={task}
-                      today={today}
-                      modules={modules}
-                      editing={editing}
-                      pending={pending}
-                      editRef={editRef}
-                      onToggle={toggleDone}
-                      onToggleStar={toggleStar}
-                      onStartEdit={startEdit}
-                      onEditTitle={title => setEditing(current => (current === null ? current : { ...current, title }))}
-                      onCommitEdit={commitEdit}
-                      onCancelEdit={cancelEdit}
-                      onDelete={setDeleting}
-                      onDetails={setDetails}
-                      onPlan={planToday}
-                      onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
-                    />
-                  ))}
-                </ul>
-              </section>
-            ))}
+            {groups.map(group => {
+              // 已完成默认折叠：勾掉一条不是为了继续盯着它，DOM 留着只是不展示。
+              const collapsed = group.key === 'done' && !doneOpen
+              const openMinutes = group.tasks.reduce((sum, task) => sum + (task.done === true ? 0 : (durationOf(task) ?? 0)), 0)
+              const head = <>
+                <span className="assistant-group-title">{group.label}</span>
+                <span className="assistant-group-rule" aria-hidden="true" />
+                <span className="assistant-group-count">{group.tasks.length}</span>
+                {openMinutes > 0 && <span className="assistant-group-total">约 {durationText(openMinutes)}</span>}
+              </>
+              return (
+                <section className="tasks-group assistant-group" key={group.key} data-group={group.key} data-tone={group.tone} data-testid="assistant-group">
+                  {group.key === 'done'
+                    ? <button type="button" className="assistant-group-head assistant-fold-head" aria-expanded={!collapsed} onClick={() => setDoneOpen(!doneOpen)}>
+                      {head}
+                      <span className="assistant-fold-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
+                    </button>
+                    : <header className="assistant-group-head">{head}</header>}
+                  <ul className="tasks-list" hidden={collapsed}>
+                    {group.tasks.map(task => (
+                      <TaskRow
+                        key={task.id}
+                        task={task}
+                        today={today}
+                        modules={modules}
+                        editing={editing}
+                        pending={pending}
+                        editRef={editRef}
+                        onToggle={toggleDone}
+                        onToggleStar={toggleStar}
+                        onStartEdit={startEdit}
+                        onEditTitle={title => setEditing(current => (current === null ? current : { ...current, title }))}
+                        onCommitEdit={commitEdit}
+                        onCancelEdit={cancelEdit}
+                        onDelete={setDeleting}
+                        onDetails={setDetails}
+                        onPlan={planToday}
+                        onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
+                      />
+                    ))}
+                  </ul>
+                </section>
+              )
+            })}
           </div>
         )}
 

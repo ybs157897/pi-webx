@@ -27,9 +27,9 @@ logs the embedded pi SDK version at startup; on older Node it fails there, at bo
 ## Personal workbench
 
 The default page (`/`) is the eight-module AI personal workbench migrated from the
-`ai-workbench` frontend: 我的主页 (dashboard), 今日规划 (tasks), 工作助理 (works),
-问题修复 (fixes), 日志查询 (logs), 需求管理 (requirements), 代码开发 (codes) and
-知识库 (knowledge). The original full Pi interface remains at `/chat`; both pages
+`ai-workbench` frontend: 我的主页 (dashboard), 我的助理 (assistant), 问题修复 (fixes),
+日志查询 (logs), 需求管理 (requirements), 代码开发 (codes), 知识库 (knowledge) and
+Agent 配置 (agent-settings). The original full Pi interface remains at `/chat`; both pages
 use this repository's session client and one local bridge process. The workbench's
 records use the SQLite API below, while Pi conversations retain their own session
 logs. The agent can read the knowledge library through the knowledge REST tool —

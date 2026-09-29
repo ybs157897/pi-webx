@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { validateFields } from '../../workbench/schema.mjs';
 import { WorkbenchInputError, type WorkbenchStore } from '../../workbench/store';
 import { normalizePlanEntries } from './schema.mjs';
-import { assertLifeTaskSchedule, assertLifeTaskShape } from './validation';
+import { assertTaskSchedule, assertTaskShape } from './validation';
 
 type Row = Record<string, unknown> & { id: string };
 type CaptureEntry = {
@@ -32,13 +32,13 @@ function localClock(now = new Date()): { iso: string; timeZone: string; localDat
     localTime: `${value('hour')}:${value('minute')}` };
 }
 
-export function readLifeContext(store: WorkbenchStore, raw: unknown = {}, now = new Date()): {
+export function readAssistantContext(store: WorkbenchStore, raw: unknown = {}, now = new Date()): {
   now: ReturnType<typeof localClock>; tasks: Row[]; plans: Row[];
   totals: { tasks: number; plans: number }; returned: { tasks: number; plans: number };
   offset: number; hasMore: boolean;
 } {
   if (!object(raw) || Object.keys(raw).some(key => !['query', 'limit', 'offset'].includes(key))) {
-    throw new WorkbenchInputError('生活上下文查询字段不合法');
+    throw new WorkbenchInputError('助理上下文查询字段不合法');
   }
   const query = raw.query ?? '';
   const limit = raw.limit ?? 100;
@@ -46,7 +46,7 @@ export function readLifeContext(store: WorkbenchStore, raw: unknown = {}, now = 
   if (typeof query !== 'string' || query.length > 100 || typeof limit !== 'number'
     || !Number.isInteger(limit) || limit < 1 || limit > 200 || typeof offset !== 'number'
     || !Number.isInteger(offset) || offset < 0 || offset > 10000) {
-    throw new WorkbenchInputError('生活上下文查询参数不合法');
+    throw new WorkbenchInputError('助理上下文查询参数不合法');
   }
   const match = (row: Row): boolean => `${String(row.title ?? '')} ${String(row.note ?? '')} ${String(row.originalText ?? '')}`
     .toLowerCase().includes(query.trim().toLowerCase());
@@ -54,7 +54,7 @@ export function readLifeContext(store: WorkbenchStore, raw: unknown = {}, now = 
     .sort((a, b) => String(a.plannedDate ?? '9999-12-31').localeCompare(String(b.plannedDate ?? '9999-12-31'))
       || String(a.startTime ?? '99:99').localeCompare(String(b.startTime ?? '99:99'))
       || String(a.due ?? '9999-12-31').localeCompare(String(b.due ?? '9999-12-31')));
-  const plans = store.listRecords('lifePlans').filter(row => row.appliedAt === null && match(row))
+  const plans = store.listRecords('plans').filter(row => row.appliedAt === null && match(row))
     .sort((a, b) => String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? '')));
   const taskPage = tasks.slice(offset, offset + limit).map(row => ({
     id: row.id, title: row.title, originalText: row.originalText ?? '', note: row.note ?? '',
@@ -72,7 +72,7 @@ export function readLifeContext(store: WorkbenchStore, raw: unknown = {}, now = 
 function normalizeCapture(raw: unknown): CaptureEntry[] {
   if (!object(raw) || Object.keys(raw).some(key => key !== 'entries')
     || !Array.isArray(raw.entries) || raw.entries.length < 1 || raw.entries.length > 20) {
-    throw new WorkbenchInputError('请提供 1 至 20 条生活事项');
+    throw new WorkbenchInputError('请提供 1 至 20 条待办事项');
   }
   const keys = new Set<string>();
   return raw.entries.map((entry: unknown) => {
@@ -96,10 +96,10 @@ function normalizeCapture(raw: unknown): CaptureEntry[] {
 }
 
 /** 同一会话的 entryKey 永远只创建一条任务，整批写入原子化。 */
-export function captureLifeTasks(store: WorkbenchStore, sessionId: string, raw: unknown): {
+export function captureAssistantTasks(store: WorkbenchStore, sessionId: string, raw: unknown): {
   entries: Array<{ entryKey: string; record: Row; alreadyCaptured: boolean }>;
 } {
-  if (!sessionId) throw new WorkbenchInputError('生活秘书会话身份缺失');
+  if (!sessionId) throw new WorkbenchInputError('我的助理会话身份缺失');
   const entries = normalizeCapture(raw);
   return store.sqlite.transaction(() => {
     const existing = new Map(store.listRecords('tasks')
@@ -161,23 +161,23 @@ function finalPlanTasks(store: WorkbenchStore, entries: PlanEntry[], checkVersio
     changed.push(record);
   }
   for (const task of changed) {
-    assertLifeTaskShape(task);
-    assertLifeTaskSchedule(task, [...final.values()]);
+    assertTaskShape(task);
+    assertTaskSchedule(task, [...final.values()]);
   }
   return changed;
 }
 
 /** Agent 保存可审阅草稿；不会改动任何待办的排期。 */
-export function proposeLifePlan(store: WorkbenchStore, sessionId: string, raw: unknown): { plan: Row; alreadyProposed: boolean } {
-  if (!sessionId) throw new WorkbenchInputError('生活秘书会话身份缺失');
+export function proposeAssistantPlan(store: WorkbenchStore, sessionId: string, raw: unknown): { plan: Row; alreadyProposed: boolean } {
+  if (!sessionId) throw new WorkbenchInputError('我的助理会话身份缺失');
   if (!object(raw) || Object.keys(raw).some(key => !['planKey', 'note', 'entries'].includes(key))
     || typeof raw.planKey !== 'string' || !KEY_RE.test(raw.planKey)
     || (raw.note !== undefined && typeof raw.note !== 'string')) {
-    throw new WorkbenchInputError('生活安排建议字段不合法');
+    throw new WorkbenchInputError('安排建议字段不合法');
   }
   const entries = planEntries(raw.entries);
   return store.sqlite.transaction(() => {
-    const previous = store.listRecords('lifePlans').find(row => row.sourceSessionId === sessionId && row.planKey === raw.planKey);
+    const previous = store.listRecords('plans').find(row => row.sourceSessionId === sessionId && row.planKey === raw.planKey);
     if (previous) {
       if (JSON.stringify(previous.entries) !== JSON.stringify(entries) || previous.note !== (raw.note ?? '')) {
         throw new WorkbenchInputError('planKey 已用于不同安排，请使用新的标识', 409);
@@ -185,21 +185,21 @@ export function proposeLifePlan(store: WorkbenchStore, sessionId: string, raw: u
       return { plan: previous, alreadyProposed: true };
     }
     finalPlanTasks(store, entries, true);
-    const plan = store.addRecord('lifePlans', { title: '生活安排建议', sourceSessionId: sessionId,
+    const plan = store.addRecord('plans', { title: '安排建议', sourceSessionId: sessionId,
       planKey: raw.planKey, entries, note: raw.note ?? '', appliedAt: null });
     return { plan, alreadyProposed: false };
   })();
 }
 
 /** 只有明确调用确认接口，才会在同一事务内更新全部事项与草稿状态。 */
-export function applyLifePlan(store: WorkbenchStore, id: string, raw: unknown = {}): {
+export function applyAssistantPlan(store: WorkbenchStore, id: string, raw: unknown = {}): {
   plan: Row; tasks: Row[]; alreadyApplied: boolean;
 } {
   if (!object(raw) || Object.keys(raw).some(key => key !== 'expectedUpdatedAt')
     || typeof raw.expectedUpdatedAt !== 'string') throw new WorkbenchInputError('确认需要建议的 updatedAt');
   return store.sqlite.transaction(() => {
-    const plan = store.listRecords('lifePlans').find(row => row.id === id);
-    if (!plan) throw new WorkbenchInputError('生活安排建议不存在', 404);
+    const plan = store.listRecords('plans').find(row => row.id === id);
+    if (!plan) throw new WorkbenchInputError('安排建议不存在', 404);
     const entries = planEntries(plan.entries);
     if (plan.appliedAt) {
       const byId = new Map(store.listRecords('tasks').map(task => [task.id, task]));
@@ -211,18 +211,18 @@ export function applyLifePlan(store: WorkbenchStore, id: string, raw: unknown = 
     const saved = changed.map(task => ({ ...task, updatedAt: nextStamp(task.updatedAt) }));
     for (const task of saved) update.run(JSON.stringify(task), task.id);
     const applied = { ...plan, appliedAt: new Date().toISOString(), updatedAt: nextStamp(plan.updatedAt) };
-    store.sqlite.prepare("UPDATE workbench_records SET payload = ? WHERE module = 'lifePlans' AND id = ?")
+    store.sqlite.prepare("UPDATE workbench_records SET payload = ? WHERE module = 'plans' AND id = ?")
       .run(JSON.stringify(applied), id);
     return { plan: applied, tasks: saved, alreadyApplied: false };
   })();
 }
 
-export function discardLifePlan(store: WorkbenchStore, id: string): { ok: true } {
+export function discardAssistantPlan(store: WorkbenchStore, id: string): { ok: true } {
   return store.sqlite.transaction(() => {
-    const plan = store.listRecords('lifePlans').find(row => row.id === id);
-    if (!plan) throw new WorkbenchInputError('生活安排建议不存在', 404);
+    const plan = store.listRecords('plans').find(row => row.id === id);
+    if (!plan) throw new WorkbenchInputError('安排建议不存在', 404);
     if (plan.appliedAt) throw new WorkbenchInputError('已应用的安排不能取消', 409);
-    store.removeRecord('lifePlans', id);
+    store.removeRecord('plans', id);
     return { ok: true as const };
   })();
 }

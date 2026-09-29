@@ -24,7 +24,7 @@ import {
 } from './ui.jsx'
 import {
   IconBug, IconBook, IconCode, IconHome, IconLogs, IconMenu,
-  IconRefresh, IconRequirements, IconSettings, IconSparkles, IconWorks,
+  IconRefresh, IconRequirements, IconSettings, IconSparkles,
 } from './icons.jsx'
 import { usePrefs } from './state/prefs.js'
 import { parseTranscriptViewMode } from '../lib/transcript/presentation'
@@ -38,9 +38,8 @@ import CommandPalette from './shell/CommandPalette.jsx'
 import SettingsSheet from './shell/SettingsSheet.jsx'
 import AgentSettingsPage from './modules/agent-settings/index.jsx'
 import Dashboard from './modules/dashboard/index.jsx'
-import LifeWorkspace from './modules/life/index.jsx'
-import LifeChat from './modules/life/LifeChat.jsx'
-import Works from './modules/works/index.jsx'
+import AssistantWorkspace from './modules/assistant/index.jsx'
+import AssistantChat from './modules/assistant/AssistantChat.jsx'
 import Fixes from './modules/fixes/index.jsx'
 import Logs from './modules/logs/index.jsx'
 import Requirements from './modules/requirements/index.jsx'
@@ -52,8 +51,7 @@ export const APP_NAME = 'AI 指挥台'
 /** 菜单注册表：左导航、底部 tab、移动端抽屉、命令面板跳转都从这里取。 */
 export const MODULES = [
   { id: 'dashboard', label: '我的主页', desc: '今天的全局一屏', icon: IconHome, Component: Dashboard },
-  { id: 'life', label: '生活秘书', desc: '我的待办与今日规划，帮你收集、整理和安排生活事项', icon: IconSparkles, Component: LifeWorkspace },
-  { id: 'works', label: '工作助理', desc: '和专属助手规划工作，安排什么时候做什么', icon: IconWorks, Component: Works },
+  { id: 'assistant', label: '我的助理', desc: '一份待办与今日安排，帮你收集、整理和规划生活与工作', icon: IconSparkles, Component: AssistantWorkspace },
   { id: 'fixes', label: '问题修复', desc: '问题清单、优先级与状态流转', icon: IconBug, Component: Fixes },
   { id: 'logs', label: '日志查询', desc: '对话框式检索与记录开发日志', icon: IconLogs, Component: Logs },
   { id: 'requirements', label: '需求管理', desc: '通过对话梳理需求，确认后导入待办', icon: IconRequirements, Component: Requirements },
@@ -63,7 +61,7 @@ export const MODULES = [
 ]
 
 /** 底部 tab 的固定三项 + 更多 + AI。 */
-const TABS = ['dashboard', 'life', 'works']
+const TABS = ['dashboard', 'assistant', 'requirements']
 
 /** AI 副驾文案：hook 的底层报错在这里换成人话（useWorkbenchPiChat 只透出 error.message）。 */
 const AI_TEXT = {
@@ -75,8 +73,8 @@ const ASK_IDLE = { pending: null, failed: false }
 
 /** 空数据兜底：`data` 归一化用（服务端字段缺失时不至于让模块崩）。 */
 const EMPTY_DATA = {
-  tasks: [], works: [], fixes: [], logs: [], requirements: [], codes: [],
-  knowledge: [], knowledgeBases: [], knowledgeFolders: [], lifePlans: [],
+  tasks: [], plans: [], fixes: [], logs: [], requirements: [], codes: [],
+  knowledge: [], knowledgeBases: [], knowledgeFolders: [],
 }
 
 /**
@@ -89,7 +87,7 @@ export function normalizeData(raw) {
   const safeArray = key => (Array.isArray(raw[key]) ? raw[key] : [])
   return {
     tasks: safeArray('tasks'),
-    works: safeArray('works'),
+    plans: safeArray('plans'),
     fixes: safeArray('fixes'),
     logs: safeArray('logs'),
     requirements: safeArray('requirements'),
@@ -97,7 +95,6 @@ export function normalizeData(raw) {
     knowledge: safeArray('knowledge'),
     knowledgeBases: safeArray('knowledgeBases'),
     knowledgeFolders: safeArray('knowledgeFolders'),
-    lifePlans: safeArray('lifePlans'),
   }
 }
 
@@ -361,7 +358,7 @@ export default function App() {
       <SideNav modules={MODULES} active={activeModule} data={data} piStatus={piStatus} onNavigate={openModule} />
 
       <main className="main">
-        <div className={`main-inner ${activeModule === 'life' ? 'life-main-inner' : activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : activeModule === 'requirements' ? 'req-main-inner' : activeModule === 'works' ? 'works-main-inner' : ''}`}>
+        <div className={`main-inner ${activeModule === 'assistant' ? 'assistant-main-inner' : activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : activeModule === 'requirements' ? 'req-main-inner' : ''}`}>
           <div className="page-head">
             <div>
               <h1 className="page-title">{active.label}</h1>
@@ -374,7 +371,7 @@ export default function App() {
             </div>
           </div>
           <ModuleView
-            chat={activeModule === 'life' ? <LifeChat data={data} themeMode={theme} stepsMode={stepsMode} refresh={refresh} mutate={mutate} notify={notify} /> : undefined}
+            chat={activeModule === 'assistant' ? <AssistantChat data={data} themeMode={theme} stepsMode={stepsMode} refresh={refresh} mutate={mutate} notify={notify} /> : undefined}
             data={data}
             profile={profile}
             modules={MODULES}
@@ -429,7 +426,7 @@ export default function App() {
       )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
-      {panelOpen === false && agentPanel === null && !['codes', 'requirements', 'works', 'life'].includes(activeModule) && (
+      {panelOpen === false && agentPanel === null && !['codes', 'requirements', 'assistant'].includes(activeModule) && (
         <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>

@@ -73,7 +73,7 @@ export default function TaskDetails({ task, onClose, mutate, notify }) {
       {draft.plannedDate && <button className="btn btn-sm" type="button" data-testid="task-clear-plan" onClick={() => setDraft(current => ({ ...current, plannedDate: '', startTime: '', endTime: '' }))}>从日程移除</button>}
       <p className="tasks-detail-hint">截止日期是必须处理的期限；计划日期是准备哪天做，可以随时调整。</p>
       <label className="field"><span className="field-label">备注</span><textarea className="textarea" rows="3" value={draft.note} onChange={event => set('note', event.target.value)} maxLength={8000} /></label>
-      {task?.originalText && <div className="tasks-original"><span>最初记录</span><p>{task.originalText}</p></div>}
+      {task?.originalText && <div className="assistant-original"><span className="assistant-original-label">最初记录</span><p>{task.originalText}</p></div>}
     </div>
   </FormModal>
 }

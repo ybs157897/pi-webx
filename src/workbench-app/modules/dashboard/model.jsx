@@ -9,8 +9,8 @@ const TEXT = {
   progressLabel: '今日清单已完成',
   dueToday: '今日到期',
   overdue: '逾期',
-  noPlan: '今天还没有安排，和生活秘书一起规划',
-  plan: '去今日规划',
+  noPlan: '今天还没有安排，和我的助理一起规划',
+  plan: '去安排今天',
   todos: '今日待办',
   todosHint: '今日安排，以及到期需要关注的事项',
   viewAll: '查看全部',
@@ -38,7 +38,7 @@ const TEXT = {
   codeTotal: '共',
   noProject: '未归项目',
   guideTitle: '欢迎使用个人 AI 指挥台',
-  guideText: '生活秘书帮你收集待办、安排今天，工作模块帮你处理需求与开发。'
+  guideText: '我的助理帮你收集待办、安排今天，其它模块帮你处理需求、代码与开发记录。'
     + '可以先记下一件事，也可以载入演示数据看看。',
   guideDemo: '灌入演示数据',
   guidePlan: '先去规划今天',
@@ -134,7 +134,7 @@ function deskOverview(data) {
     fixDone: fixes.filter(fix => fix.status === 'done').length,
     fixHigh: fixes.filter(fix => fix.status !== 'done' && fix.priority === 'high').length,
     fixOpen: fixes.filter(fix => fix.status !== 'done').length,
-    totalRecords: ['tasks', 'works', 'fixes', 'logs', 'requirements', 'codes']
+    totalRecords: ['tasks', 'fixes', 'logs', 'requirements', 'codes']
       .reduce((sum, key) => sum + (Array.isArray(source[key]) ? source[key].length : 0), 0),
   }
 }

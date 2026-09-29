@@ -11,6 +11,9 @@
  * 工作台本地兜底（「问小台」pending 气泡 / 软提示 / 错误条）钉在输入框上方的
  * 固定条里：不滚进正文、永远可见。`pending` 用户气泡（App 的「问小台」失败兜底）：
  * 内容已上屏但还没送达，带「未送达」脚标——pi 不可用时用户也看得见自己刚发了什么。
+ *
+ * 模块可以往正文与输入框之间挂一块自己的结构面板（`dock`，如我的助理的安排建议确认卡）；
+ * 不传时面板结构与旧行为逐字节一致，/chat 与其它使用方不受影响。
  * @module shell/AIPanel
  */
 
@@ -174,6 +177,9 @@ export default function AIPanel({
   // live 状态行的「Pi Agent」前缀（如「日志 Agent · gpt-…」），emptyExtra
   // 渲染在空态欢迎语下方（能力卡）。不传则与旧行为完全一致。
   title, subtitle, emptyExtra, onStop, stopping, draft, onDraftChange, welcomeText, suggestions, inputPlaceholder, embedded = false,
+  // 挂件槽：渲染在正文与输入框之间（模块自带的结构面板，如安排建议确认卡）。
+  // 不传 / 传 null 时正文与输入框之间不出现任何节点；/chat 与其它使用方零影响。
+  dock = null,
 }) {
   // Esc 关闭：与命令面板/抽屉一致的键盘出口（渲染期不碰 window，SSR 纯渲染安全）。
   useEffect(() => {
@@ -241,6 +247,8 @@ export default function AIPanel({
             )
             : <TranscriptView transcript={transcript} mode={stepsMode} onAction={onAction} />}
         </div>
+
+        {dock}
 
         <div className="composer">
           {busy && (
