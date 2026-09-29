@@ -1,4 +1,4 @@
-export type ModuleAgentSettingsId = 'logs' | 'requirements' | 'codes' | 'works';
+export type ModuleAgentSettingsId = 'logs' | 'requirements' | 'codes' | 'works' | 'life';
 
 export interface AgentSettingsSkill {
   key: string;

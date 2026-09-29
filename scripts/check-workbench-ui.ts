@@ -8,7 +8,7 @@
  *
  * 覆盖（对应 docs/workbench-redesign.md 第 4 节逐模块规格）：
  *   1. 我的主页是指挥台 widget 板：`data-widget` 六件套 + 空库引导只走 `welcome`；
- *   2. 今日规划：快速捕获条 + 今天/全部两档 + 逾期优先分组；
+ *   2. 我的待办：无默认截止日的捕获 + 全量/未安排/到期/完成筛选；生活规划另有门禁；
  *   3. 工作助理：独立规划对话和排期；原看板与列表保留为工作清单；
  *   4. 问题修复是列表（用户定调）：密集表格 + 行内状态 + 关联回链；
  *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
@@ -56,6 +56,8 @@ import './check-capability-tools';
 import './check-module-agent-settings-ui';
 import './check-requirements-ui';
 import './check-works-planning-ui';
+import './check-life-secretary-ui';
+import './check-life-navigation';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
@@ -180,19 +182,21 @@ const data = fakeData();
   assert.ok(sourceOf('../src/workbench-app/modules/dashboard/index.jsx').includes('onLoadDemo()'), '主页演示数据按钮未接线');
 }
 
-/* ================================================== 2. 今日规划：快速捕获 + 分组 */
+/* ================================================== 2. 我的待办：快速捕获 + 分组 */
 
 {
   const markup = render(Tasks, data);
-  assert.ok(markup.includes('data-module="tasks"'), '规划缺 data-module');
-  assert.ok(markup.includes('data-testid="tasks-capture"'), '规划缺快速捕获条');
-  assert.equal(occurrences(markup, 'data-testid="task-row"'), 3, '今天档应有 3 行（逾期+今天+今天已勾）');
-  assert.ok(markup.includes('今天') && markup.includes('已完成'), '规划缺分组');
+  assert.ok(markup.includes('data-module="tasks"'), '待办缺 data-module');
+  assert.ok(markup.includes('data-testid="tasks-capture"'), '待办缺快速捕获条');
+  assert.equal(occurrences(markup, 'data-testid="task-row"'), 4, '我的待办默认应包含全部日期的 4 条事项');
+  assert.ok(markup.includes('未安排') && markup.includes('即将到期') && markup.includes('已完成'), '待办缺范围筛选');
   assert.ok(markup.includes('is-done'), '完成行缺划线态');
   assertNoLeaks(markup, '规划');
 
   const allMarkup = render(Tasks, data, { prefs: { tasksScope: 'all' } });
   assert.equal(occurrences(allMarkup, 'data-testid="task-row"'), 4, '全部档应有 4 行');
+  const doneMarkup = render(Tasks, data, { prefs: { tasksScope: 'done' } });
+  assert.equal(occurrences(doneMarkup, 'data-testid="task-row"'), 1, '已完成档只显示 1 条完成事项');
 
   assert.ok(sourceOf('../src/workbench-app/modules/tasks/index.jsx').includes('parseQuickAdd')
     && sourceOf('../src/workbench-app/modules/tasks/model.jsx').includes('function parseQuickAdd'),
@@ -409,7 +413,7 @@ const data = fakeData();
   assert.equal(occurrences(documents, 'data-testid="kb-item"'), 3, '库内文档数错误');
   assert.ok(documents.includes('data-testid="kb-search"'), '缺库内搜索');
   assert.ok(documents.includes('data-testid="kb-tag-filter"') && documents.includes('data-testid="kb-source-filter"'), '缺标签或来源筛选');
-  assert.ok(documents.includes('今日规划') && documents.includes('知识库'), '来源筛选应由文档 refs 动态生成');
+  assert.ok(documents.includes('我的待办') && documents.includes('知识库'), '来源筛选应由文档 refs 动态生成');
   assert.ok(documents.includes('data-testid="kb-new"'), '缺新建文档入口');
   assert.ok(!documents.includes('data-testid="kb-backlinks"'), '文档列表不应显示阅读关联');
   assertNoLeaks(documents, '知识库文档列表');
@@ -422,7 +426,7 @@ const data = fakeData();
   assert.ok(selected.includes('data-testid="kb-title-input"') && selected.includes('data-testid="kb-body-input"'), '编辑态缺标题或正文');
   assert.ok(selected.includes('data-testid="kb-save"') && selected.includes('data-testid="kb-preview"'), '编辑态缺保存或预览');
   assert.ok(selected.includes('aria-label="移动文档到目录"') && selected.includes('规范'), '阅读态缺目录归属');
-  assert.ok(selected.includes('data-testid="kb-sources"') && selected.includes('今日规划「给知识库补反链断言」'), '跨模块来源没有保留');
+  assert.ok(selected.includes('data-testid="kb-sources"') && selected.includes('我的待办「给知识库补反链断言」'), '跨模块来源没有保留');
   const outgoingAt = selected.indexOf('data-testid="kb-outgoing"');
   const incomingAt = selected.indexOf('data-testid="kb-incoming"');
   assert.ok(outgoingAt >= 0 && incomingAt > outgoingAt, '双向链接分区缺失');

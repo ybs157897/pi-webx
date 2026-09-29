@@ -1,18 +1,4 @@
-/**
- * 今日规划：快速捕获条 + 按紧迫度分组的密集任务列表（Plane 式的日视图）。
- *
- * 三条设计线索：
- * 1. 捕获优先——顶部常驻输入框，回车即落库（默认 `due` 今天、`priority` 普通）；
- *    句尾小语法 `#标签` / `@明天` / `!高` 由本文件纯函数 `parseQuickAdd` 解析，
- *    行内改标题时复用同一套语法，所以截止日/优先级/标签不必另开弹窗。
- * 2. 范围切换——「今天 / 全部」记忆在 `prefs.tasksScope`，切走再回来还在原范围。
- * 3. 一屏闭环——勾选、改标题、星标、删除都在行内；分组头只有小号灰字与计数，
- *    视觉重量留给标题本身。
- *
- * props 见 Dashboard.jsx 顶部说明；本模块额外用到 `prefs`/`setPref`（范围记忆）、
- * `empty`/`onLoadDemo`（首启引导）、`modules`/`navigate`（关联角标跳转）。
- * @module src/workbench-app/modules/tasks
- */
+/** 我的待办：随手收集、筛选与编辑生活事项；安排日期由今日规划共用。 */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './Tasks.css'
@@ -20,6 +6,7 @@ import { api } from '../../api.mjs'
 import { Card, ConfirmDialog, Empty, Segmented } from '../../ui.jsx'
 import { IconFlame, IconPlus, IconTasks } from '../../icons.jsx'
 import { streakDays, todayISO } from '../../util.mjs'
+import TaskDetails from './TaskDetails.jsx'
 
 import {
   TEXT,
@@ -48,8 +35,10 @@ export default function Tasks({
   const [capture, setCapture] = useState('')
   const [editing, setEditing] = useState(null)
   const [deleting, setDeleting] = useState(null)
+  const [details, setDetails] = useState(null)
+  const [query, setQuery] = useState('')
   const [pending, setPending] = useState('')
-  const [localScope, setLocalScope] = useState('today')
+  const [localScope, setLocalScope] = useState('all')
   const [scopeOverride, setScopeOverride] = useState(navigationTarget?.scope === 'all' ? 'all' : null)
   const [sourceRequirementId, setSourceRequirementId] = useState(typeof navigationTarget?.requirementId === 'string' ? navigationTarget.requirementId : '')
   const handledNavigation = useRef(null)
@@ -57,13 +46,16 @@ export default function Tasks({
   /** 行内编辑的提交闸门：回车/失焦只算一次，Esc 之后不再提交。 */
   const locked = useRef(false)
 
-  const scope = scopeOverride ?? (prefs?.tasksScope === 'all' || prefs?.tasksScope === 'today' ? prefs.tasksScope : localScope)
+  const scope = scopeOverride ?? (SCOPE_OPTIONS.some(option => option.value === prefs?.tasksScope) ? prefs.tasksScope : localScope)
   const parsedCapture = useMemo(() => parseQuickAdd(capture, today), [capture, today])
   const editingId = editing === null ? '' : editing.id
   const sourceRequirement = requirements.find(row => row.id === sourceRequirementId)
-  const sourceTasks = useMemo(() => sourceRequirementId === '' ? tasks : tasks.filter(task =>
-    Array.isArray(task.refs) && task.refs.some(ref => ref?.type === 'requirements' && ref.id === sourceRequirementId)
-  ), [tasks, sourceRequirementId])
+  const sourceTasks = useMemo(() => {
+    const fromSource = sourceRequirementId === '' ? tasks : tasks.filter(task =>
+      Array.isArray(task.refs) && task.refs.some(ref => ref?.type === 'requirements' && ref.id === sourceRequirementId))
+    const term = query.trim().toLocaleLowerCase()
+    return term ? fromSource.filter(task => [task.title, task.tag, task.note, task.originalText].some(value => String(value ?? '').toLocaleLowerCase().includes(term))) : fromSource
+  }, [tasks, sourceRequirementId, query])
 
   const counts = useMemo(() => ({
     total: tasks.length,
@@ -71,7 +63,7 @@ export default function Tasks({
   }), [tasks])
 
   const progress = useMemo(() => {
-    const dueToday = tasks.filter(task => task.due === today)
+    const dueToday = tasks.filter(task => task.plannedDate === today)
     return { done: dueToday.filter(task => task.done === true).length, total: dueToday.length }
   }, [tasks, today])
 
@@ -133,6 +125,7 @@ export default function Tasks({
     const ok = await mutate(
       () => api.addRecord('tasks', {
         title: parsed.title, priority: parsed.priority, tag: parsed.tag, due: parsed.due,
+        originalText: capture.trim(),
       }),
       captureToast(parsed, today),
     )
@@ -159,6 +152,13 @@ export default function Tasks({
       task.starred === true ? TEXT.unstarred : TEXT.starred,
     )
     setPending('')
+  }
+
+  async function planToday(task) {
+    if (task.kind === 'fixed') { setDetails({ ...task, plannedDate: today }); return }
+    setPending(task.id)
+    try { await mutate(() => api.patchRecord('tasks', task.id, { plannedDate: today }), '已安排到今天') }
+    finally { setPending('') }
   }
 
   function startEdit(task) {
@@ -206,12 +206,8 @@ export default function Tasks({
   const sourceFiltered = sourceRequirementId !== ''
   const sourceTitle = String(sourceRequirement?.title ?? '这条需求')
   const sourceEmpty = sourceFiltered && sourceTasks.length === 0
-  const emptyTitle = sourceEmpty ? '这条需求还没有关联待办'
-    : sourceFiltered && scope === 'today' ? '今天没有这条需求的待办'
-      : counts.total === 0 ? TEXT.emptyAll : TEXT.emptyToday
-  const emptyHint = sourceEmpty ? '确认导入后会显示在这里，也可以清除筛选查看全部待办'
-    : sourceFiltered && scope === 'today' ? '切到「全部」查看这条需求未来到期的待办'
-      : counts.total === 0 ? TEXT.emptyAllHint : TEXT.emptyTodayHint
+  const emptyTitle = sourceEmpty ? '这条需求还没有关联待办' : counts.total === 0 ? TEXT.emptyAll : '这里暂时没有事项'
+  const emptyHint = sourceEmpty ? '确认导入后会显示在这里，也可以清除筛选查看全部待办' : counts.total === 0 ? TEXT.emptyAllHint : '试试其他筛选，或记录一件新事项'
 
   return (
     <div className="tasks" data-module="tasks">
@@ -268,6 +264,7 @@ export default function Tasks({
         <Segmented options={SCOPE_OPTIONS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
         <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 条 · 待办 {counts.open}</p>
       </div>
+      <label className="tasks-search"><span className="sr-only">搜索待办</span><input type="search" data-testid="tasks-search" placeholder="搜索事项、标签或备注" value={query} onChange={event => setQuery(event.target.value)} /></label>
 
       {groups.length === 0
         ? (
@@ -280,7 +277,7 @@ export default function Tasks({
                 ? <button type="button" className="btn" onClick={sourceEmpty ? () => setSourceRequirementId('') : () => changeScope('all')}>{sourceEmpty ? '查看全部待办' : '查看这条需求的全部待办'}</button>
                 : canLoadDemo
                 ? <button type="button" className="btn btn-primary" onClick={onLoadDemo}>{TEXT.loadDemo}</button>
-                : (counts.total > 0 && scope === 'today'
+                : (counts.total > 0 && scope !== 'all'
                   ? <button type="button" className="btn" onClick={() => changeScope('all')}>{TEXT.showAll}</button>
                   : undefined)}
             />
@@ -311,6 +308,8 @@ export default function Tasks({
                       onCommitEdit={commitEdit}
                       onCancelEdit={cancelEdit}
                       onDelete={setDeleting}
+                      onDetails={setDetails}
+                      onPlan={planToday}
                       onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
                     />
                   ))}
@@ -322,7 +321,7 @@ export default function Tasks({
 
       <div className="tasks-foot">
         <span className="tasks-foot-item" title={TEXT.doneStatHint}>
-          {TEXT.doneStat} <b>{progress.done}/{progress.total}</b>
+          今日安排完成 <b>{progress.done}/{progress.total}</b>
         </span>
         <span className="tasks-foot-item" title={TEXT.streakHint}>
           <span className="tasks-foot-flame" aria-hidden="true"><IconFlame size={14} /></span>
@@ -338,6 +337,7 @@ export default function Tasks({
         onCancel={() => setDeleting(null)}
         onConfirm={confirmDelete}
       />
+      <TaskDetails task={details} onClose={() => setDetails(null)} mutate={mutate} notify={notify} />
     </div>
   )
 }

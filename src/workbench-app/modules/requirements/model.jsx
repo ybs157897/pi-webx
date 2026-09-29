@@ -57,7 +57,7 @@ const TEXT = {
   relatedTasks: '关联任务',
   noTasks: '还没有关联任务',
   noTasksHint: '选择「拆分并导入待办」，确认后即可在这里跟进',
-  goTasks: '去今日规划',
+  goTasks: '去我的待办',
   taskDone: '已完成',
   taskTodo: '待办',
   back: '退回',

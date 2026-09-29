@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ARRAY_MODULES, emptyState, demoState, validateFields } from './schema.mjs';
 import { assertWorkScheduleRecord } from '../modules/works/validation';
+import { assertLifeTaskSchedule, assertLifeTaskShape } from '../modules/life/validation';
 
 type ArrayModule = typeof ARRAY_MODULES[number];
 type RecordRow = Record<string, unknown> & { id: string };
@@ -87,6 +88,17 @@ function normalizeImport(raw: unknown): WorkbenchState {
   }
 
   for (const work of state.works) assertWorkScheduleRecord(work, state.works);
+  for (const task of state.tasks) {
+    assertLifeTaskShape(task);
+    assertLifeTaskSchedule(task, state.tasks);
+  }
+  const captures = new Set<string>();
+  for (const task of state.tasks) {
+    if (task.captureSessionId === undefined) continue;
+    const key = JSON.stringify([task.captureSessionId, task.captureEntryKey]);
+    if (captures.has(key)) throw new WorkbenchInputError('导入数据中待办收集标识重复');
+    captures.add(key);
+  }
 
   const baseIds = new Set(state.knowledgeBases.map(base => base.id));
   const folders = new Map(state.knowledgeFolders.map(folder => [folder.id, folder]));
@@ -304,6 +316,10 @@ export class WorkbenchStore {
       record.refs = this.knowledgeRefs(fields.body, record.id, String(record.knowledgeBaseId), refsOf(record));
     }
     if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
+    if (module === 'tasks') {
+      assertLifeTaskShape(record);
+      assertLifeTaskSchedule(record, this.listRecords('tasks'));
+    }
     this.db.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)')
       .run(module, record.id, JSON.stringify(record));
     return record;
@@ -324,6 +340,10 @@ export class WorkbenchStore {
       record.refs = this.knowledgeRefs(String(record.body ?? ''), id, String(record.knowledgeBaseId), refsOf(record));
     }
     if (module === 'works') assertWorkScheduleRecord(record, this.listRecords('works'));
+    if (module === 'tasks') {
+      assertLifeTaskShape(record);
+      assertLifeTaskSchedule(record, this.listRecords('tasks'));
+    }
     if (module === 'tasks' && clean.done !== undefined) record.doneAt = clean.done ? new Date().toISOString() : null;
     if (STAMPED_MODULES.has(module)) {
       const previous = Date.parse(String(record.updatedAt ?? ''));
@@ -390,6 +410,7 @@ export class WorkbenchStore {
       "SELECT module, payload FROM workbench_records WHERE payload LIKE ? ESCAPE '\\' ORDER BY seq DESC LIMIT ?",
     ).all(like, limit * 2) as RecordPayloadRow[];
     for (const row of rows) {
+      if (row.module === 'lifePlans') continue;
       const record = parseRecord(row.payload);
       hits.push(hitOf(row.module, record));
     }

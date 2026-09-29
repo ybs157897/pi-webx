@@ -70,7 +70,7 @@ export default function Dashboard({ data, profile, mutate, navigate, empty, onLo
                       {demoBusy ? '正在灌入…' : TEXT.guideDemo}
                     </button>
                   )}
-                  <button type="button" className="btn" onClick={() => navigate('tasks')}>{TEXT.guidePlan}</button>
+                  <button type="button" className="btn" onClick={() => navigate('today')}>{TEXT.guidePlan}</button>
                 </div>
               </div>
             </Card>
@@ -103,7 +103,7 @@ export default function Dashboard({ data, profile, mutate, navigate, empty, onLo
           <Card
             title={TEXT.progress}
             subtitle={TEXT.progressHint}
-            action={<IconButton label={TEXT.plan} onClick={() => navigate('tasks')}><IconTasks size={16} /></IconButton>}
+            action={<IconButton label={TEXT.plan} onClick={() => navigate('today')}><IconTasks size={16} /></IconButton>}
           >
             <div className="dash-progress">
               <ProgressRing done={view.todayDone} total={view.todayTotal} />

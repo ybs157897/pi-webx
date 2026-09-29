@@ -13,6 +13,9 @@ const TEXT = {
   scopeLabel: '范围',
   scopeToday: '今天',
   scopeAll: '全部',
+  scopeUnplanned: '未安排',
+  scopeUpcoming: '即将到期',
+  scopeDone: '已完成',
   groupOverdue: '已逾期',
   groupToday: '今天',
   groupLater: '以后',
@@ -69,8 +72,10 @@ const GROUPS = [
 ]
 
 const SCOPE_OPTIONS = [
-  { value: 'today', label: TEXT.scopeToday },
   { value: 'all', label: TEXT.scopeAll },
+  { value: 'unplanned', label: TEXT.scopeUnplanned },
+  { value: 'upcoming', label: TEXT.scopeUpcoming },
+  { value: 'done', label: TEXT.scopeDone },
 ]
 
 /** 标签色点取色盘：只用设计令牌里的语义色。 */
@@ -101,13 +106,13 @@ function parseDueWord(word, today) {
  * @param input - 原始输入。
  * @param today - 今天（`YYYY-MM-DD`），注入便于测试。
  * @returns `{ title, priority, tag, due, matched }`；`matched` 标明哪些标记真的出现过——
- *   新建时用默认值兜底（今天到期、普通优先级），行内改标题时只改出现过的字段。
+ *   新建时不设截止日期，行内改标题时只改出现过的字段。
  */
 export function parseQuickAdd(input, today = todayISO()) {
   const matched = { priority: false, tag: false, due: false }
   let priority = 'normal'
   let tag = ''
-  let due = today
+  let due = ''
   const words = []
   for (const token of String(input ?? '').trim().split(/\s+/)) {
     if (token === '') continue
@@ -154,7 +159,7 @@ function captureToast(parsed, today) {
   const marks = []
   if (parsed.matched.tag) marks.push(`#${parsed.tag}`)
   if (parsed.matched.priority) marks.push(`${PRIORITY[parsed.priority].label}优先级`)
-  if (parsed.matched.due && parsed.due !== today) marks.push(formatDay(parsed.due))
+  if (parsed.matched.due) marks.push(formatDay(parsed.due))
   return marks.length === 0 ? TEXT.added : `${TEXT.added} · ${marks.join(' · ')}`
 }
 
@@ -175,6 +180,9 @@ function urgencyOf(task, today) {
  */
 function inScope(task, scope, today) {
   if (scope === 'all') return true
+  if (scope === 'unplanned') return task.done !== true && !task.plannedDate
+  if (scope === 'upcoming') return task.done !== true && typeof task.due === 'string' && task.due >= today && task.due <= addDays(today, 7)
+  if (scope === 'done') return task.done === true
   if (task.done === true) return task.due === today
   if (typeof task.due !== 'string' || task.due === '') return true
   return task.due <= today
@@ -187,7 +195,7 @@ function compareOpen(a, b) {
   if (rank !== 0) return rank
   const left = String(a.due ?? '')
   const right = String(b.due ?? '')
-  if (left !== right) return left < right ? -1 : 1
+  if (left !== right) return !left ? 1 : !right ? -1 : left < right ? -1 : 1
   return String(b.createdAt ?? '').localeCompare(String(a.createdAt ?? ''))
 }
 
@@ -247,7 +255,7 @@ function firstNavigableRef(task, modules) {
 /** 一行任务：勾选 + 标题（双击或按钮进编辑）+ 优先级/截止日/标签/关联 + 星标、删除。 */
 function TaskRow({
   task, today, modules, editing, pending, editRef,
-  onToggle, onToggleStar, onStartEdit, onEditTitle, onCommitEdit, onCancelEdit, onDelete, onNavigate,
+  onToggle, onToggleStar, onStartEdit, onEditTitle, onCommitEdit, onCancelEdit, onDelete, onNavigate, onDetails, onPlan,
 }) {
   const done = task.done === true
   const priority = PRIORITY[task.priority] ?? PRIORITY.normal
@@ -305,6 +313,7 @@ function TaskRow({
             {priority.label}
           </span>
           <span className={`task-due ${due.tone}`}>{due.text}</span>
+          {task.plannedDate && <span className="task-scheduled">安排 {formatDay(task.plannedDate, 'md')}{task.startTime ? ` · ${task.startTime}` : ''}</span>}
           {tag !== '' && (
             <span className="task-tag" title={`#${tag}`}>
               <span className="task-tag-dot" data-tone={tagTone(tag)} aria-hidden="true" />
@@ -334,6 +343,8 @@ function TaskRow({
       </div>
 
       <div className="task-actions">
+        {onPlan && !done && <button type="button" className="btn btn-sm task-plan" data-testid="task-plan-today" disabled={busy || task.plannedDate === today} onClick={() => onPlan(task)}>{task.plannedDate === today ? '已安排' : '安排今天'}</button>}
+        {onDetails && <button type="button" className="btn btn-sm task-details" data-testid="task-details-open" onClick={() => onDetails(task)}>详情</button>}
         <IconButton
           label={task.starred === true ? TEXT.unstar : TEXT.star}
           className={`task-star ${task.starred === true ? 'is-on' : ''}`}

@@ -64,7 +64,7 @@ const TEXT = {
 
 /** 链接 / 来源徽章的模块名：镜像服务端 MODULE_LABELS（前端不 import 服务端代码）。 */
 const LINK_LABELS = {
-  tasks: '今日规划',
+  tasks: '我的待办',
   works: '工作助理',
   fixes: '问题修复',
   logs: '日志查询',

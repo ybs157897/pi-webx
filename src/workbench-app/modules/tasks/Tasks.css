@@ -1,5 +1,5 @@
 /*
- * 今日规划（Tasks）模块样式：快速捕获条 + 按紧迫度分组的密集任务列表。
+ * 我的待办模块样式：快速捕获条 + 按紧迫度分组的密集任务列表。
  *
  * 只消费 styles.css 的设计令牌（表面 / 文本 / 语义色 / 间距 / 字号 / 圆角），
  * 亮暗两套主题自动跟随，紧凑密度档也跟着 --sp-* 一起压。
@@ -104,6 +104,8 @@
   color: var(--text-3);
   font-variant-numeric: tabular-nums;
 }
+.tasks-search input { width: 100%; min-height: 38px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius-md); background: var(--surface-0); color: var(--text-1); font: inherit; font-size: var(--fs-sm); }
+.tasks-search input:focus { border-color: var(--accent); outline: none; }
 
 /* ================================================================ 分组头 */
 
@@ -225,6 +227,7 @@
 .task-due.danger { color: var(--danger); font-weight: 550; }
 .task-due.plain { color: var(--text-2); }
 .task-due.muted { color: var(--text-3); }
+.task-scheduled { color: var(--accent); font-weight: 550; }
 
 .task-tag { display: inline-flex; align-items: center; gap: 5px; min-width: 0; color: var(--text-2); }
 
@@ -268,12 +271,21 @@
 
 .task-actions { display: flex; align-items: center; gap: 2px; flex: none; }
 .task-actions .icon-btn { width: 28px; height: 28px; }
+.task-actions .task-plan, .task-actions .task-details { white-space: nowrap; font-size: var(--fs-xs); }
 
 .task-star { color: var(--text-3); }
 .task-star.is-on { color: var(--warn); }
 .task-star.is-on svg { fill: currentColor; }
 
 .task-actions .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); }
+.tasks-detail-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.tasks-detail-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.tasks-detail-grid .field { min-width: 0; }
+.tasks-detail-grid input, .tasks-detail-grid select { width: 100%; min-width: 0; }
+.tasks-detail-hint { color: var(--text-3); font-size: var(--fs-xs); line-height: 1.5; }
+.tasks-original { padding: var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); }
+.tasks-original span { color: var(--text-3); font-size: var(--fs-xs); }
+.tasks-original p { margin-top: var(--sp-1); white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); font-size: var(--fs-sm); }
 
 /* ================================================================ 底部统计 */
 
@@ -295,6 +307,11 @@
 
 /* ≤480px：标签只留色点（文字转 sr-only，读屏仍念得出来），动作按钮收一号。 */
 @media (max-width: 480px) {
+  .tasks-bar-count { flex-basis: 100%; margin-inline-start: 0; }
+  .tasks-detail-grid { grid-template-columns: minmax(0, 1fr); }
+  .task-row { flex-wrap: wrap; }
+  .task-actions { width: 100%; padding-left: 28px; justify-content: flex-start; }
+  .task-actions .task-plan, .task-actions .task-details { min-height: 36px; }
   .task-actions .icon-btn { width: 26px; height: 26px; }
   .task-tag { gap: 0; }
   .task-tag-text {

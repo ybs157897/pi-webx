@@ -5,14 +5,15 @@
  */
 
 /** 数组型模块 key（记录直接挂在 state 下）。 */
-export const ARRAY_MODULES = ['tasks', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders']
+export const ARRAY_MODULES = ['tasks', 'lifePlans', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders']
 
 /** 全部模块 key。 */
 export const MODULES = [...ARRAY_MODULES]
 
 /** 模块中文名（AI 工具与提示共用）。 */
 export const MODULE_LABELS = {
-  tasks: '今日规划',
+  tasks: '我的待办',
+  lifePlans: '生活安排建议',
   works: '工作助理',
   fixes: '问题修复',
   logs: '日志查询',
@@ -25,6 +26,7 @@ export const MODULE_LABELS = {
 
 /** 各领域字段定义的聚合入口，公共字段校验由 schema-fields.mjs 提供。 */
 import { schema as tasksSchema } from '../modules/tasks/schema.mjs'
+import { schema as lifeSchema } from '../modules/life/schema.mjs'
 import { schema as worksSchema } from '../modules/works/schema.mjs'
 import { schema as fixesSchema } from '../modules/fixes/schema.mjs'
 import { schema as logsSchema } from '../modules/logs/schema.mjs'
@@ -36,6 +38,7 @@ export { todayISO } from './schema-fields.mjs'
 
 const MODULE_SCHEMA = {
   ...tasksSchema,
+  ...lifeSchema,
   ...worksSchema,
   ...fixesSchema,
   ...logsSchema,
@@ -66,7 +69,7 @@ export function validateFields(module, fields, options = {}) {
   const problems = []
   for (const [key, spec] of Object.entries(schema)) {
     const given = fields[key]
-    if (given === undefined || given === null) {
+    if (given === undefined || (given === null && spec.nullable !== true)) {
       if (!partial && spec.required) {
         problems.push(`${key} 是必填项`)
         continue

@@ -1,0 +1,16 @@
+schemaVersion: 1
+id: life
+enabled: true
+promptFile: ./prompts/life.md
+skills: []
+tools:
+  - life.context
+  - life.capture
+  - life.proposePlan
+mcp: []
+knowledge:
+  homeBinding: life
+  sharedReadBindings: []
+limits:
+  maxRunningSessions: 1
+  maxToolOutputChars: 24000

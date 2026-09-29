@@ -1,4 +1,4 @@
-export const ARRAY_MODULES: readonly ['tasks', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders'];
+export const ARRAY_MODULES: readonly ['tasks', 'lifePlans', 'works', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'knowledgeBases', 'knowledgeFolders'];
 export const MODULES: typeof ARRAY_MODULES;
 export const MODULE_LABELS: Record<string, string>;
 

@@ -42,7 +42,7 @@ try {
   const capabilitiesResponse = await fetch(base);
   assert.equal(capabilitiesResponse.status, 200);
   const capabilities = await capabilitiesResponse.json() as { agents: Array<{ id: string; ok: boolean; enabled: boolean; tools?: string[] }> };
-  assert.deepEqual(capabilities.agents.map(agent => agent.id), ['requirements', 'codes', 'logs', 'works']);
+  assert.deepEqual(capabilities.agents.map(agent => agent.id), ['requirements', 'codes', 'logs', 'works', 'life']);
   const worksCapability = capabilities.agents.find(agent => agent.id === 'works');
   assert.equal(worksCapability?.ok, true);
   assert.equal(worksCapability?.enabled, true);

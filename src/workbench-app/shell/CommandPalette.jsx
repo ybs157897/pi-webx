@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../api.mjs'
 import { IconCommand, IconMoon, IconSearch, IconSettings, IconSparkles } from '../icons.jsx'
+import { recordNavigationLabel, resolveWorkbenchNavigation } from './navigation.mjs'
 
 export default function CommandPalette({ modules, onNavigate, onOpenSettings, onToggleTheme, theme, onClose }) {
   const [query, setQuery] = useState('')
@@ -42,12 +43,12 @@ export default function CommandPalette({ modules, onNavigate, onOpenSettings, on
       list.push({
         title: '记录',
         items: hits.map(hit => {
-          const module = modules.find(item => item.id === hit.module)
+          const module = modules.find(item => item.id === resolveWorkbenchNavigation(hit.module).id)
           return {
             key: `hit-${hit.module}-${hit.id}`,
             icon: module?.icon ?? IconSearch,
             title: hit.title,
-            sub: `${module?.label ?? hit.module} · ${hit.snippet || '无摘要'}`,
+            sub: `${recordNavigationLabel(hit.module, modules)} · ${hit.snippet || '无摘要'}`,
             run: () => onNavigate(hit.module),
           }
         }),

@@ -5,14 +5,14 @@ import { addDays, byDateDesc, groupBy, todayISO } from '../../util.mjs'
 const TEXT = {
   brief: 'AI 早报',
   progress: '今日进度',
-  progressHint: '今天到期的任务完成率',
+  progressHint: '今天已安排事项的完成率',
   progressLabel: '今日清单已完成',
   dueToday: '今日到期',
   overdue: '逾期',
-  noPlan: '今天还没有排期，去今日规划加一条',
+  noPlan: '今天还没有安排，和生活秘书一起规划',
   plan: '去今日规划',
   todos: '今日待办',
-  todosHint: '今天到期与已逾期的未完成事项',
+  todosHint: '今日安排，以及到期需要关注的事项',
   viewAll: '查看全部',
   todosEmpty: '今天没有待办',
   todosEmptyHint: '到期和逾期的都清掉了，可以去规划页安排下一步',
@@ -38,8 +38,8 @@ const TEXT = {
   codeTotal: '共',
   noProject: '未归项目',
   guideTitle: '欢迎使用个人 AI 指挥台',
-  guideText: '这里把待办、问题、日志、需求与开发事项收在同一条流水线上，所有记录都存在本机 SQLite。'
-    + '先灌一份演示数据，或直接从今天要做的第一件事开始。',
+  guideText: '生活秘书帮你收集待办、安排今天，工作模块帮你处理需求与开发。'
+    + '可以先记下一件事，也可以载入演示数据看看。',
   guideDemo: '灌入演示数据',
   guidePlan: '先去规划今天',
   taskDone: '任务已完成',
@@ -91,7 +91,7 @@ function byLogOrder(a, b) {
 
 /**
  * 主页全部派生数据：一次性从 `data` 现算，组件不再存第二份。
- * 「今天」= `due === today`；「今日待办」= 未完成且 `due <= today`（含逾期）。
+ * 今日进度按 plannedDate 统计；待关注列表同时包含到期事项。
  * @param data - /api/state 的 data（App 已归一化）。
  * @returns 各 widget 需要的计数、列表与日期。
  */
@@ -103,9 +103,9 @@ function deskOverview(data) {
   const fixes = source.fixes ?? []
   const codes = source.codes ?? []
   const openTasks = tasks.filter(task => task.done !== true)
-  const todayTasks = tasks.filter(task => task.due === today)
+  const todayTasks = tasks.filter(task => task.plannedDate === today)
   const queue = openTasks
-    .filter(task => typeof task.due === 'string' && task.due <= today)
+    .filter(task => task.plannedDate === today || (typeof task.due === 'string' && task.due !== '' && task.due <= today))
     .sort(byQueueOrder)
   const codeRows = [...groupBy(codes, code => (
     typeof code.project === 'string' && code.project.trim() !== '' ? code.project : TEXT.noProject

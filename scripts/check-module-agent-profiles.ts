@@ -52,15 +52,16 @@ function errors(results: Map<string, { ok: boolean }>): string[] {
 }
 
 try {
-  /* 四份合法配置全部加载成功，逐文件隔离 */
+  /* 每个已注册 Agent 的合法配置全部加载成功，逐文件隔离 */
   const good = await fixture({
     'requirements.yaml': yaml('requirements'),
     'codes.yaml': yaml('codes'),
     'logs.yaml': yaml('logs'),
     'works.yaml': yaml('works'),
+    'life.yaml': yaml('life'),
   });
   const first = await loadAgentProfiles(good);
-  assert.deepEqual(errors(first), [], '四份合法 YAML 都应加载成功');
+  assert.deepEqual(errors(first), [], '所有合法 YAML 都应加载成功');
   for (const id of AGENT_IDS) {
     const result = first.get(id);
     assert.ok(result?.ok === true, `${id} 应加载成功`);

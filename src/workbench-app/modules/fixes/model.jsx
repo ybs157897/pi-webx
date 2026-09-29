@@ -55,7 +55,7 @@ const TEXT = {
   noTags: '没有标签',
   relatedTasks: '关联任务',
   relatedLogs: '关联日志',
-  goTasks: '去今日规划',
+  goTasks: '去我的待办',
   goLogs: '去日志查询',
   noTasks: '没有关联任务',
   noTasksHint: '任务记录的 refs 指向这条问题后，会出现在这里',

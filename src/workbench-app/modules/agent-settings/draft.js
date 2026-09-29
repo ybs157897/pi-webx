@@ -1,4 +1,5 @@
 export const AGENT_MODULES = [
+  { id: 'life', label: '生活秘书', description: '收集生活事项并规划每天的安排' },
   { id: 'works', label: '工作助理', description: '规划时间与工作安排' },
   { id: 'logs', label: '日志', description: '查询记录并引用证据' },
   { id: 'requirements', label: '需求', description: '梳理与分析需求' },

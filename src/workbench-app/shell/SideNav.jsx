@@ -10,7 +10,7 @@ import { IconSparkles } from '../icons.jsx'
 export function badgeOf(moduleId, data) {
   const open = (list) => (Array.isArray(list) ? list.filter(item => item.status !== undefined ? item.status !== 'done' : !item.done).length : 0)
   switch (moduleId) {
-    case 'tasks': return Array.isArray(data.tasks) ? data.tasks.filter(item => !item.done).length : 0
+    case 'life': return Array.isArray(data.tasks) ? data.tasks.filter(item => !item.done).length : 0
     case 'works': return open(data.works)
     case 'fixes': return open(data.fixes)
     case 'logs': return Array.isArray(data.logs) ? data.logs.filter(item => item.date >= new Date().toISOString().slice(0, 10)).length : 0
@@ -32,6 +32,7 @@ export default function SideNav({ modules, active, data, piStatus, onNavigate })
             <li key={module.id}>
               <button
                 type="button"
+                data-testid={`side-nav-${module.id}`}
                 className={`nav-item ${module.id === active ? 'is-active' : ''}`}
                 onClick={() => onNavigate(module.id)}
                 title={module.desc}
