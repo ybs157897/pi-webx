@@ -3,7 +3,7 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-29。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共九个导航入口，业务实现按模块目录归位。
+更新日期：2026-09-30。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共九个导航入口，业务实现按模块目录归位。
 
 ## 总体架构
 
@@ -226,6 +226,20 @@
 | 旧数据迁移与兼容 | `server/workbench/store.ts`：`works` 记录（`scheduledDate → plannedDate`、`status === 'done' → done`）、`lifePlans → plans`、`works_schedule_entries` 绑定表在启动迁移中并入，可重复执行；旧导出 JSON 同键兼容；旧 life / works 会话不迁移 |
 | 门禁与隔离浏览器服务 | `scripts/check-assistant-plans.ts`（服务端全链路与迁移）、`check-assistant-agent.ts`（真实 SDK 装配、works/life HTTP 404）、`check-assistant-ui.tsx`（SSR DOM）；`npm run dev:assistant-fixture` 起离线模型 + 真实 SDK/SQLite 的隔离验收服务 |
 
+### 需求生命周期全链路
+
+| 功能 | 位置 |
+| --- | --- |
+| 同事务业务变更日志 | `server/workbench/mutation-journal.ts`：需求/待办 SQL triggers、一次历史基线、整批替换边界；在 Store 建表后、迁移前安装 |
+| 根 ID、修订与审计投影 | `server/modules/requirements/lifecycle.ts` barrel，`lifecycle-{contracts,schema,journal,events,trace}.ts`：UUID/REQ 查询、内容修订、tombstone、时间线与对象关联 |
+| 交付与明确审阅 | `lifecycle-deliveries.ts` / `lifecycle-router.ts`：证据、版本、真实 Run/工具、幂等及并发确认；原业务完成与正式接受分开 |
+| 受限 Agent 追踪工具 | `lifecycle-tools.ts`：chatroom_trace / chatroom_delivery 由 assemble 注入并经统一 YAML 白名单；不能接受交付 |
+| 群消息输入与执行根 | `modules/chatroom/trace-links.ts`：冻结消息/Run 的需求根与版本、跨根分叉来源、工具摘要、交接与失败/取消；`module-agents/failures.ts` 安全错误分类 |
+| 全链路界面 | `modules/requirements/Trace{Drawer,Content,DeliveryForm}.jsx` / `Trace.css`：ID查询、时间线、证据提交、确认接受/退回、Session UUID关联与安全诊断；`TraceRequestScope.js` 约束异步请求归属、切换互斥和卸载后失效 |
+| 验收 | `scripts/check-{mutation-journal,requirement-lifecycle,requirement-trace-runtime,requirement-trace-ui}.ts*`；`requirement-trace-fixture.ts` 共用真实 SDK 种子；`npm run dev:requirement-trace-fixture` 起隔离浏览器服务；live 脚本显式运行 |
+
+详细协议见 `docs/architecture/requirement-lifecycle-tracing.md`。
+
 ### 内部聊天室（模块 Agent 通信）
 
 产品与运行边界见 `docs/architecture/internal-chatroom.md`。
@@ -234,11 +248,14 @@
 | --- | --- |
 | 微信群式正文、输入、@与回复 | `src/workbench-app/modules/chatroom/`；侧栏/命令面板由 `App.jsx` 的 chatroom 注册项提供；按 seq 增量同步、watch 更新投递状态 |
 | @ 成员语法 | `src/shared/chatroom-mentions.mjs`：前后端共享别名、目标校验与输入补全定位 |
-| 独立持久消息与串行投递盒子 | `server/modules/chatroom/{contracts,store,service}.ts`：独立 SQLite 表、身份盖章、幂等键、来源引用、认领记录（`claimants` 内部列）、循环上限、重启恢复；`consumption-store.ts` 存固定订阅者快照和逐成员消费确认，成功须有公开回复，终态防重复执行，部分失败可见 |
+| 独立持久消息与有界并行投递 | `server/modules/chatroom/{contracts,store,service}.ts`：独立 SQLite 表、身份盖章、幂等键、来源引用、认领记录（`claimants` 内部列）、循环上限、重启恢复；`consumption-store.ts` 存固定订阅者快照和逐成员消费确认，成功须有公开回复，终态防重复执行，部分失败可见；`service-input.ts` / `service-context.ts` / `service-provenance.ts` / `service-scheduler.ts` 收口输入与业务来源 |
 | 模块公共通信工具与消息 API | `modules/chatroom/{tools,router}.ts`：`chatroom_send` / `chatroom_read`，`GET/POST /api/chatroom/messages`；`module-agents/assemble.ts` 按 YAML 白名单注入 |
-| 唤醒真实模块 Agent 与广播认领扇出 | `modules/chatroom/runtime.ts`：共享 `module-agents/session-service.ts` 装配隔离 SDK 会话，忙时等待、创建/回合超时与退出清理；`runtime-prompts.ts` 负责正文提示词和严格 JSON 认领解析，判定阶段 SDK 禁用工具；订阅者先判断、认领后完整处理并写入消费确认；生产装配在 `server/index.ts` |
+| 唤醒真实模块 Agent 与广播认领扇出 | `modules/chatroom/runtime.ts` 是公开 barrel；`runtime-dispatch.ts` / `runtime-turn.ts` / `runtime-mailbox.ts`：共享 `module-agents/session-service.ts` 装配隔离 SDK 会话，忙时等待、创建/回合超时与退出清理；`runtime-prompts.ts` 负责正文提示词和严格 JSON 认领解析，判定阶段 SDK 禁用工具；订阅者先独立禁工具判断、认领后接续持久工作会话，逐成员 FIFO、跨成员并行；生产装配在 `server/index.ts` |
+| 持续任务、分工与执行账本 | `modules/chatroom/work-{contracts,input,store,service,user-actions}.ts`：讨论绑定、协作任务、成员分工、Run、工具开始/结束与父交接，显式完成、中断核对、版本及幂等恢复/取消/单独核对；群记录公开任务投影，不公开私有 Session |
+| 精确会话恢复 | `server/module-agents/session-index.ts`：持久登记 Session 路径、按 ID 查历史 header；`session-service.ts` 统一身份/配置快照检查，个人和群会话不依赖最近 200 条列表 |
+| 话题与任务界面 | `modules/chatroom/TaskBoard.jsx`、`useChatroomContext.js`、`useChatroomTaskActions.js`：任务成员状态、继续/取消/核对后恢复，话题与草稿/请求幂等键跨刷新保存 |
 | 助理交接领域工具 | `server/modules/requirements/dispatch.ts`：被点名的需求 Agent 原子建需求和待办并绑定引用；`server/modules/assistant/coordination.ts`：只按研发回报完成关联待办，事务/版本/身份检查，排期保持原确认流 |
-| 门禁 | `npm run check:chatroom`：`scripts/check-chatroom.ts`（SQLite/HTTP/投递，`chatroom-check-fixtures.ts` 为接收回合消费确认夹具）、`check-chatroom-consumption.ts`（成员消费确认/HTTP watch/部分失败/重启）、`check-chatroom-coordination.ts`（真实业务写入边界）、`check-chatroom-runtime.ts`（离线真实 SDK 链路）、`check-chatroom-ui.tsx`（SSR）；手动真实模型发消息验收为 `scripts/check-chatroom-live.ts`，输出临时消费日志与文件结果 |
+| 门禁 | `npm run check:chatroom`：`scripts/check-chatroom.ts`（SQLite/HTTP/投递，`chatroom-check-fixtures.ts` 为接收回合消费确认夹具）、`check-chatroom-consumption.ts`（成员消费确认/HTTP watch/部分失败/重启）、`check-chatroom-coordination.ts`（真实业务写入边界）、`check-chatroom-runtime.ts` 与 `check-chatroom-persistent-runtime.ts`（离线真实 SDK 链路、持续会话、冷恢复、并发与取消）、`check-chatroom-work.ts`（工作记录/HTTP/中断核对）、`check-chatroom-ui.tsx`（SSR）；手动真实模型发消息验收为 `scripts/check-chatroom-live.ts`，输出临时消费日志与文件结果；`npm run dev:chatroom-fixture` 提供隔离浏览器服务 |
 
 ### 代码开发 IDE 与固定对话
 
@@ -291,5 +308,7 @@
 - `docs/workbench-ai-chat-compact-mode.md` — AI 对话全屏浮层形态与简洁模式输出规范
 - `docs/system-prompt-design.md` — 提示词分层设计
 - `docs/workbench-redesign.md` — 工作台重塑的需求与决策记录
+- `docs/tests/chatroom-persistent-work.md` — 群聊持续协作的门禁、真实模型与浏览器验收
+- `docs/tests/requirement-lifecycle-tracing.md` — 唯一需求根、修订、执行、证据与正式接受的验收及模型实测限制
 - `docs/tests/subagents.md` — 子智能体手测记录（历史口径）
 - `docs/history/` — 迁移期归档（ALIGN-DSH-REFERENCE、FIXES-TO-PORT）

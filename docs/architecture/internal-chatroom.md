@@ -1,46 +1,69 @@
 # 模块 Agent 内部聊天室
 
-四个模块 Agent 共用一个内部群：需求管理、我的助理、代码开发、日志查询。侧栏「内部聊天室」按持久递增序号展示头像、发言人、收件人、时间和正文气泡；不展示思考块、工具调用或系统提示词。普通模块对话不自动公开到群里。
+内部群是需求管理、代码开发、我的助理、日志查询的公开协作记录。群消息、Agent 私有会话、协作任务及单次执行分别持久化；普通模块对话不自动公开到群里。
 
-## 用户流程
+## 使用流程
 
-1. 在「内部聊天室」输入 `@需求管理 请整理这个需求并交给开发实施：……`。输入 `@` 或点 @ 按钮选择成员；也支持 `@需求`、`@开发`、`@研发`、`@助理`、`@日志` 等别名。不 @ 任何人时消息是一次群发布：推送给所有其他启用成员，各成员按职责自行认领，认领者处理后把正文发回群里；无人认领则该消息标记失败并提示点名重发。
-2. 需求 Agent 读取当前消息与同一话题历史。条件不清楚就在群里提问；用户点它消息上的「回复」，再 @需求管理 补充，保留上下文。
-3. 需求明确后，需求 Agent 调用 `requirements_dispatch`，一次事务保存需求和导入待办，再发 `@代码开发` 交代任务与验收条件；关联 ID 与版本由服务端沿消息传递。
-4. 代码 Agent 在其配置工作目录中执行，然后 `@我的助理` 回报实际完成的任务 ID、改动、验证和未完成项。四个成员都拥有通用文件与命令工具；声称运行过构建或测试前必须真实执行，并把命令与结果写进回报。
-5. 助理核对后用 `assistant_coordinate(complete_tasks)` 更新明确完成的关联待办，并在群里广播结果。用户期间修改过的事项会产生版本冲突，拒绝覆盖。
+1. 用户在群中发消息，可 @ 一位成员，也可广播让成员按职责认领。输入区显示当前话题，补充消息延续该话题；「新话题」清除关联。回复气泡保留 replyTo。
+2. 普通交流或澄清进入成员自己的讨论会话。Agent 明确接下可交付工作后调用 `chatroom_work(action="accept")`，创建协作任务和自己的分工；讨论会话升级为此分工的执行会话，原讨论绑定清空。
+3. 用户在任务卡片点「继续」，后续消息明确携带协作任务 ID。其他成员接到同任务交接后拥有自己的分工及执行会话。没有唯一任务关联时保留讨论身份，不猜测最近任务。
+4. Agent 调用 `chatroom_work(action="update")` 记录等待用户、等待同事、完成或失败，并给出真实工作摘要。消费成功只表示这条输入处理回合成功并有公开回复，不表示任务或业务待办完成。
+5. 用户可取消任务，控制直接作用于当前运行；已取消但结果不明的任务可单独「核对完成」，保持取消状态并解除原话题阻拦。中断任务保留原会话与执行记录；未核对的工具副作用要求用户检查实际改动后明确恢复，不自动重跑。
 
-在普通需求页面已经讨论并保存的草稿，也能由该会话发 `@需求管理` 携带原草稿 ID 和版本，交给独立群聊会话接手。需求工具在事务中校验原版本并复用该记录，避免重复创建需求。
-仅保存需求草稿不会派工。原先的界面预览/导入流程仍可使用。日程安排方案仍须界面确认，群聊交接不修改排期。
+群任务是协作执行记录，引用现有需求和待办，不替代业务记录。历史群消息原样保留；旧回合没有持久接收 Session 绑定的，不伪造恢复关系，后续输入按新绑定处理并可查询旧公开记录。`requirements_dispatch` 原子保存需求与待办；`assistant_coordinate` 仍只允许按服务端研发回报及版本校验完成待办。安排方案仍须界面确认。
 
-新配置只作用于新会话；已有模块会话继续使用创建时的配置快照。更新后若旧会话没有群聊工具，需要在该模块新建对话。
+## 身份与状态
 
-## 最小独立边界
+| 对象 | 持久身份 | 职责 |
+| --- | --- | --- |
+| 群消息 | messageId / seq / threadId | 公开正文、回复关系、来源与业务引用 |
+| 逐成员消费 | messageId + agentId | 固定订阅者快照、认领与处理确认 |
+| 讨论绑定 | workspaceKey + roomId + threadId + agentId | 持续普通交流，不与个人聊天共享 |
+| 协作任务与分工 | taskId / taskId + agentId | 工作目标、各成员状态、成果摘要与执行会话 |
+| Run | runId / attempt | 一次接收执行、sessionId、输入来源、检查点及工具记录 |
 
-`server/modules/chatroom/` 负责协议、SQLite 消息表、队列、消息 HTTP、通信工具与运行器；不把群聊消息混入通用工作台业务记录。`server/modules/requirements/dispatch.ts` 持有需求整理与原子待办导入；`server/modules/assistant/coordination.ts` 只持有研发回报后的完成状态逻辑，聊天室仅传递业务引用。
+讨论及执行 Session 均使用公共模块装配入口，身份、工作目录、配置快照、Skills、MCP、知识范围继续按模块收口。逻辑会话可持续，运行实例每回合结束释放；再次接收输入按持久 sessionId 冷恢复。配置更新只作用于新会话；原会话按原配置快照恢复。
 
-同级 `../pi-chatroom` 的 `protocol.ts`、`room.ts`、`orchestrator.ts` 提供顺序发言和成员路由的设计参考。该项目目前是内存 CLI 模拟器，成员禁用业务工具，结束时才导出转录，因此本实现不启动它，也不依赖其相对路径或虚拟成员模型。
+个人会话与群执行会话分别绑定。`module_agent_session_index` 精确登记模块 Session 路径与身份，不依赖全局最近 200 条列表；历史未登记日志按 header ID 查找并经原身份与快照校验后登记。客户端不能指定 sessionPath 或覆盖工具面。
 
-模块会话装配收敛到 `server/module-agents/session-service.ts`，用户会话入口和聊天室运行器复用身份、配置快照、工作目录冲突检查与 MCP 生命周期。群聊使用独立的短命模块会话，不插入用户正在进行的对话。
+工作状态包括 waiting、running、waiting_for_user、waiting_for_agent、completed、failed、interrupted、needs_review、cancelled。每个成员的状态独立，任务状态由分工汇总。completed 必须显式报告真实成果，不因收到消息、工具运行或回合结束自动生成。业务待办完成另走受限业务工具。
 
-## 消息与运行约束
+## 消息协议与执行
 
-- `chatroom_send` 的发言身份由服务端装配闭包固定；模型不能指定 sender。正文 @成员决定实际接收方；可选 `to` 参数必须与正文一致。一条消息只点名一位成员，未知名称或多个目标报错；邮箱不作点名。没有 @ 且省略 `to` 是群发布，走认领扇出，不直接投递给某个人。
-- 群发布按 MQ 订阅模式扇出：订阅者是全部启用的模块 Agent（成员清单来自配置加载的 profiles，新增模块 Agent 无需改动聊天室代码），发布者本人除外。首次消费将订阅者名单作为固定快照写入 `chatroom_consumptions`；消息与成员组合唯一。运行器按固定顺序让每个订阅者先跑一个轻量认领判定回合——SDK 实际禁用工具，只接受完整 JSON 对象中布尔类型的 `claim`；判定认领的成员随即恢复工具，在同一会话继续完整处理回合并公开回复。认领记录持久化在消息的内部 `claimants` 字段（不进公开投影），非认领成员的会话无权投递该消息。收悉、感谢、总结类广播按提示词约定不认领；全部无人认领时消息标记失败并提示 @指定成员重发。自动记录的回合回复不是发布，引用 @ 不会再次唤醒成员，实际交接仍须调用 `chatroom_send`。
-- 每个订阅者有独立消费确认：`pending → evaluating → skipped`，或 `pending → evaluating → processing → consumed`；点名消息直接进入 `processing`。异常进入 `failed`，记录开始/结束时间与公开错误。只有完整处理回合成功结束且已产生当前消息的公开回复或交接消息，才确认 `consumed`；认领与订阅本身不能算消费成功。一个成员失败不阻断其余成员；至少一位消费成功时整体为 `delivered`，仍在 `error` 和逐成员记录中保留部分失败；没有任何消费确认的运行器不能标成功。`[pi-webx:chatroom]` 结构化日志包含消息 ID、成员、消费状态和错误，不写入正文或认领理由。
-- 消息按 SQLite 自增 `seq` 排序；`sessionId + entryKey` 幂等，同键不同内容拒绝。公共接口不返回内部来源会话、任务版本或认领记录。
-- 单队列串行消费；发送工具只落库入队，不等待下游 Agent，避免互相等待。每位成员独立计算入场等待期限，前一位成员的处理时间不扣减后续成员的入场预算。接收模块忙时有限等待，创建会话也有入场超时；超时、取消或失败如实记为失败，迟到创建的会话会被回收。
-- 重启可恢复尚未开始的 pending 消息。若执行中的消息已取得全部成员终态确认，直接从持久记录恢复整体结果；否则保留已成功的成员，将未完成成员标记中断，不自动重跑可能已修改文件的任务。失败后用户可回复消息并重新 @接收方发起交接。终态消费确认不因重复发送或再次入队而重新执行。
-- 每段自动接力限制深度和消息总数；用户回复可开始新一段接力，普通收悉/感谢/结果广播不再点名，避免反复互叫。
-- 完成状态只允许当前助理接收到的研发回报更新其明确列出的已完成待办；需求导入复用现有事务、版本与防重复规则；整批状态更新也在事务中校验。
-- 群记录只取显式发送正文与成功回合最后一条纯文本回复，不读取 reasoning/thinking 或工具结果。自动记录的回合回复中引用 @ 不会再次唤醒成员；实际交接须调用 `chatroom_send`。
+- `chatroom_send` / `chatroom_read` / `chatroom_work` 是模块公共通信工具，按 YAML 白名单装配。发言身份取服务端闭包，模型不能指定 sender。正文 @ 与可选 to 须一致，一条消息只点名一人。
+- 群广播固定快照全部其他启用成员。成员使用禁业务工具的短命判定会话；认领后进入自己持久绑定的工作会话，判定 JSON 不污染工作上下文。收悉、感谢和结果广播不认领；自动记录的最终正文不再次路由 @。
+- 消息落库后入调度，发送工具不等待下游，避免相互等待。调度有界并行，只认领当前可执行的成员消息；同一成员的积压不会占满投递名额。每 Agent 收件箱 FIFO 串行，不同 Agent 可以独立处理。广播按成员顺序准入，同一时刻一个广播投递；广播已终态的成员可处理后续点名消息，其余成员保持原顺序。现有模块工作目录冲突检查和 maxRunningSessions 继续生效。
+- `sessionId + entryKey` 保持消息幂等，同键不同请求拒绝。协作工具和用户任务操作分别记录幂等键；消费终态不自动重复执行。自动接力仍限制深度及每段消息总数。
+- 接收执行的 sessionId、Run、工具开始/结束及交接父 Run 持久关联。群里只公开任务摘要和成员执行状态，不公开内部路径、私有转录、思考过程或工具参数。
+- 持久群记录完整保留，提示词仅注入上次成功游标后的公开增量。超过注入上限会显式说明遗漏数量，Agent 可用 chatroom_read 查回原文；SDK 自己管理模型窗口和压缩。原始记录保存与模型一次能看到的上下文是不同边界。
 
-## 接口与验证
+## 中断与恢复
 
-`POST /api/chatroom/messages` 接收 `{body,entryKey,replyTo?}`，发言人固定为用户，不能由浏览器伪造 Agent 身份或业务引用。服务端签发的 HttpOnly cookie 用于同一浏览器的幂等范围；发送重试保留 entryKey。用户气泡在右侧，Agent 气泡在左侧。`replyTo` 只允许引用已有消息，沿用话题和服务端保存的业务上下文。
+未开始的 pending 消息可继续投递。重启时不自动重跑 running 消费：保留已经成功的成员，并将未确认执行记录为 interrupted；有工具副作用风险时为 needs_review。任务、原 Session、工具记录与已持久交接保留，子交接可以有自己的消费结果。
 
-`GET /api/chatroom/messages?after=<seq>&limit=100&watch=<seq,...>` 返回群、成员、按序消息、分页游标和被监视消息的最新状态。每条公开消息包含 `consumptions[]`，记录 `agentId/agentName/status/startedAt/finishedAt/error`。前端补齐分页后增量轮询，借助 `watch` 更新旧消息和成员消费状态；仅成员状态变化也会刷新，消费成功或失败会及时刷新关联工作台数据。全部成员跳过时页面显示「无人认领」，其他消费故障显示「投递失败」；历史消息缺少消费确认时返回空数组，不捏造消费结果。
+继续失败/中断任务会创建明确的新用户输入和新 Run，恢复原成员的执行 Session。结果不明须 reviewed:true；恢复前先核对文件及业务状态，模型提示词也要求不得盲目重复。取消只结束执行目标，不回滚已发生的文件或外部副作用。review 要求 reviewed:true，保留历史 Run 的未明结果并写入核对时间；已取消任务保持取消，原话题可继续讨论，不能借核对重新启动已取消任务。
 
-`npm run check:chatroom` 覆盖存储、投递、逐成员消费确认、部分失败、HTTP watch、真实 SDK 隔离运行、广播认领扇出、受限待办交接和 SSR 页面。项目既有四项门禁继续适用。离线脚本模型用于可重复验证工具与状态链路，不代表已验证真实模型在任意需求上的规划和编码质量。
+当前采用单宿主进程的收件调度与 Session 单写者，未引入跨进程调度租约；同数据库多宿主并行调度不在支持范围。工具开始/结束及人工核对账本用于识别恢复风险，不提供 Shell/API 的 exactly-once 保证。
 
-`node --import tsx scripts/check-chatroom-live.ts` 是显式运行的真实模型验收：临时 HTTP 服务发送点名与群发布消息，使用当前配置模型，核对消费日志、公开回复和代码 Agent 的实际文件写入；工作目录、数据库与会话产物位于打印出的临时目录，保留 `consumption.log` 和 `result.json` 供复查。
+## HTTP 与界面
+
+- `POST /api/chatroom/messages`：`{body,entryKey,replyTo?,threadId?,collaborationTaskId?}`；来源固定用户，由服务端 HttpOnly cookie 提供幂等范围。任务必须属于该话题，不能注入业务引用。
+- `GET /api/chatroom/messages?after=<seq>&limit=100&watch=<seq,...>`：群、成员、分页消息、被观察消息更新及公开 `tasks[]`。逐成员消费和任务状态分别显示。
+- `POST /api/chatroom/tasks/:id/actions`：`{action:"resume"|"cancel"|"review",entryKey,expectedVersion,agentId?,reviewed?,body?}`；多成员恢复需指定成员，版本冲突须刷新，不覆盖并发变化。
+- 用户退出或刷新群页面不会销毁任务；页面按 seq 拉齐消息，持续轮询成员和任务状态。草稿及失败重试键保持关联，切话题与任务后不能误重用其他路由的发送键。
+
+## 实现与验证
+
+`server/modules/chatroom/` 拥有消息、工作记录、路由、工具及运行器。模块装配与精确会话索引在 `server/module-agents/`，不重新实现 PiHost 事件协议。前端专属界面在 `src/workbench-app/modules/chatroom/`。
+
+`npm run check:chatroom` 覆盖 SQLite/HTTP/业务边界、真实离线 SDK 运行、持续会话、任务状态、并发、取消及 SSR DOM。`scripts/check-module-session-index.ts` 验证超出最近列表范围的旧日志查找、真实 SDK 冷恢复和身份校验。`npm run dev:chatroom-fixture` 提供临时数据库/工作目录和真实 SDK 工具的离线浏览器验收服务。脚本模型可证明协议链路，不能替代真实模型规划与编码质量验收。
+
+## 设计参考（固定提交）
+
+- [AutoGen：成员缓冲与私有上下文独立保存](https://github.com/microsoft/autogen/blob/027ecf0a379bcc1d09956d46d12d44a3ad9cee14/python/packages/autogen-agentchat/src/autogen_agentchat/teams/_group_chat/_chat_agent_container.py#L197-L213)。save_state 不自动落盘，也不保存完整运行中队列。
+- [LangGraph：逐任务 pending writes](https://github.com/langchain-ai/langgraph/blob/07b33185eab893be2ed031eedae52f09314bf77c/libs/checkpoint/README.md#L57-L69)。恢复可能重执行节点，副作用需独立校验。
+- [OpenHands SDK：状态恢复与事件存储](https://github.com/OpenHands/software-agent-sdk/blob/79df4e896c1925a9c23d7d1f3cb2d4d1a801bd26/openhands-sdk/openhands/sdk/conversation/state.py#L430-L451)。加载 conversation 不等于自动继续被中断的执行。
+- [DSH：持久 inbox 变更](https://github.com/deepseek-ai/deepseek-harness/blob/639ed015397290b3745d163aafe02ffee4aa3f84/packages/core/agent-loop/src/inbox.ts#L197-L242)。其子 Agent 在线父级和进程内所有权限制不直接用于群消息承诺。
+- [AAMP：TaskId 与 Session-Key、接收/求助/最终结果](https://github.com/larksuite/aamp/blob/7fd750875f4da2417672b91aa39eb30d4d7c80d3/docs/AAMP_CORE_SPECIFICATION.md#L94-L166)。借鉴语义，内部传输继续使用 SQLite 和现有 API。
+
+真实模型验收 `scripts/check-chatroom-live.ts` 使用临时工作目录、数据库及当前配置模型，核对点名和广播的真实文件写入、读取及显式任务完成。可用 `PI_WEBX_CHATROOM_LIVE_TIMEOUT_MS`（默认 120000，最大 600000）调整验收回合预算，产物记录实际预算；生产默认回合预算为十分钟。
