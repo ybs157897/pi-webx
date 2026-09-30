@@ -1,6 +1,8 @@
 /**
- * 日志查询 —— 检索中心：主界面是一张密集的结果表，操作入口只有两个对话框
- * （「查询日志」下条件、「记录日志」落一条）——形态是用户定调过的，必须保留。
+ * 日志查询 —— 检索中心（对话优先）：默认落在「日志对话」，与 logs Agent 边走边问，
+ * 截图与日志文件可以直接丢进输入框；「日志记录」页签保留原密集结果表与查询 / 记录
+ * 弹窗。工具栏两个按钮跨视图可用：查询提交后落回记录视图看结果，记录提交后停在
+ * 当前视图。从导航带 `navigationTarget.selectedId` 进来时直落记录视图。
  *
  * 表格概念取自 amir20/dozzle 的日志流：最左一条 4px 级别色条（info=accent /
  * warn=warn / error=danger）、时间列（今天只报时刻）、来源 chip、正文两行截断，
@@ -15,10 +17,11 @@
  * @module src/workbench-app/modules/logs
  */
 
-import { useId, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { api } from '../../api.mjs'
+import { parseTranscriptViewMode } from '../../../lib/transcript/presentation'
 
-import { IconLogs, IconPlus, IconSparkles } from '../../icons.jsx'
+import { IconLogs, IconPlus } from '../../icons.jsx'
 import { groupBy, todayISO } from '../../util.mjs'
 import './Logs.css'
 
@@ -26,11 +29,14 @@ export { logsAgentPanel } from './agent-ui.js'
 
 import { TEXT, EMPTY_FILTERS, SOURCE_LIMIT, TAG_LIMIT, levelOf, parseTags, byRecency } from './model.jsx'
 
+import Dialogs from './Dialogs.jsx'
+import LogsChat from './LogsChat.jsx'
 import View from './View.jsx'
 
-export default function Logs({ data, mutate, notify, empty = false, onLoadDemo, openAgent }) {
+export default function Logs({ data, mutate, notify, refresh, empty = false, onLoadDemo, navigationTarget, themeMode, prefs }) {
   const today = todayISO()
   const logs = Array.isArray(data?.logs) ? data.logs : []
+  const [view, setView] = useState(navigationTarget?.selectedId ? 'records' : 'chat')
 
   const [filters, setFilters] = useState(EMPTY_FILTERS)
   const [queryDraft, setQueryDraft] = useState(EMPTY_FILTERS)
@@ -43,6 +49,11 @@ export default function Logs({ data, mutate, notify, empty = false, onLoadDemo, 
   const [busy, setBusy] = useState(false)
   const [demoBusy, setDemoBusy] = useState(false)
   const queryFormId = useId()
+
+  /** 导航入口带 selectedId 时直达记录视图（日志没有详情页，selectedId 只用于落位）。 */
+  useEffect(() => {
+    setView(navigationTarget?.selectedId ? 'records' : 'chat')
+  }, [navigationTarget])
 
   /** 关键字 / 来源 / 日期围出来的底集：级别计数与结果都从它派生（级别 chip 只筛最后一层）。 */
   const base = useMemo(() => {
@@ -130,6 +141,8 @@ export default function Logs({ data, mutate, notify, empty = false, onLoadDemo, 
     }
     setFilters({ ...queryDraft, keyword: queryDraft.keyword.trim(), levels: [...queryDraft.levels] })
     setQueryOpen(false)
+    // 查询的结果在表里：提交后落回记录视图，别让用户再找一次页签。
+    setView('records')
   }
 
   function openRecord() {
@@ -177,37 +190,34 @@ export default function Logs({ data, mutate, notify, empty = false, onLoadDemo, 
     setDemoBusy(false)
   }
 
-  const agentReady = typeof openAgent === 'function'
-
-  const headActions = (
-    <>
-      <button
-        type="button"
-        className="btn logs-agent-btn"
-        data-testid="logs-agent-open"
-        disabled={!agentReady}
-        title={agentReady ? TEXT.askAgent : TEXT.askAgentUnavailable}
-        onClick={() => { if (agentReady) openAgent('logs') }}
-      >
-        <IconSparkles size={16} /> {TEXT.askAgent}
-      </button>
-      <button type="button" className="btn" data-testid="logs-query-open" onClick={openQuery}>
-        <IconLogs size={16} /> {TEXT.query}
-      </button>
-      <button type="button" className="btn btn-primary" data-testid="logs-record-open" onClick={openRecord}>
-        <IconPlus size={16} /> {TEXT.record}
-      </button>
-    </>
-  )
-
-  return <View {...{
+  /** 结果表与查询 / 记录弹窗吃同一份状态（弹窗挂在工作区根上，跨视图可开）。 */
+  const viewProps = {
     logs, empty, onLoadDemo, demoBusy, loadDemo,
-    openRecord, hasFilter, rows, headActions, filters,
+    openRecord, hasFilter, rows, filters,
     setFilters, levelCounts, toggleLevel, sourcePool, visibleSources,
     pickSource, setAllSources, allSources, levels, clearFilters,
     groups, today, openId, setOpenId, setPendingDelete,
     queryOpen, setQueryOpen, setQueryDraft, queryFormId, submitQuery,
     queryDraft, recordOpen, busy, setRecordOpen, submitRecord,
     record, setRecord, pendingDelete, confirmDelete,
-  }} />
+  }
+
+  return <div className="logs-workspace" data-module="logs" data-testid="logs-workspace">
+    <div className="logs-workspace-toolbar">
+      <div className="segmented" role="group" aria-label="日志工作区">
+        <button type="button" className={`segmented-item ${view === 'chat' ? 'is-active' : ''}`} data-testid="logs-chat-tab" aria-pressed={view === 'chat'} onClick={() => setView('chat')}>日志对话</button>
+        <button type="button" className={`segmented-item ${view === 'records' ? 'is-active' : ''}`} data-testid="logs-records-tab" aria-pressed={view === 'records'} onClick={() => setView('records')}><IconLogs size={15} />日志记录 · {logs.length}</button>
+      </div>
+      <div className="logs-workspace-actions">
+        <button type="button" className="btn" data-testid="logs-query-open" onClick={openQuery}><IconLogs size={16} />{TEXT.query}</button>
+        <button type="button" className="btn btn-primary" data-testid="logs-record-open" onClick={openRecord}><IconPlus size={16} />{TEXT.record}</button>
+      </div>
+    </div>
+    {/* 日志暂无「本次对话记录」投影，data 只用来保持与需求对话一致的宿主接口。 */}
+    <div className="logs-conversation-host" hidden={view !== 'chat'}>
+      <LogsChat data={data} themeMode={themeMode} stepsMode={parseTranscriptViewMode(prefs?.transcriptView)} onRefreshData={refresh} />
+    </div>
+    {view === 'records' && <div className="logs-records-host"><View {...viewProps} /></div>}
+    <Dialogs {...viewProps} />
+  </div>
 }

@@ -46,7 +46,7 @@ try {
   const assistantCapability = capabilities.agents.find(agent => agent.id === 'assistant');
   assert.equal(assistantCapability?.ok, true);
   assert.equal(assistantCapability?.enabled, true);
-  assert.deepEqual(assistantCapability?.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan']);
+  assert.deepEqual(assistantCapability?.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
   const concurrent = await Promise.all(Array.from({ length: 8 }, () => post({ requestId: 'same-create' })));
   assert.ok(concurrent.every(result => result.status === 200));
   const id = concurrent[0]!.body.session.id;
@@ -114,7 +114,7 @@ try {
   for (const name of ['read', 'grep', 'find', 'ls', 'edit', 'write']) {
     assert.ok(codeHosted.session.getToolDefinition(name), `codes has ${name}`);
   }
-  assert.equal(codeHosted.session.getToolDefinition('bash'), undefined, 'codes cannot run shell');
+  assert.ok(codeHosted.session.getToolDefinition('bash'), 'codes 可运行命令工具');
   const codeWrite = codeHosted.session.getToolDefinition('write')!;
   await codeWrite.execute('codes-write', { path: 'codes-fixture.txt', content: 'bound project marker' }, undefined, undefined, {} as never);
   assert.equal(await readFile(join(codesA, 'codes-fixture.txt'), 'utf8'), 'bound project marker', 'real SDK write resolves relative to bound project');
@@ -152,7 +152,7 @@ try {
   assert.ok(assistantHosted.session.getToolDefinition('assistant_capture'));
   assert.ok(assistantHosted.session.getToolDefinition('assistant_propose_plan'));
   assert.equal(assistantHosted.session.getToolDefinition('requirements_save_draft'), undefined);
-  assert.equal(assistantHosted.session.getToolDefinition('bash'), undefined);
+  assert.ok(assistantHosted.session.getToolDefinition('bash'), '助理也拥有通用命令工具');
   await host.kill(assistantHosted.id);
   console.log('PASS 模块 HTTP：创建幂等、运行中恢复、并发恢复、SDK 工具回合与快照；代码 Agent 真实目录、工具白名单、按项目恢复隔离');
 } finally {

@@ -1,5 +1,5 @@
 /**
- * 移动端「事项 / 对话」两态的跨组件通道。
+ * 对话展开/收起与当前会话待确认数量的跨组件通道。
  *
  * 对话列是 App 以节点形式注入 workspace 的（`chat={<AssistantChat/>}`），节点在 App 里创建、
  * 拿不到 workspace 的视图 state；方案确认细条又必须留在对话列里才知道「这个会话有几份待确认」。
@@ -10,7 +10,7 @@
 
 import { createContext, useContext } from 'react'
 
-const FALLBACK = { showChat: () => {} }
+const FALLBACK = { showChat: () => {}, hideChat: () => {}, reportPendingPlans: () => {} }
 
 export const AssistantMobileView = createContext(FALLBACK)
 

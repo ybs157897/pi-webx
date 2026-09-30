@@ -1,6 +1,14 @@
+/**
+ * 模块 Agent 会话 hook：懒创建会话、双存储恢复指针、requestId 幂等。
+ * send 的第二参是输入框附件：图片随 prompt 信封走 `images`（PiImage 内联管线），
+ * 文本文件在发送时内联进消息正文（formatAttachmentBlocks，见 shell/composer-attachments.mjs）；
+ * 本地 pending 气泡只报「附了几个」，不把大文件全文画进气泡。
+ */
+
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api as piApi } from '../../lib/api'
 import { usePiSession } from '../../lib/usePiSession'
+import { formatAttachmentBlocks } from '../shell/composer-attachments.mjs'
 import { agentStorageKey, normalizeProjectCwd, readPointer, writePointer, clearPointer, readDraft, writeDraft } from './session-storage.mjs'
 
 const errorText = error => error instanceof Error ? error.message : String(error)
@@ -67,17 +75,23 @@ export function useModuleAgentChat(agentId, { cwd } = {}) {
     return open(stored ?? undefined)
   }, [open, storageKey])
 
-  const send = useCallback(async text => {
-    const content = text.trim()
-    if (!content || sendingRef.current || restoring) return false
+  const send = useCallback(async (text, attachments = {}) => {
+    const content = (text ?? '').trim()
+    const images = Array.isArray(attachments?.images) ? attachments.images : []
+    const files = Array.isArray(attachments?.files) ? attachments.files : []
+    if ((content === '' && images.length === 0 && files.length === 0) || sendingRef.current || restoring) return false
     if (agentId === 'codes' && !projectCwd) { setError('请先打开代码项目目录'); return false }
     sendingRef.current = true
     stopRequested.current = false
-    setSending(true); setError(''); setPendingText(content)
+    setSending(true); setError('')
+    setPendingText(content + (files.length + images.length > 0
+      ? `\n\n（已附 ${[files.length && `${files.length} 个文件`, images.length && `${images.length} 张图片`].filter(Boolean).join('和')}）`
+      : ''))
     try {
       const id = await ensureSession()
       if (stopRequested.current) return false
-      const response = await piApi.sendCommand(id, { type: 'prompt', message: content, id: requestId() })
+      const message = files.length > 0 ? content + formatAttachmentBlocks(files) : content
+      const response = await piApi.sendCommand(id, { type: 'prompt', message, id: requestId(), ...(images.length > 0 ? { images } : {}) })
       if (!response.success || response.data?.accepted === false) throw new Error(response.error ?? response.data?.reason ?? 'Agent 未接受消息')
       if (stopRequested.current) await piApi.sendCommand(id, { type: 'abort' })
       return true

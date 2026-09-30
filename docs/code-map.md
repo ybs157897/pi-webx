@@ -3,13 +3,13 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-29。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共八个导航入口，业务实现按模块目录归位。
+更新日期：2026-09-29。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共九个导航入口，业务实现按模块目录归位。
 
 ## 总体架构
 
 ```
 浏览器
- ├─ /            工作台前端（src/workbench-app/，React，7 业务入口 + Agent 配置）
+ ├─ /            工作台前端（src/workbench-app/，React，8 业务入口 + Agent 配置）
  └─ /chat        聊天前端（src/App.tsx → src/app/，LobeHub 风格）
         │ SSE + POST
         ▼
@@ -152,7 +152,7 @@
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
 | 模块注册表（createTools 工厂，assistant + requirements + logs + codes） | `server/module-agents/registry.ts` |
-| HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配） |
+| HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配）；`session-service.ts` 共享用户/聊天室会话创建、快照恢复、工作区占用校验 |
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
 | 装配纯函数（工具白名单过滤 + 校验 + MCP 连接装配） | `server/module-agents/assemble.ts`（router 与会话/MCP 门禁共用） |
@@ -160,25 +160,39 @@
 | 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts`；文本可经 `skills_read` 读取，二进制配套资源以 base64 留存固定版本 |
 | MCP 适配（envRefs/headerRefs 注入、工具桥接、dispose） | `server/module-agents/mcp.ts`；stdio fixture `scripts/mcp-fixture-server.ts` |
 | 前端会话 hook（懒创建、双存储恢复指针、requestId 幂等） | `src/workbench-app/agents/useModuleAgentChat.jsx` |
-| 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`definitions.js`、`AgentCapabilities.jsx`；日志专属文案在 `modules/logs/agent-ui.js`（App.jsx 以 `agentPanel` 态与通用浮层互斥；日志页保留 `logs-agent-open` 入口） |
+| 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`definitions.js`、`AgentCapabilities.jsx`；日志专属文案在 `modules/logs/agent-ui.js`（App.jsx 以 `agentPanel` 态与通用浮层互斥；日志页已对话化，`logs-agent-open` 侧挂入口退役） |
 | 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
 | Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |
 | 门禁 | `scripts/check-data-source-adapters.ts`（异构接口与插件）、`check-module-agent-http.ts`（幂等/并发/快照恢复）、`scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用）、`check-module-agent-mcp.ts`（A03/A04 服务端，stdio fixture 子进程） |
 | 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
 
-### 工作台（/，8 个导航入口）
+### 工作台（/，9 个导航入口）
 
 | 功能 | 位置 |
 | --- | --- |
-| 模块导航定义（8 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / assistant 我的助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / knowledge 知识库 / agent-settings Agent 配置 |
-| 模块实现 | `src/workbench-app/modules/{dashboard,assistant,today,tasks,fixes,logs,requirements,codes,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；today / tasks 是 assistant 页签的内容组件；其余 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import。旧 `modules/{Tasks,Works}.jsx` 与 `modules/{life,works}/` 已随合并退役 |
-| Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker.ts`），`ModuleTabs.jsx` 模块卡片切换（四份注册 Agent：assistant / logs / requirements / codes，assistant 首位），`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
+| 模块导航定义（9 个） | `src/workbench-app/App.jsx` 的 `MODULES`：dashboard 我的主页 / assistant 我的助理 / fixes 问题修复 / logs 日志查询 / requirements 需求管理 / codes 代码开发 / chatroom 内部聊天室 / knowledge 知识库 / agent-settings Agent 配置 |
+| 模块实现 | `src/workbench-app/modules/{dashboard,assistant,today,tasks,fixes,logs,requirements,codes,chatroom,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；today / tasks 是 assistant 页签的内容组件；其余 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import。旧 `modules/{Tasks,Works}.jsx` 与 `modules/{life,works}/` 已随合并退役 |
+| 日志查询（对话优先，2026-09 与需求管理同形态） | `modules/logs/index.jsx`（日志对话/日志记录页签 + 跨视图查询/记录按钮，弹窗挂根）、`LogsChat.jsx`（`useModuleAgentChat('logs')` + AIPanel，`supportsImages` 开）、`Landing.jsx`（首页三件套 + 快捷检索 chips）、`View.jsx`（密集结果表，保留 `logs-*` 旧 testid）、`Dialogs.jsx`（查询/记录/删除三弹窗）；布局在 `Logs.css`；`navigationTarget.selectedId` 直落记录视图 |
+| Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker/`），`ModuleTabs.jsx` 模块卡片切换（四份注册 Agent：assistant / logs / requirements / codes，assistant 首位），`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
 | 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
+| 模块对话输入框附件（图片 + 文本文件） | `shell/composer-attachments.mjs`（准入/转换/内联格式/卡片元数据 `attachmentBadge`，图片复用 `src/shared/attachments` 限额）+ `shell/AIPanel.jsx` 的 `supportsImages` 开关：回形针、粘贴、拖拽落点（`composer-drop` + 悬浮层）三个入口，文件以卡片展示（类型角标 + 文件名 + 类型标签）；`agents/useModuleAgentChat.jsx` 的 `send(text, attachments)` 把文本内联进消息、图片走 prompt 信封 `images`；借鉴 ZCode prompt-attachment 的「文本内联 + 注入防护」思路，PDF 等二进制暂拒 |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
 | SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`；`schema.mjs` 保留 `ARRAY_MODULES`、公共校验和演示数据，`schema-fields.mjs` 放共享字段，`server/modules/<id>/schema.mjs` 放模块字段（`knowledgeBases` / `knowledgeFolders` 归 knowledge） |
 | 知识库接入协议（读/写口子） | `docs/workbench-knowledge-protocol.md`；pi 侧工具 `extensions/pi-webx-knowledge.ts` |
+
+### 系统原生目录选择器（/api/workspace/pick）
+
+选择器跑在服务端宿主机上（`server/routes.ts` 的 `POST /api/workspace/pick`，连接断开即中止），前端只见 `{ path }`——取消是 `null`，宿主机没有选择器才是 501。
+
+| 功能 | 位置 |
+| --- | --- |
+| 平台分发（barrel，引用方零改动） | `server/directory-picker/index.ts`：`pickNativeDirectory` / `DirectoryPickerUnsupportedError` |
+| darwin / linux / 其他平台 | `native-picker.ts`：darwin 走 AppleScript `choose folder`（带 `default location`），linux 走 zenity → kdialog，都没有则报 `DirectoryPickerUnsupportedError`；`execFile` 直传 argv，不经 shell |
+| win32（koffi + IFileOpenDialog） | `win32-driver.ts` 起子进程并映射 IPC 协议、用 WM_CLOSE 服务中止；`win32-worker.ts` 是子进程入口（阻塞在模态 `Show` 里）；`win32-bindings.ts` 是 koffi FFI（vtable 槽位、GUID、`SetFolder` 的 SHCreateItemFromParsingName）；`win32-dialog.ts` 是纯 COM 时序，注入绑定即可全平台测试 |
+| koffi | `dependencies` 里的原生模块，只在 win32 子进程里被加载（父进程与门禁都不碰）；宿主机装不上就如实报错，没有 PowerShell 兜底档 |
+| 门禁 | `scripts/check-directory-picker-win32.ts`：假 koffi 内存里跑完整 COM 调用序（含 GUID/槽位/有符号 HRESULT/内存释放）、driver 的中止协议与 kill 兜底、平台分发；非 Windows 上还会真起一次子进程验证 tsx + IPC 链路，并用真 koffi 钉住「地址解码得到字符串、buffer 解码得到自身字节」 |
 
 ### 需求对话与待办导入
 
@@ -186,7 +200,7 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css` |
+| 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css`；`Landing.jsx` 维护居中首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
 | 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览需求与待办、编辑/勾选、键盘焦点和错误反馈 |
@@ -201,16 +215,30 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 入口壳层与「今天 / 待办」两页签 | `src/workbench-app/modules/assistant/index.jsx`（`AssistantWorkspace`）：页签、计数徽章与 tablist 键盘导航；对话列由 `App.jsx` 以 `chat` 节点注入，切换不卸载会话。`mobile-view.jsx` 是窄屏「事项 / 对话」切换的 context 通道 |
+| 入口壳层与「今天 / 待办」两页签 | `src/workbench-app/modules/assistant/index.jsx`（`AssistantWorkspace`）：页签、计数徽章与 tablist 键盘导航；`ChatDock.jsx` 管理最右侧对话容器及展开/收起按钮，隐藏保持会话挂载；`mobile-view.jsx` 传递展开动作和当前会话待确认数，窄屏「事项 / 对话」切换 |
 | 常驻对话列 | `modules/assistant/AssistantChat.jsx`：`useModuleAgentChat('assistant')` + `AIPanel` 的 embedded 形态，`assistant-agent-chat` / `data-agent-id="assistant"`；写入工具指纹变化后回读数据 |
 | 方案确认卡 | `modules/assistant/PlanReview.jsx`：挂在输入框上方的 dock，只展示本会话草稿；确认 `POST /api/workbench/plans/:id/apply`（带 `expectedUpdatedAt`，409 → 重新确认），取消 `DELETE /api/workbench/plans/:id`；展开区 `PlanEntries` 按天分组 |
-| 待办视图（收集 / 分组 / 筛选） | `src/workbench-app/modules/tasks/`：`index.jsx` 页面，`model.jsx` 快速捕获语法 `parseQuickAdd` 与认知分组（已逾期 / 今天 / 稍后 / 已完成）；`server/modules/tasks/schema.mjs` 是待办字段真相源 |
-| 今天视图（时间轴） | `src/workbench-app/modules/today/index.jsx`：有 `startTime` 的事项按时间进轴，`fixed` / `flexible` 只分节点符号；≥45 分钟空档画呼吸缝；「今天，时间待定」小节、遗留与候选默认折叠、概览三格同源派生 |
+| 待办视图（收集 / 分组 / 筛选） | `src/workbench-app/modules/tasks/`：`index.jsx` 组合快速记录卡与分组卡，`TaskOverview.jsx` 展示全量待办的未完成/今天安排/逾期/完成统计；`model.jsx` 快速捕获语法 `parseQuickAdd` 与认知分组；`server/modules/tasks/schema.mjs` 是待办字段真相源 |
+| 今天视图（时间轴） | `src/workbench-app/modules/today/index.jsx`：日程主卡、遗留/候选侧卡；`TodayOverview.jsx` 四项同源概览。有 `startTime` 的事项按时间进轴，`fixed` / `flexible` 只分节点符号；≥45 分钟空档画呼吸缝，保留时间待定小节；布局随内容容器宽度切换 |
 | 业务记录导航 | `src/workbench-app/shell/navigation.mjs` 把 tasks / today 数据链接折算到 assistant 的对应页签并保留需求来源筛选；`recordNavigationLabel('tasks')` = 「我的待办」。UI 门禁 `scripts/check-assistant-ui.tsx` 验证侧栏单入口与映射 |
-| 独立身份与提示词 | `config/agents/assistant.yaml`、`config/agents/prompts/assistant.md`；工具白名单恰为 `assistant_context` / `assistant_capture` / `assistant_propose_plan`，无 bash/read/edit，独立会话、工作目录与知识库沿用公共装配机制 |
+| 独立身份与提示词 | `config/agents/assistant.yaml`、`config/agents/prompts/assistant.md`；工具白名单为 `assistant_context` / `assistant_capture` / `assistant_propose_plan` / 受限 `assistant_coordinate`、通用文件与命令工具（read/write/edit/bash/grep/find/ls），以及 `chatroom_send` / `chatroom_read`，独立会话、工作目录与知识库沿用公共装配机制 |
 | 工具、草稿确认与排期校验 | `server/modules/assistant/{tools,service,validation}.ts`、`schema.mjs`：生成草稿不改待办，确认时事务内整批校验并写入（时段成对、结束晚于开始、固定安排需完整时段、未完成事项不重叠）；`plans` 只能经确认接口应用或取消 |
 | 旧数据迁移与兼容 | `server/workbench/store.ts`：`works` 记录（`scheduledDate → plannedDate`、`status === 'done' → done`）、`lifePlans → plans`、`works_schedule_entries` 绑定表在启动迁移中并入，可重复执行；旧导出 JSON 同键兼容；旧 life / works 会话不迁移 |
 | 门禁与隔离浏览器服务 | `scripts/check-assistant-plans.ts`（服务端全链路与迁移）、`check-assistant-agent.ts`（真实 SDK 装配、works/life HTTP 404）、`check-assistant-ui.tsx`（SSR DOM）；`npm run dev:assistant-fixture` 起离线模型 + 真实 SDK/SQLite 的隔离验收服务 |
+
+### 内部聊天室（模块 Agent 通信）
+
+产品与运行边界见 `docs/architecture/internal-chatroom.md`。
+
+| 功能 | 位置 |
+| --- | --- |
+| 微信群式正文、输入、@与回复 | `src/workbench-app/modules/chatroom/`；侧栏/命令面板由 `App.jsx` 的 chatroom 注册项提供；按 seq 增量同步、watch 更新投递状态 |
+| @ 成员语法 | `src/shared/chatroom-mentions.mjs`：前后端共享别名、目标校验与输入补全定位 |
+| 独立持久消息与串行投递盒子 | `server/modules/chatroom/{contracts,store,service}.ts`：独立 SQLite 表、身份盖章、幂等键、来源引用、认领记录（`claimants` 内部列）、循环上限、重启恢复；`consumption-store.ts` 存固定订阅者快照和逐成员消费确认，成功须有公开回复，终态防重复执行，部分失败可见 |
+| 模块公共通信工具与消息 API | `modules/chatroom/{tools,router}.ts`：`chatroom_send` / `chatroom_read`，`GET/POST /api/chatroom/messages`；`module-agents/assemble.ts` 按 YAML 白名单注入 |
+| 唤醒真实模块 Agent 与广播认领扇出 | `modules/chatroom/runtime.ts`：共享 `module-agents/session-service.ts` 装配隔离 SDK 会话，忙时等待、创建/回合超时与退出清理；`runtime-prompts.ts` 负责正文提示词和严格 JSON 认领解析，判定阶段 SDK 禁用工具；订阅者先判断、认领后完整处理并写入消费确认；生产装配在 `server/index.ts` |
+| 助理交接领域工具 | `server/modules/requirements/dispatch.ts`：被点名的需求 Agent 原子建需求和待办并绑定引用；`server/modules/assistant/coordination.ts`：只按研发回报完成关联待办，事务/版本/身份检查，排期保持原确认流 |
+| 门禁 | `npm run check:chatroom`：`scripts/check-chatroom.ts`（SQLite/HTTP/投递，`chatroom-check-fixtures.ts` 为接收回合消费确认夹具）、`check-chatroom-consumption.ts`（成员消费确认/HTTP watch/部分失败/重启）、`check-chatroom-coordination.ts`（真实业务写入边界）、`check-chatroom-runtime.ts`（离线真实 SDK 链路）、`check-chatroom-ui.tsx`（SSR）；手动真实模型发消息验收为 `scripts/check-chatroom-live.ts`，输出临时消费日志与文件结果 |
 
 ### 代码开发 IDE 与固定对话
 

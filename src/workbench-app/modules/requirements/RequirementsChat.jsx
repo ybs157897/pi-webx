@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import AIPanel from '../../shell/AIPanel.jsx'
 import { useModuleAgentChat } from '../../agents/useModuleAgentChat.jsx'
+import { RequirementsNewConversation, RequirementsStarterActions, RequirementsWelcome } from './Landing.jsx'
 
 export const requirementsAgentPanel = {
   id: 'requirements',
@@ -13,6 +14,8 @@ export const requirementsAgentPanel = {
 export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh, onImport, onOpenTasks }) {
   const chat = useModuleAgentChat('requirements')
   const [refreshError, setRefreshError] = useState('')
+  const panelRef = useRef(null)
+  const starterPrefix = useRef('')
   const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
   const savedTools = (transcript?.entries ?? []).flatMap(entry => entry.kind === 'assistant' ? entry.tools ?? [] : entry.kind === 'toolResult' ? [entry.run] : [])
     .filter(tool => tool.toolName === 'requirements_save_draft' && tool.status === 'success')
@@ -36,12 +39,21 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   const configError = capabilityError || (capability && !capability.ok ? capability.error || '需求助手未启用，请在 Agent 配置中检查。' : '')
 
+  function chooseStarter(prompt) {
+    const content = starterPrefix.current && draft.startsWith(starterPrefix.current) ? draft.slice(starterPrefix.current.length) : draft
+    setDraft(prompt + content)
+    starterPrefix.current = prompt
+    panelRef.current?.querySelector('textarea')?.focus()
+  }
+
   return <section className="req-conversation" data-testid="req-conversation" data-agent-id="requirements" aria-label="需求梳理对话">
-    <div className="req-chat-panel">
-      <AIPanel {...requirementsAgentPanel} embedded subtitle="需求助手" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
+    <div className="req-chat-panel" ref={panelRef}>
+      <AIPanel {...requirementsAgentPanel} embedded supportsImages subtitle="需求助手" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
         dialog={dialog} onRespondDialog={respondToDialog} onSend={send} onAction={send} onNew={newConversation} onRetry={retry} onRefreshData={refreshDrafts}
         onStop={canStop ? stop : undefined} stopping={stopping} draft={draft} onDraftChange={setDraft}
-        emptyExtra={configError ? <p role="alert" className="req-chat-error" data-testid="req-agent-error">{configError}</p> : <ol className="req-chat-steps" aria-label="需求梳理步骤"><li>说想法</li><li>梳理需求</li><li>确认待办</li></ol>} />
+        emptyState={<RequirementsWelcome error={configError} />}
+        composerLeading={<RequirementsNewConversation busy={busy} onNew={newConversation} />}
+        composerFooter={<RequirementsStarterActions busy={busy} status={status} modelName={modelName} onChoose={chooseStarter} />} />
     </div>
     {refreshError && <p role="alert" className="req-chat-error" data-testid="req-refresh-error">草稿刷新失败：{refreshError}<button className="btn btn-sm" type="button" onClick={refreshDrafts}>重试</button></p>}
     {records.length > 0 && <div className="req-drafts" aria-label="本次对话的需求草稿" data-testid="req-session-drafts">

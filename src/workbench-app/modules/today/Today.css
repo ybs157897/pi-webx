@@ -1,17 +1,16 @@
 /*
  * 今日视图样式：一天 = 一根时间轴。
  *
- * 版面自上而下：标题行 → 概览条（吸顶）→ 遗留折叠 → 时间轴 / 空态 → 时间待定 → 候选折叠。
+ * 版面自上而下：日期控制 → 概览卡 → 日程主卡与待处理卡。
  * 轴的三处差异就是「锚点 vs 补位」的全部表达：节点实心/空心、有无卡片底、时间字重。
  *
  * 只消费 styles.css 的设计令牌；类名前缀 `assistant-`（新形态）、`today-`（模块容器兼容）。
- * 局部常量 --assistant-gutter 挂在容器上，横向断点统一在这里改一处。
- * 断点：≤640px 收窄 gutter、标题行纵排；≤390px 动作折行。
+ * 局部常量 --assistant-gutter 挂在容器上，按左侧可用宽度排成单/双列。
  */
 
 /* ================================================================ 容器与标题行 */
 
-.today { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; --assistant-gutter: 56px; }
+.today { display: flex; flex-direction: column; gap: var(--sp-4); min-width: 0; container: today-content / inline-size; --assistant-gutter: 56px; }
 
 .assistant-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--sp-3); }
 .assistant-head-main { min-width: 0; }
@@ -33,32 +32,35 @@
 }
 .assistant-date-input:focus { border-color: var(--accent); outline: none; }
 
-/* ================================================================ 概览条（吸顶） */
+/* ================================================================ 概览卡与日程主次列 */
 
-.assistant-overview { position: sticky; top: 0; z-index: 5; padding: var(--sp-1) 0 var(--sp-2); background: var(--bg); }
+.today-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.today-stat-card { display: flex; flex-direction: column; align-items: flex-start; min-width: 0; min-height: 112px; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-1); color: var(--text-1); text-align: start; font: inherit; }
+.today-stat-label { color: var(--text-2); font-size: var(--fs-sm); font-weight: 550; }
+.today-stat-value { margin-top: var(--sp-2); color: var(--text-1); font-size: var(--fs-2xl); font-weight: 680; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.today-stat-value small { margin-inline-start: 5px; color: var(--text-3); font-size: var(--fs-xs); font-weight: 500; }
+.today-stat-value.is-text { font-size: var(--fs-xl); }
+.today-stat-hint { margin-top: auto; padding-top: var(--sp-2); color: var(--text-3); font-size: var(--fs-xs); line-height: 1.4; overflow-wrap: anywhere; }
+.today-stat-card.is-action { cursor: pointer; transition: border-color .15s ease, background .15s ease; }
+.today-stat-card.is-action:hover { border-color: var(--accent); background: var(--accent-soft); }
+.today-stat-card.is-action .today-stat-value { color: var(--accent); }
+.today-stat-track { display: block; width: 100%; height: 4px; margin-top: auto; border-radius: var(--radius-pill); background: var(--surface-3); overflow: hidden; }
+.today-stat-track span { display: block; height: 100%; background: var(--ok); }
 
-.assistant-overview-card {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: var(--sp-3);
-  padding: var(--sp-3) var(--sp-4);
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-md);
-  background: var(--surface-1);
+.today-body { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--sp-3); min-width: 0; }
+.today-schedule-card { min-width: 0; padding: var(--sp-4); border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-0); }
+.today-section-heading { margin-bottom: var(--sp-3); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-1); }
+.today-section-heading h3 { color: var(--text-1); font-size: var(--fs-md); font-weight: 650; }
+.today-section-heading p { margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); }
+.today-supporting-cards { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+
+@container today-content (min-width: 760px) {
+  .today-overview-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-.assistant-overview-cell { min-width: 0; padding: 0; border: 0; background: transparent; text-align: start; font: inherit; }
-.assistant-overview-value { color: var(--text-1); font-size: var(--fs-lg); font-weight: 650; font-variant-numeric: tabular-nums; line-height: 1.2; }
-.assistant-overview-label { margin-top: 2px; color: var(--text-3); font-size: var(--fs-xs); }
-
-.assistant-overview-cell.is-action { cursor: pointer; border-radius: var(--radius-sm); transition: color .15s ease; }
-.assistant-overview-cell.is-action .assistant-overview-value { color: var(--accent); }
-.assistant-overview-cell.is-action:hover .assistant-overview-label { color: var(--text-2); }
-
-.assistant-overview-foot { display: flex; align-items: center; gap: var(--sp-2); grid-column: 1 / -1; }
-.assistant-overview-track { flex: 1 1 auto; height: 2px; border-radius: 1px; background: var(--surface-3); overflow: hidden; }
-.assistant-overview-fill { height: 100%; background: var(--ok); transition: width .3s ease; }
-.assistant-overview-done { flex: none; color: var(--text-3); font-size: var(--fs-xs); font-variant-numeric: tabular-nums; }
+@container today-content (min-width: 900px) {
+  .today-body { grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); }
+}
 
 /* ================================================================ 时间轴 */
 
@@ -115,14 +117,15 @@
 
 /* ================================================================ 折叠块（遗留 / 候选） */
 
-.assistant-fold { display: flex; flex-direction: column; gap: var(--sp-2); }
+.assistant-fold { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-0); overflow: hidden; }
 
-.assistant-fold-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--row-h-sm); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-radius: var(--radius-md); background: var(--surface-1); color: var(--text-2); font-size: var(--fs-sm); text-align: start; cursor: pointer; transition: background .15s ease; }
+.assistant-fold-head { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: 44px; padding: var(--sp-2) var(--sp-3); border: 0; background: var(--surface-1); color: var(--text-2); font-size: var(--fs-sm); text-align: start; cursor: pointer; transition: background .15s ease; }
 .assistant-fold-head:hover { background: var(--surface-2); }
 .assistant-fold-head.is-warn { background: var(--warn-soft); border-color: transparent; color: var(--warn-strong); }
 .assistant-fold-head.is-warn:hover { background: var(--warn-soft); }
 .assistant-fold-head .assistant-fold-chevron { display: grid; place-items: center; margin-inline-start: auto; transition: transform .15s ease; }
 .assistant-fold-head[aria-expanded="true"] .assistant-fold-chevron { transform: rotate(90deg); }
+.assistant-fold-body { border-top: 1px solid var(--line-1); }
 
 .assistant-fold-body[hidden] { display: none; }
 
@@ -160,15 +163,14 @@
 
 /* ================================================================ 响应式 */
 
-@media (max-width: 640px) {
-  .today { --assistant-gutter: 44px; }
+@container today-content (max-width: 640px) {
+  .today-body { --assistant-gutter: 44px; }
   .assistant-head { align-items: stretch; flex-direction: column; }
-  .assistant-overview-value { font-size: var(--fs-md); }
-  .assistant-overview-card { padding: var(--sp-3); }
   .assistant-slot-actions .btn { min-height: 32px; }
 }
 
-@media (max-width: 390px) {
+@container today-content (max-width: 390px) {
+  .today-stat-card, .today-schedule-card { padding: var(--sp-3); }
   .assistant-date-input { flex: 1 1 120px; }
   .assistant-slot-body { flex-wrap: wrap; }
   .assistant-slot-actions { width: 100%; justify-content: flex-start; }

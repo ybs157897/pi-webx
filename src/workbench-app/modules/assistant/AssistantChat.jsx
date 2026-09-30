@@ -11,6 +11,7 @@
 import { useEffect, useState } from 'react'
 import { useModuleAgentChat } from '../../agents/useModuleAgentChat.jsx'
 import AIPanel from '../../shell/AIPanel.jsx'
+import { IconChevronRight } from '../../icons.jsx'
 import { useAssistantMobileView } from './mobile-view.jsx'
 import PlanReview from './PlanReview.jsx'
 
@@ -27,7 +28,7 @@ const WRITE_TOOLS = ['assistant_capture', 'assistant_propose_plan']
 
 export default function AssistantChat({ data, themeMode, stepsMode, refresh, mutate, notify }) {
   const chat = useModuleAgentChat('assistant')
-  const { showChat } = useAssistantMobileView()
+  const { showChat, hideChat, reportPendingPlans } = useAssistantMobileView()
   const [refreshError, setRefreshError] = useState('')
   const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
   const writes = (transcript?.entries ?? []).flatMap(entry => entry.kind === 'assistant' ? entry.tools ?? [] : entry.kind === 'toolResult' ? [entry.run] : [])
@@ -52,8 +53,11 @@ export default function AssistantChat({ data, themeMode, stepsMode, refresh, mut
     ? []
     : plans.filter(plan => plan?.sourceSessionId === sessionId && (plan.appliedAt === null || plan.appliedAt === undefined))
   const docked = pendingPlans.length > 0
+  useEffect(() => { reportPendingPlans(pendingPlans.length) }, [pendingPlans.length, reportPendingPlans])
+  useEffect(() => () => reportPendingPlans(0), [reportPendingPlans])
   const configError = capabilityError || (capability && !capability.ok ? capability.error || '请在 Agent 配置中检查我的助理设置。' : '')
   return <section className="assistant-chat" data-testid="assistant-agent-chat" data-agent-id="assistant" data-session-id={sessionId ?? ''} data-plan={docked ? 'open' : undefined} aria-label="我的助理对话">
+    <button type="button" className="icon-btn assistant-chat-collapse" data-testid="assistant-chat-collapse" aria-label="收起对话" title="收起对话（Esc）" onClick={hideChat}><IconChevronRight size={18} /></button>
     <div className="assistant-chat-body">
       <div className="assistant-chat-panel"><AIPanel {...assistantAgentPanel} embedded subtitle="收集 · 整理 · 安排" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
         dock={docked ? <PlanReview plans={plans} tasks={data?.tasks ?? []} sessionId={sessionId} refresh={refresh} notify={notify} /> : null}

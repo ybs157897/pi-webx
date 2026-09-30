@@ -1,22 +1,46 @@
 /* Requirement conversation owns its layout; the navigation stays available. */
-.main-inner.req-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-bottom: var(--sp-5); max-width: 1180px; }
+.main-inner.req-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-bottom: var(--sp-5); max-width: none; background: var(--surface-0); }
 .req-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
 .req-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-4); }
 .req-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; }
 .req-workspace-toolbar .segmented-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
-.req-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; max-width: 920px; margin-inline: auto; }
+.req-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; margin-inline: auto; }
 .req-conversation-host[hidden] { display: none; }
-.req-conversation { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; border: 1px solid var(--line-1); border-radius: var(--radius-lg); overflow: hidden; background: var(--surface-0); }
+.req-conversation { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
 .req-chat-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .req-chat-panel > div { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .req-chat-panel .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
 .req-chat-panel .ai-overlay-surface { background: var(--surface-0); }
 .req-chat-panel .aside-head { background: var(--surface-0); }
-.req-chat-panel .chat-empty { padding: var(--sp-5); width: min(100%, 560px); }
-.req-chat-panel .chat-empty-text { line-height: 1.75; }
 .req-chat-panel .composer { padding: var(--sp-3) var(--sp-4); }
 .req-chat-panel .ai-fallback { max-height: 160px; overflow-y: auto; }
-.req-chat-steps { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-4); padding: 0; list-style-position: inside; color: var(--text-3); font-size: var(--fs-xs); }
+/* 四列网格：附件回形针 | 新对话 | 弹性空档 | 发送/停止——附件键加入后发送钮仍钉在最右。 */
+.req-chat-panel .composer-box { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: var(--sp-3); padding: var(--sp-4); border-color: var(--line-1); border-radius: calc(var(--radius-lg) + var(--sp-2)); background: var(--surface-0); box-shadow: var(--shadow-2); }
+.req-chat-panel .composer-box:focus-within { border-color: var(--accent); }
+.req-chat-panel .module-attach { grid-column: 1; align-self: center; }
+.req-chat-panel .composer-input { grid-column: 1 / -1; min-width: 0; min-height: 48px; font-size: var(--fs-md); line-height: 1.6; }
+.req-chat-panel .send-btn { grid-column: 4; width: 36px; height: 36px; border-radius: var(--radius-pill); }
+.req-composer-new { grid-column: 2; justify-self: start; color: var(--text-3); }
+.req-chat-panel [data-empty="false"] .req-composer-new { display: none; }
+
+/* The welcome and composer form one centered group, with shared send/dialog handling. */
+.req-chat-panel [data-empty="true"] .ai-overlay-surface { justify-content: safe center; padding-block: var(--sp-7); overflow-y: auto; }
+.req-chat-panel [data-empty="true"] .aside-head { display: none; }
+.req-chat-panel [data-empty="true"] .chat-scroll { flex: none; overflow: visible; }
+.req-chat-panel [data-empty="true"] .composer { flex: none; max-width: 760px; padding: 0 var(--sp-4); border: 0; }
+.req-landing { margin: 0 auto var(--sp-6); padding-inline: var(--sp-4); text-align: center; }
+.req-landing-title { margin: 0; font-size: clamp(32px, 3.2vw, 48px); line-height: 1.25; letter-spacing: .06em; font-weight: 700; color: var(--text-1); }
+.req-landing-description { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-md); }
+.req-starter-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: 44px; margin-inline: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-xs); }
+.req-starter-toolbar > span { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.req-starter-toolbar > span:first-child { flex: none; }
+.req-starter-status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.req-starter-status .status-dot { flex: none; }
+.req-starter-suggestions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-3); margin-top: var(--sp-7); }
+.req-starter-chip { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 36px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-radius: var(--radius-pill); background: var(--surface-0); color: var(--text-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.req-starter-chip:hover:not(:disabled) { border-color: var(--line-2); background: var(--surface-1); color: var(--text-1); }
+.req-starter-chip:focus-visible, .req-composer-new:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.req-starter-chip:disabled { cursor: default; opacity: .5; }
 .req-chat-error { color: var(--danger); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .req-chat-error button { margin-left: var(--sp-2); }
 .req-drafts { flex: none; max-height: 180px; overflow-y: auto; border-top: 1px solid var(--line-1); background: var(--surface-1); }
@@ -39,8 +63,17 @@
   .req-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
   .req-chat-panel .aside-head .grow { min-width: 0; }
   .req-chat-panel .aside-sub { overflow-wrap: anywhere; }
-  .req-chat-panel .chat-empty { padding: var(--sp-3); }
   .req-chat-panel .composer { padding: var(--sp-2); }
+  .req-chat-panel [data-empty="true"] .ai-overlay-surface { justify-content: safe center; padding-block: var(--sp-6); }
+  .req-chat-panel [data-empty="true"] .composer { padding-inline: 0; }
+  .req-chat-panel .composer-box { padding: var(--sp-3); }
+  .req-chat-panel .composer-input { font-size: var(--fs-lg); }
+  .req-chat-panel .send-btn, .req-composer-new { width: 44px; height: 44px; }
+  .req-landing { margin-bottom: var(--sp-5); }
+  .req-landing-description { font-size: var(--fs-sm); }
+  .req-starter-toolbar { margin-inline: var(--sp-2); padding-inline: var(--sp-3); }
+  .req-starter-suggestions { gap: var(--sp-2); margin-top: var(--sp-5); }
+  .req-starter-chip { min-height: 44px; }
   .req-draft { flex-wrap: wrap; padding: var(--sp-2); }
   .req-drafts { max-height: 150px; }
   .req-draft button { min-height: 44px; }

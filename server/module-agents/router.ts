@@ -6,43 +6,22 @@
  * sessionId 定位磁盘会话文件，身份核对在 host 装配线里完成，客户端不能传
  * sessionPath、不能覆盖工具面。requestId 幂等：同一请求重试复用进行中的创建。
  */
-import { SessionManager } from '@earendil-works/pi-coding-agent';
-import { realpath, stat } from 'node:fs/promises';
-import { readModuleAgentEntry } from '../pi/host-session-assembly';
-import { ProfileSnapshots } from './snapshots';
-import type { DataSourceRegistry } from '../data-sources/registry';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
-import path from 'node:path';
-
-import type { PiHost } from '../pi/host';
 import { HostError } from '../pi/host';
-import { listStoredSessions } from '../stored-sessions';
 import type { SessionSummary, ModuleAgentCapability } from '../../src/shared/protocol';
-import type { WorkbenchStore } from '../workbench/store';
 import {
   AGENT_IDS,
   type AgentId,
-  type ProfileLoadResult,
-  type ResolvedAgentProfile,
 } from './contracts';
-import { assembleModuleAgent } from './assemble';
 import { readBinding } from './knowledge';
-import { assertWorkspaceAvailable, canonicalWorkspacePath, effectiveWorkspace, WorkspaceError, workspacePathsOverlap } from './workspace';
+import { effectiveWorkspace } from './workspace';
+import { assertCodesWorkspace, createModuleAgentSessionService, type ModuleAgentSessionService, type ModuleAgentSessionServiceDeps } from './session-service';
 
 /** 同一 requestId 的创建结果保留窗口：客户端重试落在窗口内得到同一份应答。 */
 const REQUEST_ID_TTL_MS = 5 * 60_000;
-/** 按 sessionId 恢复时扫描的存储会话上限，与 routes 的 STORED_LOOKUP_LIMIT 对齐。 */
-const STORED_LOOKUP_LIMIT = 200;
-
-export interface ModuleAgentsRouterDeps {
-  host: PiHost;
-  store: WorkbenchStore;
-  profiles: Map<AgentId, ProfileLoadResult>;
-  workspaceKey: string;
-  dataSourceRegistry?: DataSourceRegistry;
-  snapshots?: ProfileSnapshots;
-  storedSessions?: typeof listStoredSessions;
+export interface ModuleAgentsRouterDeps extends ModuleAgentSessionServiceDeps {
+  sessionService?: ModuleAgentSessionService;
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -53,28 +32,13 @@ function isAgentId(value: string): value is AgentId {
   return (AGENT_IDS as readonly string[]).includes(value);
 }
 
-async function codesWorkspace(value: unknown): Promise<string> {
-  if (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0')) {
-    throw new HostError(400, '代码 Agent 需要绝对路径的项目目录');
-  }
-  try {
-    const canonical = await realpath(value);
-    if (!(await stat(canonical)).isDirectory()) throw new HostError(400, '项目路径不是目录');
-    return canonical;
-  } catch (error) {
-    if (error instanceof HostError) throw error;
-    throw new HostError(400, '项目目录不存在或不可访问');
-  }
-}
-
 export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
   const { host, store, profiles, workspaceKey } = deps;
-  const snapshots = deps.snapshots ?? new ProfileSnapshots(path.join(path.dirname(store.sqlite.name), 'module-agent-profiles'));
+  const sessionService = deps.sessionService ?? createModuleAgentSessionService(deps);
   const router = Router();
   const restoring = new Map<string, Promise<SessionSummary>>();
   const requestTargets = new Map<string, string>();
   const inFlight = new Map<string, Promise<SessionSummary>>();
-  const workspaceClaims = new Map<symbol, { agentId: AgentId; path: string }>();
 
   router.get('/', (_req: Request, res: Response) => {
     const agents: ModuleAgentCapability[] = AGENT_IDS.map((id) => {
@@ -134,7 +98,7 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
     const sessionId = typeof body.sessionId === 'string' && body.sessionId !== '' ? body.sessionId : undefined;
     let assertedCwd: string | undefined;
     try {
-      if (agentId === 'codes' && body.cwd !== undefined) assertedCwd = await codesWorkspace(body.cwd);
+      if (agentId === 'codes' && body.cwd !== undefined) assertedCwd = await assertCodesWorkspace(body.cwd);
       else if (body.cwd !== undefined) throw new HostError(400, '仅代码 Agent 可以指定项目目录');
     } catch (error) {
       respondError(res, error);
@@ -172,7 +136,7 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
 
     const restoreKey = sessionId ? `${agentId}:${workspaceKey}:${sessionId}:${assertedCwd ?? ''}` : undefined;
     const creation = (restoreKey ? restoring.get(restoreKey) : undefined)
-      ?? openOrCreate(agentId, profile, sessionId, assertedCwd).then((hosted) => host.summary(hosted));
+      ?? sessionService.openOrCreate(agentId, profile, sessionId, assertedCwd).then((hosted) => host.summary(hosted));
     requestTargets.set(inFlightKey, target);
     inFlight.set(inFlightKey, creation);
     if (restoreKey) restoring.set(restoreKey, creation);
@@ -187,118 +151,6 @@ export function createModuleAgentsRouter(deps: ModuleAgentsRouterDeps): Router {
       respondError(res, error);
     }
   });
-
-  async function openOrCreate(agentId: AgentId, profile: ResolvedAgentProfile, sessionId?: string, assertedCwd?: string) {
-    if (sessionId !== undefined) {
-      const hosted = host.get(sessionId);
-      if (hosted !== undefined) {
-        if (hosted.moduleAgent?.agentId !== agentId || hosted.moduleAgent?.workspaceKey !== workspaceKey) {
-          throw new HostError(409, '会话不属于该模块 Agent');
-        }
-        if (assertedCwd !== undefined && await codesWorkspace(hosted.cwd) !== assertedCwd) {
-          throw new HostError(409, '会话属于其他项目目录');
-        }
-        await available(agentId, hosted.cwd);
-        return hosted;
-      }
-      const stored = (await (deps.storedSessions ?? listStoredSessions)({ limit: STORED_LOOKUP_LIMIT }))
-        .find((entry) => entry.id === sessionId);
-      if (stored === undefined) {
-        throw new HostError(404, `no stored session with id ${sessionId}`);
-      }
-      const manager = SessionManager.open(stored.path);
-      const identity = readModuleAgentEntry(manager);
-      if (identity?.agentId !== agentId || identity?.workspaceKey !== workspaceKey || !identity.profileRevision) {
-        throw new HostError(409, '会话身份不匹配，不能恢复');
-      }
-      const original = await snapshots.read(identity.profileRevision);
-      const historicalCwd = original.effectiveWorkspace ?? stored.cwd;
-      if (assertedCwd !== undefined && await codesWorkspace(historicalCwd) !== assertedCwd) {
-        throw new HostError(409, '会话属于其他项目目录');
-      }
-      if (agentId === 'codes' && await codesWorkspace(manager.getHeader()?.cwd) !== await codesWorkspace(historicalCwd)) {
-        throw new HostError(409, '会话记录的项目目录不匹配');
-      }
-      const release = await claim(agentId, historicalCwd);
-      try {
-        const assembled = await assemble(agentId, original, stored.cwd);
-        try {
-          return await host.create({
-            sessionPath: stored.path,
-            cwd: stored.cwd,
-            moduleAgent: assembled,
-          });
-        } catch (error) {
-          // 装配已建立 MCP 连接但 create 失败：连接不能被遗弃。
-          await assembled.dispose().catch(() => undefined);
-          throw error;
-        }
-      } finally {
-        release();
-      }
-    }
-    const currentCwd = effectiveWorkspace(profile);
-    if (assertedCwd !== undefined && await codesWorkspace(currentCwd) !== assertedCwd) {
-      throw new HostError(409, '项目目录与 Agent 配置的工作区不一致');
-    }
-    const release = await claim(agentId, currentCwd);
-    try {
-      await snapshots.save(profile);
-      const assembled = await assemble(agentId, profile);
-      try {
-        return await host.create({ moduleAgent: assembled });
-      } catch (error) {
-        await assembled.dispose().catch(() => undefined);
-        throw error;
-      }
-    } finally {
-      release();
-    }
-  }
-
-  /** 装配收敛到 assemble.ts：领域工具按配置 tools 过滤后才进会话。 */
-  async function assemble(agentId: AgentId, profile: ResolvedAgentProfile, legacyStoredCwd?: string) {
-    return assembleModuleAgent({ store, workspaceKey, agentId, profile,
-      workspaceDir: profile.effectiveWorkspace ?? legacyStoredCwd,
-      dataSourceRegistry: deps.dataSourceRegistry });
-  }
-
-  async function available(agentId: AgentId, directory: string): Promise<void> {
-    try {
-      await assertWorkspaceAvailable(agentId, directory, profiles,
-        [...host.sessions.values()].filter(item => item.moduleAgent).map(item => ({
-          agentId: item.moduleAgent!.agentId, cwd: item.cwd,
-        })));
-    } catch (error) {
-      if (error instanceof WorkspaceError) throw new HostError(409, error.message);
-      throw error;
-    }
-  }
-
-  async function claim(agentId: AgentId, directory: string): Promise<() => void> {
-    await available(agentId, directory);
-    const canonical = await canonicalWorkspacePath(directory);
-    // No await between checking and publishing the claim: concurrent restores serialize here.
-    for (const hosted of host.sessions.values()) {
-      if (hosted.moduleAgent?.agentId !== undefined && hosted.moduleAgent.agentId !== agentId
-        && workspacePathsOverlap(canonical, hosted.cwd)) {
-        throw new HostError(409, `工作区与运行中的模块 Agent「${hosted.moduleAgent.agentId}」重叠`);
-      }
-    }
-    for (const [otherId, result] of profiles) {
-      if (otherId !== agentId && result.ok && workspacePathsOverlap(canonical, effectiveWorkspace(result.profile))) {
-        throw new HostError(409, `工作区与模块 Agent「${otherId}」的目录重叠`);
-      }
-    }
-    for (const held of workspaceClaims.values()) {
-      if (held.agentId !== agentId && workspacePathsOverlap(canonical, held.path)) {
-        throw new HostError(409, `工作区与正在创建的模块 Agent「${held.agentId}」重叠`);
-      }
-    }
-    const token = Symbol();
-    workspaceClaims.set(token, { agentId, path: canonical });
-    return () => { workspaceClaims.delete(token); };
-  }
 
   return router;
 }

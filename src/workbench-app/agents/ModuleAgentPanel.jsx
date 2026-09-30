@@ -22,6 +22,7 @@ export default function ModuleAgentPanel({ definition, themeMode, stepsMode, onC
     <div className={`agent-panel${embedded ? ' agent-panel-embedded' : ''}`} data-testid="module-agent-panel" data-agent-id={agentId}>
       <AIPanel
         embedded={embedded}
+        supportsImages
         title={title}
         subtitle={title}
         welcomeText={welcomeText}

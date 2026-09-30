@@ -45,6 +45,7 @@ import Logs from './modules/logs/index.jsx'
 import Requirements from './modules/requirements/index.jsx'
 import Codes from './modules/codes/index.jsx'
 import Knowledge from './modules/knowledge/index.jsx'
+import Chatroom, { ChatroomIcon } from './modules/chatroom/index.jsx'
 
 export const APP_NAME = 'AI 指挥台'
 
@@ -53,9 +54,10 @@ export const MODULES = [
   { id: 'dashboard', label: '我的主页', desc: '今天的全局一屏', icon: IconHome, Component: Dashboard },
   { id: 'assistant', label: '我的助理', desc: '一份待办与今日安排，帮你收集、整理和规划生活与工作', icon: IconSparkles, Component: AssistantWorkspace },
   { id: 'fixes', label: '问题修复', desc: '问题清单、优先级与状态流转', icon: IconBug, Component: Fixes },
-  { id: 'logs', label: '日志查询', desc: '对话框式检索与记录开发日志', icon: IconLogs, Component: Logs },
+  { id: 'logs', label: '日志查询', desc: '对话式检索与记录开发日志，支持图片与附件', icon: IconLogs, Component: Logs },
   { id: 'requirements', label: '需求管理', desc: '通过对话梳理需求，确认后导入待办', icon: IconRequirements, Component: Requirements },
   { id: 'codes', label: '代码开发', desc: '文件树 + 编辑器工作区', icon: IconCode, Component: Codes },
+  { id: 'chatroom', label: '内部聊天室', desc: '需求、助理与研发的群聊记录', icon: ChatroomIcon, Component: Chatroom },
   { id: 'knowledge', label: '知识库', desc: '检索、阅读与关联沉淀的知识', icon: IconBook, Component: Knowledge },
   { id: 'agent-settings', label: 'Agent 配置', desc: '分别配置模块 Agent 的提示词、模型和 Skill', icon: IconSettings, Component: AgentSettingsPage },
 ]
@@ -239,6 +241,11 @@ export default function App() {
     return () => { cancelled = true }
   }, [replacePrefs])
 
+  // Background Agent handoffs may change records while another module is open.
+  useEffect(() => {
+    if (ready) void refresh().catch(() => {})
+  }, [activeModule, ready, refresh])
+
   // 全局快捷键：⌘K 命令面板、⌘数字切模块。
   useEffect(() => {
     const onKeyDown = event => {
@@ -358,7 +365,7 @@ export default function App() {
       <SideNav modules={MODULES} active={activeModule} data={data} piStatus={piStatus} onNavigate={openModule} />
 
       <main className="main">
-        <div className={`main-inner ${activeModule === 'assistant' ? 'assistant-main-inner' : activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : activeModule === 'requirements' ? 'req-main-inner' : ''}`}>
+        <div className={`main-inner ${activeModule === 'chatroom' ? 'chatroom-main-inner' : activeModule === 'assistant' ? 'assistant-main-inner' : activeModule === 'knowledge' ? 'kb-main-inner' : activeModule === 'codes' ? 'codes-main-inner' : activeModule === 'requirements' ? 'req-main-inner' : activeModule === 'logs' ? 'logs-main-inner' : ''}`}>
           <div className="page-head">
             <div>
               <h1 className="page-title">{active.label}</h1>
@@ -426,7 +433,7 @@ export default function App() {
       )}
 
       {/* 面板收起后的唯一入口：桌面在右下角，移动端浮在底部 tab 之上。 */}
-      {panelOpen === false && agentPanel === null && !['codes', 'requirements', 'assistant'].includes(activeModule) && (
+      {panelOpen === false && agentPanel === null && !['codes', 'requirements', 'assistant', 'chatroom'].includes(activeModule) && (
         <button type="button" className="fab" aria-label="展开 AI 面板" title="展开 AI 面板" onClick={() => applyPanel(true)}>
           <IconSparkles size={22} />
         </button>

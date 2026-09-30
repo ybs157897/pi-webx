@@ -13,6 +13,7 @@ import type { KnowledgeAccess } from './knowledge';
 import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
 import { REQUIREMENTS_TOOL_NAMES, createRequirementsTools } from '../modules/requirements';
 import { ASSISTANT_TOOL_NAMES, createAssistantTools } from '../modules/assistant';
+import { CHATROOM_TOOL_NAMES } from '../modules/chatroom/tools';
 
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
@@ -31,8 +32,8 @@ export interface ModuleAgentDefinition {
 const definitions = new Map<AgentId, ModuleAgentDefinition>([
   ['codes', { id: 'codes', toolNameMap: {}, createTools: () => [] }],
   ['logs', { id: 'logs', toolNameMap: LOGS_TOOL_NAMES, createTools: createLogsTools }],
-  ['requirements', { id: 'requirements', toolNameMap: REQUIREMENTS_TOOL_NAMES, createTools: createRequirementsTools }],
-  ['assistant', { id: 'assistant', toolNameMap: ASSISTANT_TOOL_NAMES, createTools: createAssistantTools }],
+  ['requirements', { id: 'requirements', toolNameMap: { ...REQUIREMENTS_TOOL_NAMES, 'requirements.dispatch': 'requirements_dispatch' }, createTools: createRequirementsTools }],
+  ['assistant', { id: 'assistant', toolNameMap: { ...ASSISTANT_TOOL_NAMES, 'assistant.coordinate': 'assistant_coordinate' }, createTools: createAssistantTools }],
 ]);
 
 export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | undefined {
@@ -45,5 +46,6 @@ export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | unde
  */
 export function resolveToolNames(id: AgentId, configured: readonly string[]): string[] {
   const map = moduleAgentDefinition(id)?.toolNameMap ?? {};
-  return configured.map((name) => name === 'skills.read' ? 'skills_read' : map[name] ?? name);
+  const common: Record<string, string> = { 'skills.read': 'skills_read', ...CHATROOM_TOOL_NAMES };
+  return configured.map((name) => common[name] ?? map[name] ?? name);
 }

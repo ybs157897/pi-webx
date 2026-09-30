@@ -232,3 +232,75 @@
 /* 「问日志 Agent」入口：与普通按钮同形，icon 上色标记是 AI 入口。 */
 .logs-agent-btn { color: var(--accent); }
 .logs-agent-btn:disabled { color: var(--text-3); }
+
+/* ================================================================ 对话优先形态 */
+
+/* 对话与记录视图同住一个工作区：工具栏在上，宿主占满剩余高度（类名镜像 req- 系列）。 */
+.main-inner.logs-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-bottom: var(--sp-5); max-width: none; background: var(--surface-0); }
+.logs-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
+.logs-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-4); }
+.logs-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; }
+.logs-workspace-toolbar .segmented-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
+.logs-workspace-actions { display: flex; align-items: center; gap: var(--sp-2); flex: none; }
+.logs-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; margin-inline: auto; }
+.logs-conversation-host[hidden] { display: none; }
+.logs-conversation { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
+.logs-chat-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.logs-chat-panel > div { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.logs-chat-panel .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
+.logs-chat-panel .ai-overlay-surface { background: var(--surface-0); }
+.logs-chat-panel .aside-head { background: var(--surface-0); }
+.logs-chat-panel .composer { padding: var(--sp-3) var(--sp-4); }
+.logs-chat-panel .ai-fallback { max-height: 160px; overflow-y: auto; }
+/* 四列网格：附件回形针 | 新对话 | 弹性空档 | 发送/停止——附件键加入后发送钮仍钉在最右。 */
+.logs-chat-panel .composer-box { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: var(--sp-3); padding: var(--sp-4); border-color: var(--line-1); border-radius: calc(var(--radius-lg) + var(--sp-2)); background: var(--surface-0); box-shadow: var(--shadow-2); }
+.logs-chat-panel .composer-box:focus-within { border-color: var(--accent); }
+.logs-chat-panel .module-attach { grid-column: 1; align-self: center; }
+.logs-chat-panel .composer-input { grid-column: 1 / -1; min-width: 0; min-height: 48px; font-size: var(--fs-md); line-height: 1.6; }
+.logs-chat-panel .send-btn { grid-column: 4; width: 36px; height: 36px; border-radius: var(--radius-pill); }
+.logs-composer-new { grid-column: 2; justify-self: start; color: var(--text-3); }
+.logs-chat-panel [data-empty="false"] .logs-composer-new { display: none; }
+
+/* 欢迎语与输入框组成一个居中组，发送与提问仍共用同一套输入框逻辑。 */
+.logs-chat-panel [data-empty="true"] .ai-overlay-surface { justify-content: safe center; padding-block: var(--sp-7); overflow-y: auto; }
+.logs-chat-panel [data-empty="true"] .aside-head { display: none; }
+.logs-chat-panel [data-empty="true"] .chat-scroll { flex: none; overflow: visible; }
+.logs-chat-panel [data-empty="true"] .composer { flex: none; max-width: 760px; padding: 0 var(--sp-4); border: 0; }
+.logs-landing { margin: 0 auto var(--sp-6); padding-inline: var(--sp-4); text-align: center; }
+.logs-landing-title { margin: 0; font-size: clamp(32px, 3.2vw, 48px); line-height: 1.25; letter-spacing: .06em; font-weight: 700; color: var(--text-1); }
+.logs-landing-description { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-md); }
+.logs-starter-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: 44px; margin-inline: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-xs); }
+.logs-starter-toolbar > span { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.logs-starter-toolbar > span:first-child { flex: none; }
+.logs-starter-status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.logs-starter-status .status-dot { flex: none; }
+.logs-starter-suggestions { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-3); margin-top: var(--sp-7); }
+.logs-starter-chip { display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 36px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-radius: var(--radius-pill); background: var(--surface-0); color: var(--text-2); font: inherit; font-size: var(--fs-sm); cursor: pointer; }
+.logs-starter-chip:hover:not(:disabled) { border-color: var(--line-2); background: var(--surface-1); color: var(--text-1); }
+.logs-starter-chip:focus-visible, .logs-composer-new:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.logs-starter-chip:disabled { cursor: default; opacity: .5; }
+.logs-chat-error { color: var(--danger); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
+.logs-records-host { flex: 1; min-height: 0; overflow-y: auto; }
+@media (max-width: 639px) {
+  .main-inner.logs-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
+  .logs-main-inner .page-title { font-size: var(--fs-lg); }
+  .logs-main-inner > .page-head { flex-direction: row; align-items: center; }
+  .logs-main-inner .page-desc { font-size: var(--fs-xs); }
+  .logs-workspace { gap: var(--sp-2); }
+  .logs-workspace-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .logs-workspace-toolbar button { min-height: 44px; }
+  .logs-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
+  .logs-chat-panel .aside-head .grow { min-width: 0; }
+  .logs-chat-panel .aside-sub { overflow-wrap: anywhere; }
+  .logs-chat-panel .composer { padding: var(--sp-2); }
+  .logs-chat-panel [data-empty="true"] .ai-overlay-surface { justify-content: safe center; padding-block: var(--sp-6); }
+  .logs-chat-panel [data-empty="true"] .composer { padding-inline: 0; }
+  .logs-chat-panel .composer-box { padding: var(--sp-3); }
+  .logs-chat-panel .composer-input { font-size: var(--fs-lg); }
+  .logs-chat-panel .send-btn, .logs-composer-new { width: 44px; height: 44px; }
+  .logs-landing { margin-bottom: var(--sp-5); }
+  .logs-landing-description { font-size: var(--fs-sm); }
+  .logs-starter-toolbar { margin-inline: var(--sp-2); padding-inline: var(--sp-3); }
+  .logs-starter-suggestions { gap: var(--sp-2); margin-top: var(--sp-5); }
+  .logs-starter-chip { min-height: 44px; }
+}

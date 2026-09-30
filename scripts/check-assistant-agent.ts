@@ -3,7 +3,7 @@
  *
  * 钉死的行为：config/agents 只有四份注册 Agent（life/works 已退役）；assistant
  * 配置不指定模型（继承用户默认）、绑定 assistant 知识库、沿用旧生活助理的资源
- * 上限；装配后的工具集恰为 assistant_* 三个，没有 bash/read/edit，cwd 落在
+ * 上限；装配后的工具集包含受限助理工具、通用文件与命令工具和内部群聊，cwd 落在
  * assistant 专属工作区；会话日志带 pi-webx:module-agent 身份条目，重开身份与
  * 工具面不变；HTTP 入口对 works/life 一律 404。
  */
@@ -86,7 +86,7 @@ try {
   assert.equal(assistant.config.model, undefined, 'assistant 沿用用户选择的默认模型');
   assert.equal(assistant.config.knowledge.homeBinding, 'assistant');
   assert.deepEqual(assistant.config.knowledge.sharedReadBindings, []);
-  assert.deepEqual(assistant.config.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan']);
+  assert.deepEqual(assistant.config.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
   assert.deepEqual(assistant.config.limits, { maxRunningSessions: 1, maxToolOutputChars: 24000 },
     '资源上限沿用生活秘书的历史值');
   assert.ok(assistant.promptText.includes('我的助理'));
@@ -96,11 +96,12 @@ try {
   const option = await assembleModuleAgent({ store, workspaceKey: 'default', agentId: 'assistant', profile: assistant });
   const hosted = await host.create({ provider: model.provider, model: model.id, moduleAgent: option });
   const names = hosted.session.getAllTools().map(tool => tool.name).sort();
-  const expected = ['assistant_capture', 'assistant_context', 'assistant_propose_plan'];
+  const expected = ['assistant_capture', 'assistant_context', 'assistant_coordinate', 'assistant_propose_plan',
+    'bash', 'chatroom_read', 'chatroom_send', 'edit', 'find', 'grep', 'ls', 'read', 'write'];
   assert.deepEqual(names, expected);
-  assert.deepEqual([...Object.values(ASSISTANT_TOOL_NAMES)].sort(), expected, '配置名映射必须与 SDK 工具名一一对应');
+  assert.deepEqual([...Object.values(ASSISTANT_TOOL_NAMES)].sort(), ['assistant_capture', 'assistant_context', 'assistant_propose_plan'], '配置名映射必须与 SDK 工具名一一对应');
   assert.deepEqual(hosted.session.getActiveToolNames().sort(), expected);
-  for (const forbidden of ['bash', 'read', 'edit', 'write', 'requirements_save_draft']) {
+  for (const forbidden of ['requirements_save_draft']) {
     assert.equal(hosted.session.getToolDefinition(forbidden), undefined, `assistant 不得拥有 ${forbidden}`);
   }
   assert.ok(hosted.session.systemPrompt.includes('我的助理'));
@@ -194,7 +195,7 @@ try {
   const capabilities = await (await fetch(base)).json() as { agents: Array<{ id: string; tools?: string[] }> };
   assert.deepEqual(capabilities.agents.map(agent => agent.id), ['requirements', 'codes', 'logs', 'assistant']);
   assert.deepEqual(capabilities.agents.find(agent => agent.id === 'assistant')?.tools,
-    ['assistant.context', 'assistant.capture', 'assistant.proposePlan']);
+    ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
 
   assert.equal(store.listRecords('tasks').length, 3);
   console.log('PASS assistant Agent: four profiles only, offline SDK tools and workspace, draft-only plan, session identity and retired ids');

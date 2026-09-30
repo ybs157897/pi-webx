@@ -1063,3 +1063,100 @@ kbd {
   .page-head { flex-direction: column; align-items: stretch; }
   .form-row { flex-direction: column; gap: 0; }
 }
+
+/* ================================================================ 7. 输入框附件（模块 Agent） */
+
+/* 回形针入口 / 图片预览条 / 拖拽悬浮层 / 文件卡片 / 准入错误条：都挂在输入区里、输入框上方。
+   AIPanel 的 supportsImages 关闭时这些节点不渲染，本段样式自然不生效。 */
+
+.module-attach {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  flex: none;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  transition: background .15s ease, color .15s ease;
+}
+
+.module-attach:hover:not(:disabled) { background: var(--surface-2); color: var(--text-1); }
+.module-attach:disabled { opacity: .5; cursor: default; }
+
+.composer-attachments { padding: 0 var(--sp-2) var(--sp-2); }
+
+/* 拖拽落点：包住整个输入区；悬浮层在拖拽经过时盖满视口提示「放开以添加」。 */
+.composer-drop { min-width: 0; position: relative; }
+
+.attach-drag-overlay {
+  position: fixed;
+  inset: 12px;
+  z-index: 900;
+  display: grid;
+  place-items: center;
+  border: 2px dashed var(--accent);
+  border-radius: calc(var(--radius-lg) + var(--sp-2));
+  background: rgb(0 0 0 / 45%);
+  color: #fff;
+  font-size: var(--fs-lg);
+  pointer-events: none;
+}
+
+/* 文件卡片：类型角标 | 文件名 + 类型标签 | 移除键（对齐系统附件卡的观感）。 */
+.attach-files { display: flex; flex-wrap: wrap; gap: var(--sp-2); padding: 0 var(--sp-2) var(--sp-2); }
+
+.attach-file {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  max-width: 100%;
+  padding: var(--sp-2);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-1);
+  box-shadow: var(--shadow-1);
+}
+
+.attach-file-icon {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  border-radius: var(--radius-sm);
+  font-size: var(--fs-sm);
+  font-weight: 700;
+  line-height: 1;
+}
+.attach-file-icon.tone-blue { color: #2563eb; background: rgb(37 99 235 / 12%); }
+.attach-file-icon.tone-green { color: #16a34a; background: rgb(22 163 74 / 12%); }
+.attach-file-icon.tone-amber { color: #d97706; background: rgb(217 119 6 / 14%); }
+.attach-file-icon.tone-slate { color: var(--text-3); background: var(--surface-2); }
+
+.attach-file-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.attach-file-name { max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-1); font-size: var(--fs-sm); font-weight: 600; }
+.attach-file-type { color: var(--text-3); font-size: var(--fs-xs); letter-spacing: .04em; }
+
+.attach-file button {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.attach-file button:hover:not(:disabled) { background: var(--surface-2); color: var(--text-1); }
+.attach-file button:disabled { opacity: .5; cursor: default; }
+
+.attach-error { margin: 0 var(--sp-2) var(--sp-2); color: var(--danger); font-size: var(--fs-sm); }

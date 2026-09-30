@@ -7,6 +7,16 @@ tools:
   - assistant.context
   - assistant.capture
   - assistant.proposePlan
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls
+  - chatroom.send
+  - chatroom.read
+  - assistant.coordinate
 mcp: []
 knowledge:
   homeBinding: assistant

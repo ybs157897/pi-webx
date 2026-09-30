@@ -10,6 +10,9 @@ tools:
   - ls
   - edit
   - write
+  - bash
+  - chatroom.send
+  - chatroom.read
 mcp: []
 knowledge:
   homeBinding: codes

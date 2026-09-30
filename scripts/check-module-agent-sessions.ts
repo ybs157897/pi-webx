@@ -30,7 +30,9 @@ const sessionDir = join(root, 'sessions');
 const cwd = join(root, 'work');
 
 const SENTINEL = 'LOGS-AGENT-SENTINEL-7e2d';
-const MODULE_TOOL_NAMES = [...Object.values(LOGS_TOOL_NAMES), 'skills_read'].sort();
+const GENERAL_TOOL_NAMES = ['bash', 'edit', 'find', 'grep', 'ls', 'read', 'write'];
+const MODULE_TOOL_NAMES = [
+  'chatroom_read', 'chatroom_send',...Object.values(LOGS_TOOL_NAMES), 'skills_read', ...GENERAL_TOOL_NAMES].sort();
 
 const profiles = await loadAgentProfiles(defaultAgentsConfigRoot());
 const realLogs = profiles.get('logs');
@@ -157,7 +159,7 @@ async function main(): Promise<void> {
       ...profile,
       config: {
         ...profile.config,
-        tools: profile.config.tools.filter((name) => name !== 'knowledge.create' && name !== 'knowledge.update'),
+        tools: profile.config.tools.filter((name) => !['knowledge.create', 'knowledge.update', 'chatroom.send', 'chatroom.read'].includes(name)),
       },
     };
     const trimmed = await host.create({
@@ -166,10 +168,12 @@ async function main(): Promise<void> {
     });
     assert.deepEqual(
       trimmed.session.getAllTools().map((tool) => tool.name).sort(),
-      ['issues_read', 'issues_search', 'knowledge_read', 'knowledge_search', 'logs_read', 'logs_search', 'skills_read'],
+      [...['issues_read', 'issues_search', 'knowledge_read', 'knowledge_search', 'logs_read', 'logs_search', 'skills_read'], ...GENERAL_TOOL_NAMES].sort(),
       '配置删掉的名字不得出现在会话工具里',
     );
     assert.equal(trimmed.session.getToolDefinition('knowledge_create'), undefined);
+    assert.equal(trimmed.session.getToolDefinition('chatroom_send'), undefined, '关闭群聊写能力后不得继续发群消息');
+    assert.equal(trimmed.session.getToolDefinition('chatroom_read'), undefined);
     await host.kill(trimmed.id);
     // 未知工具名报装配错误，不默默放行。
     await assert.rejects(

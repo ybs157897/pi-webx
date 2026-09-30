@@ -10,10 +10,10 @@
  * （也被 `npm run check:workbench-ui` 以副作用 import 全链带上）。
  *
  * 覆盖：
- *   1. 壳层：页签 aria-selected / 计数徽章 / 面板与对话列并列，navigationTarget 直接落到待办；
- *   2. 今天：fixed/flexible 节点、≥45 分钟呼吸缝、时间待定小节、概览三格、遗留与候选
+ *   1. 壳层：页签 aria-selected / 计数徽章 / 可收起但不卸载的右侧对话，navigationTarget 直接落到待办；
+ *   2. 今天：fixed/flexible 节点、≥45 分钟呼吸缝、时间待定小节、概览四卡、遗留与候选
  *      默认折叠但保留 DOM、空日引导；
- *   3. 待办：快速捕获、认知分组（已逾期 / 今天 / 稍后 / 已完成）、已完成默认折叠、
+ *   3. 待办：统计卡、快速捕获、认知分组（已逾期 / 今天 / 稍后 / 已完成）、已完成默认折叠、
  *      范围筛选不再出现「已完成」档、原始记录只进详情弹窗；
  *   4. 方案确认卡：docked / applied / 跨会话隔离 / 多份建议；
  *   5. 导航：MODULES 与 resolveWorkbenchNavigation 把 tasks / today 折算到 assistant；
@@ -24,13 +24,15 @@ import { readFileSync } from 'node:fs'
 import { createElement as h } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import AssistantWorkspace from '../src/workbench-app/modules/assistant/index.jsx'
+import AssistantChatDock, { AssistantChatToggle } from '../src/workbench-app/modules/assistant/ChatDock.jsx'
+import AssistantChat from '../src/workbench-app/modules/assistant/AssistantChat.jsx'
 import PlanReview, { PlanEntries } from '../src/workbench-app/modules/assistant/PlanReview.jsx'
 import TaskDetails from '../src/workbench-app/modules/tasks/TaskDetails.jsx'
 import { parseQuickAdd } from '../src/workbench-app/modules/tasks/index.jsx'
 import { MODULES } from '../src/workbench-app/App.jsx'
 import SideNav from '../src/workbench-app/shell/SideNav.jsx'
 import { resolveWorkbenchNavigation, recordNavigationLabel } from '../src/workbench-app/shell/navigation.mjs'
-import { addDays, todayISO } from '../src/workbench-app/util.mjs'
+import { addDays, formatDay, todayISO } from '../src/workbench-app/util.mjs'
 
 const today = todayISO()
 const yesterday = addDays(today, -1)
@@ -67,7 +69,7 @@ function foldOf(markup: string, testid: string): { head: string; body: string } 
   return { head: markup.slice(at, bodyAt), body: markup.slice(bodyAt, bodyAt + 60) }
 }
 
-/* ------------------------------------------------- 1. 壳层：两页签 + 对话列 */
+/* ------------------------------------------------- 1. 壳层：两页签 + 可收起的右侧对话 */
 
 const shell = render(AssistantWorkspace, { chat })
 assert.ok(shell.includes('data-testid="assistant-workspace"') && shell.includes('data-testid="assistant-items"'), '壳层缺工作区或内容列')
@@ -75,6 +77,23 @@ assert.ok(shell.includes('role="tablist"') && shell.includes('data-testid="assis
 assert.ok(shell.includes('data-testid="assistant-tab-today" aria-selected="true"') && shell.includes('data-testid="assistant-tab-tasks" aria-selected="false"'), '默认应停在「今天」页签')
 assert.ok(shell.includes('>今天<span class="assistant-tab-count">3</span>') && shell.includes('>待办<span class="assistant-tab-count">7</span>'), '页签计数徽章口径应为「今天已排 / 未完成总数」')
 assert.ok(shell.includes('data-testid="chat-stub"'), '对话列应由 chat 节点注入到壳层里')
+assert.ok(shell.includes('data-chat-open="true"') && shell.includes('data-testid="assistant-chat-dock"'), '桌面首屏应展开右侧对话坞')
+assert.ok(shell.includes('data-testid="assistant-chat-toggle" aria-expanded="true"'), '数据区应有可访问的对话收起按钮')
+assert.ok(shell.includes('data-testid="assistant-mobile-items"') && shell.includes('data-testid="assistant-mobile-chat"'), '手机事项/对话切换入口应保留')
+const controls = shell.match(/data-testid="assistant-chat-toggle"[^>]*aria-controls="([^"]+)"/)?.[1]
+assert.ok(controls && shell.includes(`id="${controls}" class="assistant-chat-dock"`), '展开按钮应指向实际对话坞')
+const closedToggle = renderToStaticMarkup(h(AssistantChatToggle, { open: false, pendingCount: 2, controls: 'test-chat-dock' }))
+assert.ok(closedToggle.includes('aria-expanded="false"') && closedToggle.includes('aria-controls="test-chat-dock"'), '收起按钮应准确声明状态与受控对话坞')
+assert.ok(closedToggle.includes('展开对话') && closedToggle.includes('data-testid="assistant-chat-pending-count"') && closedToggle.includes('2 待确认'), '对话收起后仍应显示待确认方案数')
+const openDock = renderToStaticMarkup(h(AssistantChatDock, { id: 'test-chat-dock', open: true }, chat))
+const closedDock = renderToStaticMarkup(h(AssistantChatDock, { id: 'test-chat-dock', open: false }, chat))
+assert.ok(openDock.includes('data-testid="assistant-chat-dock"') && openDock.includes('data-testid="chat-stub"'), '展开对话坞应显示注入聊天')
+assert.ok(!openDock.includes('hidden=""') && !openDock.includes('inert=""'), '展开对话坞应可见且可聚焦')
+assert.ok(closedDock.includes('hidden=""') && closedDock.includes('inert=""'), '收起对话坞应从视觉与键盘焦点序列隐藏')
+assert.equal(count(closedDock, 'data-testid="chat-stub"'), 1, '收起时聊天子树应保持挂载以保留会话和草稿')
+const agentChat = render(AssistantChat)
+assert.ok(agentChat.includes('data-testid="assistant-agent-chat"') && agentChat.includes('data-testid="assistant-chat-collapse"'), '真实助理对话应提供内部收起入口')
+assert.ok(agentChat.includes('aria-label="收起对话"'), '内部收起按钮应有明确的可访问名称')
 
 const tasksShell = render(AssistantWorkspace, { chat, navigationTarget: { view: 'tasks' } })
 assert.ok(tasksShell.includes('data-testid="assistant-tab-tasks" aria-selected="true"') && tasksShell.includes('data-testid="assistant-tab-today" aria-selected="false"'), 'navigationTarget 应把壳层切到待办页签')
@@ -93,10 +112,14 @@ assert.ok(shell.includes('data-testid="assistant-undated"') && shell.includes('�
 // 「回今天」只在翻到别的日期时才出现，SSR 点不出来——读源码钉住这个入口。
 assert.ok(sourceOf('../src/workbench-app/modules/today/index.jsx').includes('data-testid="today-back-to-today"'), '今天视图缺「回今天」入口')
 
-assert.ok(shell.includes('data-testid="assistant-overview"') && shell.includes('data-testid="assistant-overview-pending"'), '概览区缺三格或待安排入口')
-assert.ok(shell.includes('3 件已排') && shell.includes('已排 · 预计 1 小时 40 分'), '概览第一格应为当天已排件数与预计用时')
-assert.ok(shell.includes('待安排 · 从待办里挑 →') && shell.includes('空闲余量'), '概览缺待安排 / 空闲余量口径')
-assert.ok(shell.includes('已完成 0/3'), '概览进度条口径应等于当天已完成 / 已排')
+assert.ok(shell.includes('data-testid="assistant-overview"') && shell.includes('data-testid="today-overview-grid"'), '今天缺卡片化概览区')
+for (const id of ['today-stat-scheduled', 'today-stat-pending', 'today-stat-slack', 'today-stat-completed'])
+  assert.ok(shell.includes(`data-testid="${id}"`), `今天概览缺 ${id}`)
+assert.ok(shell.includes('data-testid="assistant-overview-pending"'), '待安排卡应保留可展开入口')
+assert.ok(shell.includes('3<small>件未完成</small>') && shell.includes('预计 1 小时 40 分'), '已排卡应显示当天未完成件数与预计用时')
+assert.ok(shell.includes('3<small>件待办</small>') && shell.includes('4 小时 40 分'), '待安排与时段余量应按当前数据计算')
+assert.ok(shell.includes('0<small>/ 3 件</small>'), '当天完成卡应显示 0/3 的真实进度')
+assert.ok(shell.includes('data-testid="today-schedule-card"') && shell.includes('data-testid="today-supporting-cards"'), '当天日程与待处理区应分别成卡')
 
 const carry = foldOf(shell, 'today-carryover')
 assert.ok(carry.head.includes('aria-expanded="false"') && carry.body.includes('hidden=""'), '遗留事项应默认折叠')
@@ -108,6 +131,7 @@ assert.ok(shell.includes('data-testid="assistant-candidates"') && shell.includes
 const empty = render(AssistantWorkspace, { chat: undefined, data: { tasks: [], requirements: [] } })
 assert.ok(empty.includes('data-testid="assistant-empty"') && empty.includes('这一天还是空的'), '空日应给引导而不是空轴')
 assert.ok(foldOf(empty, 'today-candidates').head.includes('aria-expanded="true"'), '空日应自动展开候选，方便直接挑一件')
+assert.ok(!empty.includes('data-testid="assistant-chat-toggle"') && !empty.includes('data-testid="assistant-chat-dock"'), '未注入聊天时不应出现空对话坞')
 
 /* ------------------------------------------------- 3. 待办：认知分组与折叠 */
 
@@ -116,6 +140,14 @@ const legacyView = render(AssistantWorkspace, { chat: undefined, navigationTarge
 assert.ok(legacyView.includes('旧待办') && !legacyView.includes('undefined') && !legacyView.includes('NaN'), '旧事项缺少新字段仍应安全渲染')
 
 assert.ok(tasksShell.includes('data-module="tasks"') && tasksShell.includes('data-testid="tasks-capture"'), '待办视图缺快速捕获条')
+for (const id of ['tasks-overview', 'tasks-stat-open', 'tasks-stat-planned', 'tasks-stat-overdue', 'tasks-stat-done', 'tasks-capture-card', 'tasks-results-card'])
+  assert.ok(tasksShell.includes(`data-testid="${id}"`), `待办卡片布局缺 ${id}`)
+for (const [id, value] of [['open', 7], ['planned', 3], ['overdue', 1], ['done', 1]] as const) {
+  const at = tasksShell.indexOf(`data-testid="tasks-stat-${id}"`)
+  const card = tasksShell.slice(at, tasksShell.indexOf('</div>', at))
+  assert.ok(card.includes(`>${value}<small>件</small>`), `待办 ${id} 统计口径不符`)
+}
+assert.ok(tasksShell.includes('共 8 件'), '待办概览总量应按全部记录计算')
 assert.equal(count(tasksShell, 'data-testid="task-row"'), 8, '待办默认展示全量事项')
 assert.equal(count(tasksShell, 'data-done="false"'), 7, '未完成行应带 data-done=false')
 assert.equal(count(tasksShell, 'data-done="true"'), 1, '已完成行应带 data-done=true')
@@ -164,7 +196,7 @@ assert.ok(review.includes('data-testid="assistant-plan-dock"') && review.include
 assert.ok(review.includes('data-testid="assistant-plan-expand"') && review.includes('确认前不会改动你的日程'), '确认卡应可展开且默认不改日程')
 assert.ok(review.includes('data-testid="assistant-plan-apply"') && review.includes('data-testid="assistant-plan-cancel"'), '确认卡缺确认 / 取消动作')
 assert.ok(review.includes('data-testid="assistant-plan-more"') && review.includes('另有 1 份建议'), '多份草稿应能翻到下一份')
-assert.ok(review.includes('3 条 · 9月29日 09:00 起'), '确认卡摘要应给条数与起始时间')
+assert.ok(review.includes(`3 条 · ${formatDay(today)} 09:00 起`), '确认卡摘要应给条数与起始时间')
 assert.equal(render(PlanReview, { plans: [plan, other], sessionId: 'other-session' }), '', '草稿不可跨会话展示')
 
 const applied = render(PlanReview, { plans: [{ ...plan, appliedAt: '2026-09-29T09:00:00Z' }], sessionId: 'as-session' })
@@ -172,7 +204,7 @@ assert.ok(applied.includes('data-testid="assistant-plan-applied"') && applied.in
 
 // 展开区（交互不可达）：PlanEntries 按天分组、时段 / 灵活安排与理由直测。
 const expanded = render(PlanEntries, { entries, tasks, today })
-assert.ok(expanded.includes('今天 · 9月29日') && expanded.includes('明天'), '展开区应按天分组')
+assert.ok(expanded.includes(`今天 · ${formatDay(today)}`) && expanded.includes('明天'), '展开区应按天分组')
 assert.equal(count(expanded, 'data-testid="assistant-plan-entry"'), 3, '展开区条数应等于安排条数')
 assert.ok(expanded.includes('09:00–09:20') && expanded.includes('10:00–10:30') && expanded.includes('灵活安排'), '展开区应给时段，没时段的写「灵活安排」')
 assert.ok(expanded.includes('临近截止日') && expanded.includes('留出整块时间'), '展开区应带上每条的理由')
@@ -185,8 +217,8 @@ assert.ok(reviewSource.includes('failure.status === 409') && reviewSource.includ
 
 /* ------------------------------------------------- 6. 导航：tasks / today 折算到我的助理 */
 
-assert.equal(MODULES.length, 8, '模块注册表应是八项')
-assert.deepEqual(MODULES.map(module => module.id), ['dashboard', 'assistant', 'fixes', 'logs', 'requirements', 'codes', 'knowledge', 'agent-settings'])
+assert.equal(MODULES.length, 9, '模块注册表应包含内部聊天室，共九项')
+assert.deepEqual(MODULES.map(module => module.id), ['dashboard', 'assistant', 'fixes', 'logs', 'requirements', 'codes', 'chatroom', 'knowledge', 'agent-settings'])
 const nav = renderToStaticMarkup(h(SideNav, {
   modules: MODULES, active: 'assistant', data: { tasks: [{ id: 'a', done: false }, { id: 'b', done: true }] },
   piStatus: 'idle', onNavigate: () => {},
@@ -214,4 +246,4 @@ assert.deepEqual(
   '认不出的日期词按普通文字留在标题里，不静默吞掉；认出的标记从标题摘掉',
 )
 
-console.log('check-assistant-ui: 壳层两页签、今天时间轴、待办认知分组、方案确认卡与导航映射全部通过')
+console.log('check-assistant-ui: 卡片化数据区、可收起常驻对话、方案确认卡与导航映射全部通过')

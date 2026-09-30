@@ -19,6 +19,10 @@ import { CodesIdeRuntime } from './modules/codes/ide-runtime';
 import { createCodesIdeRouter } from './modules/codes/ide-router';
 import { CodesIdeWebSockets } from './modules/codes/ide-proxy';
 import { boundSessionWorkspace } from './module-agents/workspace';
+import { createModuleAgentSessionService } from './module-agents/session-service';
+import { getChatroomService } from './modules/chatroom/service';
+import { createChatroomRouter } from './modules/chatroom/router';
+import { createModuleAgentChatroomRuntime } from './modules/chatroom/runtime';
 
 /** Default port; override with PI_WEBX_PORT. */
 const DEFAULT_PORT = 8787;
@@ -64,11 +68,14 @@ async function main(): Promise<void> {
     },
   })));
   app.use('/api/module-agents', createModuleAgentPromptPolishRouter(manager));
+  const moduleSessionDeps = { host: manager, store: workbench, profiles: agentProfiles, workspaceKey: 'default' };
+  const sessionService = createModuleAgentSessionService(moduleSessionDeps);
+  const chatroom = getChatroomService(workbench, 'default');
+  const chatroomRuntime = createModuleAgentChatroomRuntime({ ...moduleSessionDeps, sessionService, chatroom });
+  app.use('/api/chatroom', createChatroomRouter(chatroom));
   app.use('/api/module-agents', createModuleAgentsRouter({
-    host: manager,
-    store: workbench,
-    profiles: agentProfiles,
-    workspaceKey: 'default',
+    ...moduleSessionDeps,
+    sessionService,
   }));
   app.use('/api', createApiRouter(manager));
   app.use('/api', (_req: Request, res: Response) => {
@@ -148,7 +155,7 @@ async function main(): Promise<void> {
   installSignalHandlers(server, manager, () => {
     disposeWebSocket();
     codesIdeSockets.close();
-    return codesIde.stop();
+    return Promise.all([chatroomRuntime.stop(), codesIde.stop()]).then(() => undefined);
   }, workbench);
 }
 

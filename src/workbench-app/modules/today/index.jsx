@@ -5,7 +5,7 @@
  * fixed / flexible 的区别交给节点符号（实心锚点 / 空心补位）；没有 startTime 的进轴末
  * 「时间待定」小节。遗留与候选都不进轴，各自收在轴两端的默认折叠里。
  *
- * 概览条、待定小节、候选列表共用同一个 `useMemo` 派生的数据——三格数字和列表必须同源，
+ * 概览卡、待定小节、候选列表共用同一个 `useMemo` 派生的数据——概览数字和列表必须同源，
  * 两处独立算口径迟早对不上。渲染期只读 `new Date()` 做纯计算（当前时刻线），
  * 不碰 window/document：SSR 门禁用 react-dom/server 纯渲染这些组件。
  *
@@ -18,6 +18,7 @@ import { addDays, formatDay, todayISO, weekdayCN } from '../../util.mjs'
 import { IconCalendar, IconChevronRight } from '../../icons.jsx'
 import TaskDetails from '../tasks/TaskDetails.jsx'
 import { dueLabel, durationText } from '../tasks/model.jsx'
+import TodayOverview from './TodayOverview.jsx'
 import './Today.css'
 
 /** 相邻两件事之间空闲到这个分钟数才画呼吸缝。 */
@@ -242,112 +243,103 @@ export default function Today({ data, mutate, notify, onShowTasks }) {
       </div>
     </header>
 
-    <section className="assistant-overview" data-testid="assistant-overview">
-      <div className="assistant-overview-card">
-        <div className="assistant-overview-cell">
-          <p className="assistant-overview-value">{board.open.length} 件</p>
-          <p className="assistant-overview-label">{board.openMinutes > 0 ? `已排 · 预计 ${durationText(board.openMinutes)}` : '已排'}</p>
-        </div>
-        <button type="button" className="assistant-overview-cell is-action" data-testid="assistant-overview-pending" aria-expanded={candidatesOpen} onClick={() => setPickOverride(!candidatesOpen)}>
-          <span className="assistant-overview-value">{board.candidates.length} 件</span>
-          <span className="assistant-overview-label">待安排 · 从待办里挑 →</span>
-        </button>
-        <div className="assistant-overview-cell">
-          <p className="assistant-overview-value">{board.slack === null ? '时段待定' : durationText(board.slack)}</p>
-          <p className="assistant-overview-label">{board.slack === null ? '还没排时段' : '空闲余量'}</p>
-        </div>
-        <div className="assistant-overview-foot">
-          <div className="assistant-overview-track" aria-hidden="true">
-            <div className="assistant-overview-fill" style={{ width: `${progress}%` }} />
-          </div>
-          <span className="assistant-overview-done">已完成 {board.done.length}/{board.scheduled.length}</span>
-        </div>
-      </div>
-    </section>
+    <TodayOverview board={board} progress={progress} candidatesOpen={candidatesOpen} onToggleCandidates={() => setPickOverride(!candidatesOpen)} />
 
-    {board.carryovers.length > 0 && <Fold
-      tone="is-warn"
-      testid="today-carryover"
-      head={`有 ${board.carryovers.length} 件之前安排的事还没完成`}
-      open={carryOpen}
-      onToggle={() => setCarryOpen(!carryOpen)}
-    >
-      <ul className="assistant-carryover-list" data-testid="assistant-carryover">
-        {board.carryovers.map(task => <li className="assistant-carryover-row" key={task.id}>
-          <div className="assistant-carryover-main">
-            <p className="assistant-carryover-title">{task.title}</p>
-            <p className="assistant-carryover-meta">{formatDay(task.plannedDate, 'md')} 的安排</p>
+    <div className="today-body">
+      <section className="today-schedule-card" data-testid="today-schedule-card" aria-label="当天日程">
+        <div className="today-section-heading">
+          <div>
+            <h3>当天日程</h3>
+            <p>{board.scheduled.length} 件已排 · 按时间查看</p>
           </div>
-          <button type="button" className="btn btn-sm" data-testid="today-carryover-reschedule" disabled={pending === task.id} onClick={() => reschedule(task)}>安排到这天</button>
-          <button type="button" className="btn btn-sm" data-testid="today-carryover-defer" disabled={pending === task.id} onClick={() => patch(task, { plannedDate: '', startTime: null, endTime: null }, '已退回未安排')}>暂不安排</button>
-        </li>)}
-      </ul>
-    </Fold>}
-
-    {empty
-      ? <div className="assistant-empty" data-testid="assistant-empty">
-        <span className="assistant-empty-icon" aria-hidden="true"><IconCalendar size={20} /></span>
-        <p className="assistant-empty-title">这一天还是空的</p>
-        <p className="assistant-empty-hint">先放两件真的要做的事，剩下的留给意外。</p>
-      </div>
-      : <>
-        <ol className="assistant-timeline" data-testid="assistant-timeline" data-timeline={board.timed.length > 0 ? 'on' : 'off'}>
-          {board.rows.map(row => {
-            if (row.type === 'now') {
-              return <li className="assistant-now" data-testid="assistant-now" key={row.key}>
-                <span className="assistant-now-pill">{String(clock.getHours()).padStart(2, '0')}:{String(clock.getMinutes()).padStart(2, '0')}</span>
-                <span className="assistant-now-line" />
-              </li>
-            }
-            if (row.type === 'gap') {
-              return <li className="assistant-gap" data-testid="assistant-gap" key={row.key}>
-                <span className="assistant-gap-rule" />
-                <span className="assistant-gap-text">空 {durationText(row.minutes)}</span>
-                <span className="assistant-gap-rule" />
-              </li>
-            }
-            return <SlotRow key={row.key} task={row.task} pending={pending} onDetails={setDetails} onPatch={patch} />
-          })}
-        </ol>
-        {board.undated.length > 0 && <section className="assistant-undated" data-testid="assistant-undated">
-          <div className="assistant-undated-head">
-            <span className="assistant-undated-title">{date === today ? '今天' : formatDay(date)}，时间待定（{board.undated.length}）</span>
-            <span className="assistant-undated-rule" aria-hidden="true" />
+        </div>
+        {empty
+          ? <div className="assistant-empty" data-testid="assistant-empty">
+            <span className="assistant-empty-icon" aria-hidden="true"><IconCalendar size={20} /></span>
+            <p className="assistant-empty-title">这一天还是空的</p>
+            <p className="assistant-empty-hint">先放两件真的要做的事，剩下的留给意外。</p>
           </div>
-          <ul className="assistant-undated-list">
-            {board.undated.map(task => <UndatedRow key={task.id} task={task} pending={pending} onDetails={setDetails} onPatch={patch} />)}
-          </ul>
-        </section>}
-      </>}
-
-    <Fold
-      tone="is-pick"
-      testid="today-candidates"
-      head={`从待办里挑（${board.candidates.length}）`}
-      open={candidatesOpen}
-      onToggle={() => setPickOverride(!candidatesOpen)}
-    >
-      <ul className="assistant-candidates" data-testid="assistant-candidates">
-        {board.candidates.length === 0
-          ? <li className="assistant-candidate is-empty">没有未安排的待办了</li>
-          : board.candidates.map((task, index) => {
-            const due = dueLabel(task, today)
-            return <li className="assistant-candidate" key={task.id} data-testid={index === 0 ? 'today-plan-picked' : undefined}>
-              <div className="assistant-candidate-main">
-                <p className="assistant-candidate-title">{task.title}</p>
-                <p className="assistant-candidate-meta">
-                  {task.due && <span className={`assistant-candidate-due ${due.tone}`}>{due.text}</span>}
-                  <span className="assistant-candidate-span">约 {durationText(minutesOf(task))}</span>
-                </p>
+          : <>
+            <ol className="assistant-timeline" data-testid="assistant-timeline" data-timeline={board.timed.length > 0 ? 'on' : 'off'}>
+              {board.rows.map(row => {
+                if (row.type === 'now') {
+                  return <li className="assistant-now" data-testid="assistant-now" key={row.key}>
+                    <span className="assistant-now-pill">{String(clock.getHours()).padStart(2, '0')}:{String(clock.getMinutes()).padStart(2, '0')}</span>
+                    <span className="assistant-now-line" />
+                  </li>
+                }
+                if (row.type === 'gap') {
+                  return <li className="assistant-gap" data-testid="assistant-gap" key={row.key}>
+                    <span className="assistant-gap-rule" />
+                    <span className="assistant-gap-text">空 {durationText(row.minutes)}</span>
+                    <span className="assistant-gap-rule" />
+                  </li>
+                }
+                return <SlotRow key={row.key} task={row.task} pending={pending} onDetails={setDetails} onPatch={patch} />
+              })}
+            </ol>
+            {board.undated.length > 0 && <section className="assistant-undated" data-testid="assistant-undated">
+              <div className="assistant-undated-head">
+                <span className="assistant-undated-title">{date === today ? '今天' : formatDay(date)}，时间待定（{board.undated.length}）</span>
+                <span className="assistant-undated-rule" aria-hidden="true" />
               </div>
-              <button type="button" className="btn btn-sm" data-testid="today-pick-task" disabled={pending === task.id} onClick={() => planTask(task)}>安排到今天</button>
-            </li>
-          })}
-      </ul>
-      {showTasks && <div className="assistant-fold-foot">
-        <button type="button" className="assistant-link" onClick={() => showTasks()}>查看全部待办 →</button>
-      </div>}
-    </Fold>
+              <ul className="assistant-undated-list">
+                {board.undated.map(task => <UndatedRow key={task.id} task={task} pending={pending} onDetails={setDetails} onPatch={patch} />)}
+              </ul>
+            </section>}
+          </>}
+      </section>
+
+      <aside className="today-supporting-cards" data-testid="today-supporting-cards" aria-label="待处理事项">
+        {board.carryovers.length > 0 && <Fold
+          tone="is-warn"
+          testid="today-carryover"
+          head={`有 ${board.carryovers.length} 件之前安排的事还没完成`}
+          open={carryOpen}
+          onToggle={() => setCarryOpen(!carryOpen)}
+        >
+          <ul className="assistant-carryover-list" data-testid="assistant-carryover">
+            {board.carryovers.map(task => <li className="assistant-carryover-row" key={task.id}>
+              <div className="assistant-carryover-main">
+                <p className="assistant-carryover-title">{task.title}</p>
+                <p className="assistant-carryover-meta">{formatDay(task.plannedDate, 'md')} 的安排</p>
+              </div>
+              <button type="button" className="btn btn-sm" data-testid="today-carryover-reschedule" disabled={pending === task.id} onClick={() => reschedule(task)}>安排到这天</button>
+              <button type="button" className="btn btn-sm" data-testid="today-carryover-defer" disabled={pending === task.id} onClick={() => patch(task, { plannedDate: '', startTime: null, endTime: null }, '已退回未安排')}>暂不安排</button>
+            </li>)}
+          </ul>
+        </Fold>}
+
+        <Fold
+          tone="is-pick"
+          testid="today-candidates"
+          head={`从待办里挑（${board.candidates.length}）`}
+          open={candidatesOpen}
+          onToggle={() => setPickOverride(!candidatesOpen)}
+        >
+          <ul className="assistant-candidates" data-testid="assistant-candidates">
+            {board.candidates.length === 0
+              ? <li className="assistant-candidate is-empty">没有未安排的待办了</li>
+              : board.candidates.map((task, index) => {
+                const due = dueLabel(task, today)
+                return <li className="assistant-candidate" key={task.id} data-testid={index === 0 ? 'today-plan-picked' : undefined}>
+                  <div className="assistant-candidate-main">
+                    <p className="assistant-candidate-title">{task.title}</p>
+                    <p className="assistant-candidate-meta">
+                      {task.due && <span className={`assistant-candidate-due ${due.tone}`}>{due.text}</span>}
+                      <span className="assistant-candidate-span">约 {durationText(minutesOf(task))}</span>
+                    </p>
+                  </div>
+                  <button type="button" className="btn btn-sm" data-testid="today-pick-task" disabled={pending === task.id} onClick={() => planTask(task)}>安排到今天</button>
+                </li>
+              })}
+          </ul>
+          {showTasks && <div className="assistant-fold-foot">
+            <button type="button" className="assistant-link" onClick={() => showTasks()}>查看全部待办 →</button>
+          </div>}
+        </Fold>
+      </aside>
+    </div>
 
     <TaskDetails task={details} onClose={() => setDetails(null)} mutate={mutate} notify={notify} />
   </div>

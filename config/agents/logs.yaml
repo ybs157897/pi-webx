@@ -14,6 +14,15 @@ tools:
   - knowledge.read
   - knowledge.create
   - knowledge.update
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls
+  - chatroom.send
+  - chatroom.read
 mcp:
   - id: log-source
     enabled: false

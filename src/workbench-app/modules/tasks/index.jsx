@@ -7,6 +7,7 @@ import { Card, ConfirmDialog, Empty, Segmented } from '../../ui.jsx'
 import { IconChevronRight, IconFlame, IconPlus, IconTasks } from '../../icons.jsx'
 import { streakDays, todayISO } from '../../util.mjs'
 import TaskDetails from './TaskDetails.jsx'
+import TaskOverview from './TaskOverview.jsx'
 
 import {
   TEXT,
@@ -66,7 +67,11 @@ export default function Tasks({
   const counts = useMemo(() => ({
     total: tasks.length,
     open: tasks.filter(task => task.done !== true).length,
-  }), [tasks])
+    planned: tasks.filter(task => task.plannedDate === today).length,
+    plannedDone: tasks.filter(task => task.plannedDate === today && task.done === true).length,
+    overdue: tasks.filter(task => urgencyOf(task, today) === 'overdue').length,
+    done: tasks.filter(task => task.done === true).length,
+  }), [tasks, today])
 
   const progress = useMemo(() => {
     const dueToday = tasks.filter(task => task.plannedDate === today)
@@ -217,7 +222,15 @@ export default function Tasks({
 
   return (
     <div className="tasks" data-module="tasks">
-      <div className="tasks-capture">
+      <TaskOverview stats={counts} />
+
+      <section className="tasks-capture" data-testid="tasks-capture-card" aria-label="快速记录">
+        <div className="tasks-section-heading">
+          <div>
+            <h2>快速记录</h2>
+            <p>想到什么，先记下来</p>
+          </div>
+        </div>
         <form className="tasks-capture-form" data-testid="tasks-capture" onSubmit={submitCapture}>
           <span className="tasks-capture-icon" aria-hidden="true"><IconPlus size={16} /></span>
           <input
@@ -255,7 +268,7 @@ export default function Tasks({
             )
             : TEXT.hint}
         </p>
-      </div>
+      </section>
 
       {sourceFiltered && (
         <div className="tasks-source-filter" data-testid="tasks-source-filter">
@@ -264,87 +277,96 @@ export default function Tasks({
         </div>
       )}
 
-      <div className="tasks-bar">
-        <Segmented options={SCOPE_FILTERS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
-        <label className="tasks-search"><span className="sr-only">搜索待办</span><input type="search" data-testid="tasks-search" placeholder="搜索事项、标签或备注" value={query} onChange={event => setQuery(event.target.value)} /></label>
-        <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 件 · 待办 {counts.open}</p>
-      </div>
-
-      {groups.length === 0
-        ? (
-          <Card>
-            <Empty
-              icon={<IconTasks size={22} />}
-              title={emptyTitle}
-              hint={emptyHint}
-              action={sourceFiltered
-                ? <button type="button" className="btn" onClick={sourceEmpty ? () => setSourceRequirementId('') : () => changeScope('all')}>{sourceEmpty ? '查看全部待办' : '查看这条需求的全部待办'}</button>
-                : canLoadDemo
-                ? <button type="button" className="btn btn-primary" onClick={onLoadDemo}>{TEXT.loadDemo}</button>
-                : (counts.total > 0 && scope !== 'all'
-                  ? <button type="button" className="btn" onClick={() => changeScope('all')}>{TEXT.showAll}</button>
-                  : undefined)}
-            />
-          </Card>
-        )
-        : (
-          <div className="tasks-groups">
-            {groups.map(group => {
-              // 已完成默认折叠：勾掉一条不是为了继续盯着它，DOM 留着只是不展示。
-              const collapsed = group.key === 'done' && !doneOpen
-              const openMinutes = group.tasks.reduce((sum, task) => sum + (task.done === true ? 0 : (durationOf(task) ?? 0)), 0)
-              const head = <>
-                <span className="assistant-group-title">{group.label}</span>
-                <span className="assistant-group-rule" aria-hidden="true" />
-                <span className="assistant-group-count">{group.tasks.length}</span>
-                {openMinutes > 0 && <span className="assistant-group-total">约 {durationText(openMinutes)}</span>}
-              </>
-              return (
-                <section className="tasks-group assistant-group" key={group.key} data-group={group.key} data-tone={group.tone} data-testid="assistant-group">
-                  {group.key === 'done'
-                    ? <button type="button" className="assistant-group-head assistant-fold-head" aria-expanded={!collapsed} onClick={() => setDoneOpen(!doneOpen)}>
-                      {head}
-                      <span className="assistant-fold-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
-                    </button>
-                    : <header className="assistant-group-head">{head}</header>}
-                  <ul className="tasks-list" hidden={collapsed}>
-                    {group.tasks.map(task => (
-                      <TaskRow
-                        key={task.id}
-                        task={task}
-                        today={today}
-                        modules={modules}
-                        editing={editing}
-                        pending={pending}
-                        editRef={editRef}
-                        onToggle={toggleDone}
-                        onToggleStar={toggleStar}
-                        onStartEdit={startEdit}
-                        onEditTitle={title => setEditing(current => (current === null ? current : { ...current, title }))}
-                        onCommitEdit={commitEdit}
-                        onCancelEdit={cancelEdit}
-                        onDelete={setDeleting}
-                        onDetails={setDetails}
-                        onPlan={planToday}
-                        onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
-                      />
-                    ))}
-                  </ul>
-                </section>
-              )
-            })}
+      <section className="tasks-results-card" data-testid="tasks-results-card" aria-label="待办清单">
+        <div className="tasks-section-heading">
+          <div>
+            <h2>待办清单</h2>
+            <p>按截止日期归类，完成的事项可随时展开</p>
           </div>
-        )}
+          <span className="tasks-results-total">{sourceFiltered ? '当前来源' : '全部'} {sourceTasks.length} 件</span>
+        </div>
+        <div className="tasks-bar">
+          <Segmented options={SCOPE_FILTERS} value={scope} onChange={changeScope} label={TEXT.scopeLabel} />
+          <label className="tasks-search"><span className="sr-only">搜索待办</span><input type="search" data-testid="tasks-search" placeholder="搜索事项、标签或备注" value={query} onChange={event => setQuery(event.target.value)} /></label>
+          <p className="tasks-bar-count xs">{sourceFiltered ? '全库共 ' : '共 '}{counts.total} 件 · 待办 {counts.open}</p>
+        </div>
 
-      <div className="tasks-foot">
-        <span className="tasks-foot-item" title={TEXT.doneStatHint}>
-          今日安排完成 <b>{progress.done}/{progress.total}</b>
-        </span>
-        <span className="tasks-foot-item" title={TEXT.streakHint}>
-          <span className="tasks-foot-flame" aria-hidden="true"><IconFlame size={14} /></span>
-          {TEXT.streakStat} <b>{streak}</b> {TEXT.streakUnit}
-        </span>
-      </div>
+        {groups.length === 0
+          ? (
+            <Card>
+              <Empty
+                icon={<IconTasks size={22} />}
+                title={emptyTitle}
+                hint={emptyHint}
+                action={sourceFiltered
+                  ? <button type="button" className="btn" onClick={sourceEmpty ? () => setSourceRequirementId('') : () => changeScope('all')}>{sourceEmpty ? '查看全部待办' : '查看这条需求的全部待办'}</button>
+                  : canLoadDemo
+                  ? <button type="button" className="btn btn-primary" onClick={onLoadDemo}>{TEXT.loadDemo}</button>
+                  : (counts.total > 0 && scope !== 'all'
+                    ? <button type="button" className="btn" onClick={() => changeScope('all')}>{TEXT.showAll}</button>
+                    : undefined)}
+              />
+            </Card>
+          )
+          : (
+            <div className="tasks-groups">
+              {groups.map(group => {
+                // 已完成默认折叠：勾掉一条不是为了继续盯着它，DOM 留着只是不展示。
+                const collapsed = group.key === 'done' && !doneOpen
+                const openMinutes = group.tasks.reduce((sum, task) => sum + (task.done === true ? 0 : (durationOf(task) ?? 0)), 0)
+                const head = <>
+                  <span className="assistant-group-title">{group.label}</span>
+                  <span className="assistant-group-rule" aria-hidden="true" />
+                  <span className="assistant-group-count">{group.tasks.length}</span>
+                  {openMinutes > 0 && <span className="assistant-group-total">约 {durationText(openMinutes)}</span>}
+                </>
+                return (
+                  <section className="tasks-group assistant-group" key={group.key} data-group={group.key} data-tone={group.tone} data-testid="assistant-group">
+                    {group.key === 'done'
+                      ? <button type="button" className="assistant-group-head assistant-fold-head" aria-expanded={!collapsed} onClick={() => setDoneOpen(!doneOpen)}>
+                        {head}
+                        <span className="assistant-fold-chevron" aria-hidden="true"><IconChevronRight size={14} /></span>
+                      </button>
+                      : <header className="assistant-group-head">{head}</header>}
+                    <ul className="tasks-list" hidden={collapsed}>
+                      {group.tasks.map(task => (
+                        <TaskRow
+                          key={task.id}
+                          task={task}
+                          today={today}
+                          modules={modules}
+                          editing={editing}
+                          pending={pending}
+                          editRef={editRef}
+                          onToggle={toggleDone}
+                          onToggleStar={toggleStar}
+                          onStartEdit={startEdit}
+                          onEditTitle={title => setEditing(current => (current === null ? current : { ...current, title }))}
+                          onCommitEdit={commitEdit}
+                          onCancelEdit={cancelEdit}
+                          onDelete={setDeleting}
+                          onDetails={setDetails}
+                          onPlan={planToday}
+                          onNavigate={(id, target) => { if (typeof navigate === 'function') navigate(id, target) }}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                )
+              })}
+            </div>
+          )}
+
+        <div className="tasks-foot">
+          <span className="tasks-foot-item" title={TEXT.doneStatHint}>
+            今日安排完成 <b>{progress.done}/{progress.total}</b>
+          </span>
+          <span className="tasks-foot-item" title={TEXT.streakHint}>
+            <span className="tasks-foot-flame" aria-hidden="true"><IconFlame size={14} /></span>
+            {TEXT.streakStat} <b>{streak}</b> {TEXT.streakUnit}
+          </span>
+        </div>
+      </section>
 
       <ConfirmDialog
         open={deleting !== null}

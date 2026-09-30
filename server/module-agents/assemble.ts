@@ -23,6 +23,10 @@ import { createKnowledgeAccess, ensureBinding } from './knowledge';
 import { connectMcp, type ConnectedMcp } from './mcp';
 import { moduleAgentDefinition, resolveToolNames } from './registry';
 import { boundSessionWorkspace } from './workspace';
+import { getChatroomService } from '../modules/chatroom/service';
+import { createChatroomTools } from '../modules/chatroom/tools';
+import { createAssistantCoordinationTool } from '../modules/assistant/coordination';
+import { createRequirementsDispatchTool } from '../modules/requirements/dispatch';
 
 export interface AssembleModuleAgentInput {
   store: WorkbenchStore;
@@ -87,6 +91,10 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
       if (cfg && profile.config.tools.some(name => name.startsWith(`${kind}.`))) sources[kind] = registry.create(kind, cfg);
     }
     produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits });
+    const chatroom = getChatroomService(store, workspaceKey);
+    produced.push(...createChatroomTools({ service: chatroom, agentId, limits: profile.config.limits }));
+    if (agentId === 'assistant') produced.push(createAssistantCoordinationTool(store, chatroom));
+    if (agentId === 'requirements') produced.push(createRequirementsDispatchTool(store, chatroom));
     if (profile.skills.length) produced.push(skillTool(profile.skills));
     if (profile.skills.length && !profile.config.tools.includes('skills.read')) throw new HostError(503, '配置了 Skills 时必须允许 skills.read');
     const producedNames = new Set(produced.map((tool) => tool.name));

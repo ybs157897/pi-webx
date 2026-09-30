@@ -5,6 +5,16 @@ promptFile: ./prompts/requirements.md
 skills: []
 tools:
   - requirements.saveDraft
+  - requirements.dispatch
+  - read
+  - write
+  - edit
+  - bash
+  - grep
+  - find
+  - ls
+  - chatroom.send
+  - chatroom.read
 mcp: []
 knowledge:
   homeBinding: requirements

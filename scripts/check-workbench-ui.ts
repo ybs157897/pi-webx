@@ -1,5 +1,5 @@
 /**
- * 工作台界面验收（v2，2026-09 重塑版）：把八个模块 + AI 面板正文渲染钉在 SSR 产物上。
+ * 工作台界面验收（v2，2026-09 重塑版）：把九个模块 + AI 面板正文渲染钉在 SSR 产物上。
  *
  * 写法照 `scripts/check-task-panel.ts`：真实组件进 `renderToStaticMarkup`，喂构造好的假数据，
  * 断言只认 DOM 证据。与 v1 的差别：模块们各自 `import './X.css'`（模块样式私有化），
@@ -11,7 +11,8 @@
  *   2. 我的待办：无默认截止日的捕获 + 全量/未安排/到期/完成筛选；时间轴与认知分组另有门禁；
  *   3. 我的助理：今天 / 待办两页签 + 常驻独立 Agent，待办按紧迫度分组（已逾期/今天/稍后/已完成）；
  *   4. 问题修复是列表（用户定调）：密集表格 + 行内状态 + 关联回链；
- *   5. 日志查询是对话框（用户定调）：主界面只有表，查询/记录弹窗默认关闭；
+ *   5. 日志查询是对话优先（2026-09 定调，与需求管理同形态）：默认 logs Agent 对话（输入框带
+ *      图片/附件入口），记录页签保留密集结果表，查询/记录弹窗默认关闭；
  *   6. 需求管理默认中央对话，历史记录保留两栏列表和 markdown 阅读区；
  *   7. 代码开发是编辑器工作区（用户定调）：文件树 + tab + 行号编辑区 + 状态栏；
  *   8. AI 对话兜底正文与 /chat 一致：AssistantMarkdown 渲染出真实元素，无 markdown 残留；
@@ -39,6 +40,8 @@ import Fixes from '../src/workbench-app/modules/Fixes.jsx';
 import Logs from '../src/workbench-app/modules/Logs.jsx';
 import Requirements from '../src/workbench-app/modules/Requirements.jsx';
 import RequirementRecords from '../src/workbench-app/modules/requirements/Records.jsx';
+import { RequirementsNewConversation, RequirementsStarterActions, RequirementsWelcome } from '../src/workbench-app/modules/requirements/Landing.jsx';
+import { LogsNewConversation, LogsStarterActions, LogsWelcome } from '../src/workbench-app/modules/logs/Landing.jsx';
 import Codes from '../src/workbench-app/modules/Codes.jsx';
 import CodeRecords from '../src/workbench-app/modules/codes/Records.jsx';
 import CodeChat from '../src/workbench-app/modules/codes/CodeChat.jsx';
@@ -56,6 +59,7 @@ import './check-capability-tools';
 import './check-module-agent-settings-ui';
 import './check-requirements-ui';
 import './check-assistant-ui.tsx';
+import './check-chatroom-ui.tsx';
 
 /* ------------------------------------------------------------ 渲染与比对小工具 */
 
@@ -246,36 +250,51 @@ const data = fakeData();
   assert.ok(emptyFixes.includes('data-testid="fixes-empty"'), '空库缺空态');
 }
 
-/* ================================================== 5. 日志查询：对话框（用户定调） */
+/* ================================================== 5. 日志查询：对话优先（与需求管理同形态，2026-09 定调） */
 
 {
+  // 默认视图是日志对话：logs Agent 会话 + 输入框附件入口；结果表只在记录页签出现。
   const markup = render(Logs, data);
   assert.ok(markup.includes('data-module="logs"'), '日志缺 data-module');
-  assert.ok(markup.includes('data-testid="logs-list"'), '日志主界面缺结果表');
-  assert.equal(occurrences(markup, 'data-testid="log-row"'), 3, '日志行数应等于记录数');
+  assert.ok(markup.includes('data-testid="logs-conversation"') && markup.includes('data-agent-id="logs"'), '日志默认应是对话（logs Agent）');
+  assert.ok(markup.includes('data-testid="logs-chat-tab"') && markup.includes('data-testid="logs-records-tab"'), '日志缺「日志对话 / 日志记录」页签');
+  assert.ok(markup.includes('data-empty="false"'), '服务端首屏仍在恢复会话，不应提前显示空闲首页');
   assert.ok(markup.includes('data-testid="logs-query-open"'), '日志缺「查询日志」入口');
   assert.ok(markup.includes('data-testid="logs-record-open"'), '日志缺「记录日志」入口');
-  assert.ok(markup.includes('data-testid="logs-agent-open"'), '日志缺「问日志 Agent」入口');
-  assert.ok(!markup.includes('logs-query-form') && !markup.includes('logs-record-form'), '弹窗默认必须关闭（用户定调：对话框形式）');
-  assert.ok(!markup.includes('logs-filter-bar'), '无筛选时不该画条件条');
-  assertNoLeaks(markup, '日志');
+  assert.ok(!markup.includes('data-testid="logs-agent-open"'), '「问日志 Agent」侧挂入口应随对话化退役');
+  assert.ok(!markup.includes('data-testid="logs-list"'), '对话视图不该渲染结果表');
+
+  // 记录视图：navigationTarget.selectedId 直落，表格与条件断言都钉在这里。
+  const records = render(Logs, data, { navigationTarget: { selectedId: 'x' } });
+  assert.ok(records.includes('data-testid="logs-list"'), '记录视图缺结果表');
+  assert.equal(occurrences(records, 'data-testid="log-row"'), 3, '日志行数应等于记录数');
+  assert.ok(!records.includes('logs-query-form') && !records.includes('logs-record-form'), '弹窗默认必须关闭（用户定调：对话框形式）');
+  assert.ok(!records.includes('logs-filter-bar'), '无筛选时不该画条件条');
+  assertNoLeaks(records, '日志');
 
   const logsSource = sourceOf('../src/workbench-app/modules/logs/index.jsx');
   assert.ok(logsSource.includes("api.addRecord('logs'"), '记录日志未接线');
   assert.ok(logsSource.includes('queryOpen') && logsSource.includes('recordOpen'), '查询/记录弹窗状态未落地');
+  assert.ok(logsSource.includes("setView('records')"), '查询提交后应落回记录视图');
+  const logsChatSource = sourceOf('../src/workbench-app/modules/logs/LogsChat.jsx');
+  assert.ok(logsChatSource.includes("useModuleAgentChat('logs')"), '日志对话必须使用 logs 模块 Agent');
+  assert.ok(logsChatSource.includes('supportsImages'), '日志对话应声明附件能力');
 
-  const emptyLogs = render(Logs, { ...fakeData(), logs: [] }, { empty: true });
+  const emptyLogs = render(Logs, { ...fakeData(), logs: [] }, { empty: true, navigationTarget: { selectedId: 'x' } });
   assert.ok(emptyLogs.includes('data-testid="logs-load-demo"'), '空库缺演示数据入口');
 }
 
-/* ================================================== 6. 需求管理：知识列表（用户定调） */
+/* ================================================== 6. 需求管理：对话首页与历史记录 */
 
 {
   const conversation = render(Requirements, data);
   assert.ok(conversation.includes('data-testid="req-conversation"'), '需求菜单应直接显示中央对话');
   assert.ok(conversation.includes('data-agent-id="requirements"'), '需求对话必须使用独立 Agent');
   assert.ok(conversation.includes('data-testid="req-records-tab"'), '历史记录入口应保留');
+  assert.ok(conversation.includes('data-testid="req-open-tasks"'), '待办列表入口应保留');
   assert.ok(!conversation.includes('data-testid="req-split"'), '默认入口应为对话');
+  assert.ok(conversation.includes('data-testid="req-new-conversation"'), '需求输入框应保留新对话入口');
+  assert.ok(conversation.includes('data-empty="false"'), '服务端首屏仍在恢复会话，不应提前显示空闲首页');
   const markup = render(RequirementRecords, data);
   assert.ok(markup.includes('data-module="requirements"'), '需求缺 data-module');
   assert.ok(markup.includes('data-testid="req-split"'), '需求应是左右两栏');
@@ -459,7 +478,7 @@ const data = fakeData();
 }
 
 console.log('workbench UI: knowledge bases, folders, document list, reading and links passed')
-console.log('workbench UI: 8 modules (widget board, assistant todos+today, fix list, log dialogs, knowledge split, editor) + assistant markdown passed');
+console.log('workbench UI: 9 modules (widget board, assistant todos+today, fix list, log conversation-first, knowledge split, editor) + assistant markdown passed');
 
 /* ================================================== 10. AI 对话浮层：全屏居中 + 正文同源 + 「问小台」失败兜底 */
 
@@ -542,6 +561,91 @@ console.log('workbench UI: 8 modules (widget board, assistant todos+today, fix l
   assert.ok(textOf(withQuestion).includes('选择部署方式'), '问题标题应出现在浮层里');
   assert.ok(withQuestion.includes('Docker') && withQuestion.includes('本地进程'), '问题选项应出现在浮层里');
   assert.ok(withQuestion.includes('composer-input'), '提问作答期间原输入框应保持挂载（隐藏，草稿存活）');
+
+  // 需求页实际组件通过共享面板插槽组成首页；SSR 初始 hook 在恢复中，这里喂恢复后的空会话。
+  const landingSlots = {
+    emptyState: h(RequirementsWelcome, {}),
+    composerLeading: h(RequirementsNewConversation, { busy: false, onNew: () => {} }),
+    composerFooter: h(RequirementsStarterActions, { busy: false, status: 'live', modelName: 'fixture', onChoose: () => {} }),
+  };
+  const landing = renderToStaticMarkup(h(AIPanel, { ...panelProps, assistRows: [], ...landingSlots }));
+  assert.ok(landing.includes('data-empty="true"'), '空闲空会话应展示首页');
+  for (const id of ['req-landing', 'req-landing-title', 'req-new-conversation', 'req-starter-footer', 'req-starter-toolbar', 'req-starter-suggestions',
+    'req-starter-idea', 'req-starter-document', 'req-starter-tasks', 'req-starter-acceptance']) {
+    assert.ok(landing.includes(`data-testid="${id}"`), `需求对话首页缺 ${id}`);
+  }
+  assert.ok(landing.indexOf('data-testid="req-landing-title"') < landing.indexOf('<textarea')
+    && landing.indexOf('<textarea') < landing.indexOf('data-testid="req-starter-toolbar"')
+    && landing.indexOf('data-testid="req-starter-toolbar"') < landing.indexOf('data-testid="req-starter-suggestions"'),
+  '需求首页应按标题、输入框、工具栏和快捷入口排序');
+  assert.equal(occurrences(landing, '<textarea'), 1, '需求首页不能复制输入框');
+
+  // 日志对话首页与需求同构；输入框经 supportsImages 带附件入口（截图/日志文件直接丢进来）。
+  const logsLanding = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, assistRows: [], supportsImages: true,
+    emptyState: h(LogsWelcome, {}),
+    composerLeading: h(LogsNewConversation, { busy: false, onNew: () => {} }),
+    composerFooter: h(LogsStarterActions, { busy: false, status: 'live', modelName: 'fixture', onChoose: () => {} }),
+  }));
+  assert.ok(logsLanding.includes('data-empty="true"'), '空闲空会话应展示首页（日志）');
+  for (const id of ['logs-landing', 'logs-landing-title', 'logs-new-conversation', 'logs-starter-footer', 'logs-starter-toolbar', 'logs-starter-suggestions',
+    'logs-starter-errors', 'logs-starter-analysis', 'logs-starter-summary', 'logs-starter-open']) {
+    assert.ok(logsLanding.includes(`data-testid="${id}"`), `日志对话首页缺 ${id}`);
+  }
+  assert.ok(logsLanding.includes('data-testid="module-attach"') && logsLanding.includes('data-testid="module-attach-input"'), '日志输入框缺附件入口');
+
+  // 附件能力是显式开关：默认关（问小台浮层等旧使用方 DOM 不变），模块对话逐个打开。
+  const plainPanel = renderToStaticMarkup(h(AIPanel, { ...panelProps, assistRows: [] }));
+  assert.ok(!plainPanel.includes('module-attach'), '未开启 supportsImages 不应出现附件入口');
+  const attachPanel = renderToStaticMarkup(h(AIPanel, { ...panelProps, assistRows: [], supportsImages: true }));
+  assert.ok(attachPanel.includes('data-testid="module-attach"') && attachPanel.includes('data-testid="module-attach-input"'), '开启 supportsImages 应有附件入口与文件选择');
+  // 发送链路钉在源码：附件走准入（与 /chat 同一份图片限额），文本内联、图片进 prompt 信封。
+  const composerAttachSource = sourceOf('../src/workbench-app/shell/composer-attachments.mjs');
+  assert.ok(composerAttachSource.includes('imageAdmissionError'), '附件准入必须复用 shared 的图片限额');
+  assert.ok(composerAttachSource.includes('formatAttachmentBlocks'), '文本附件内联格式缺失');
+  // 文件卡片元数据（角标 / 分类色 / 类型标签）是纯函数，直接单测映射。
+  const { attachmentBadge } = await import('../src/workbench-app/shell/composer-attachments.mjs');
+  assert.deepEqual(attachmentBadge({ name: 'CHANGELOG.md' }), { glyph: 'M', tone: 'blue', label: 'MD' });
+  assert.equal(attachmentBadge({ name: 'data.csv' }).tone, 'amber');
+  assert.equal(attachmentBadge({ name: 'src/index.ts' }).tone, 'green');
+  assert.equal(attachmentBadge({ name: 'run-2026-09-29.log' }).tone, 'slate');
+  assert.deepEqual(attachmentBadge({ name: '无扩展名' }).label, 'FILE');
+  // 拖拽是交互分支，SSR 不可达：落点/悬浮层/取文件钉在源码上。
+  const aipanelDropSource = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  assert.ok(aipanelDropSource.includes('composer-drop') && aipanelDropSource.includes('onDrop='), '输入区缺拖拽落点');
+  assert.ok(aipanelDropSource.includes('dataTransfer?.files'), '拖拽未取 dataTransfer 文件');
+  assert.ok(aipanelDropSource.includes('attach-drag-overlay') && aipanelDropSource.includes('attach-file-icon'), '拖拽悬浮层或文件卡片未落地');
+  const moduleChatSource = sourceOf('../src/workbench-app/agents/useModuleAgentChat.jsx');
+  assert.ok(moduleChatSource.includes('attachments?.images') && moduleChatSource.includes('attachments?.files'), '模块 Agent send 未接附件参数');
+  assert.ok(moduleChatSource.includes("type: 'prompt'") && moduleChatSource.includes('images'), 'prompt 信封未带图片');
+  const modulePanelSource = sourceOf('../src/workbench-app/agents/ModuleAgentPanel.jsx')
+    + sourceOf('../src/workbench-app/modules/requirements/RequirementsChat.jsx');
+  assert.ok(modulePanelSource.includes('supportsImages'), '模块 Agent 面板与需求对话应打开附件能力');
+
+  const withLandingTurns = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, ...landingSlots, assistRows: [],
+    transcript: { ...emptyTranscript, entries: [{ kind: 'user', id: 'u2', at: 1_700_000_000_000, text: '已有消息', imageCount: 0 }] },
+  }));
+  assert.ok(withLandingTurns.includes('data-empty="false"') && withLandingTurns.includes('pi-message-item'), '有消息应恢复原有转录布局');
+  assert.ok(!withLandingTurns.includes('req-landing') && !withLandingTurns.includes('req-starter-footer'), '有消息不应展示首页或快捷入口');
+
+  const runningLanding = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, ...landingSlots, assistRows: [], busy: false, transcript: { ...emptyTranscript, running: true },
+  }));
+  assert.ok(runningLanding.includes('data-empty="false"'), '运行中的空转录不应算空闲首页');
+  assert.ok(!runningLanding.includes('req-landing') && !runningLanding.includes('req-starter-footer'), '运行中不应闪回首页');
+
+  const busyLanding = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, ...landingSlots, assistRows: [], busy: true, onStop: () => {},
+  }));
+  assert.ok(busyLanding.includes('data-empty="false"') && busyLanding.includes('data-testid="module-agent-stop"'), '发送在途应保留停止按钮');
+  assert.ok(!busyLanding.includes('req-landing') && !busyLanding.includes('req-starter-footer'), '发送在途不应展示首页');
+
+  const questionLanding = renderToStaticMarkup(h(AIPanel, {
+    ...panelProps, ...landingSlots, assistRows: [], dialog: pendingQuestion, onRespondDialog: () => {},
+  }));
+  assert.ok(questionLanding.includes('data-empty="false"') && questionLanding.includes('data-testid="question-composer"'), '待回答问题应占据输入框座位');
+  assert.ok(!questionLanding.includes('req-landing') && !questionLanding.includes('req-starter-footer'), '待回答问题不应展示首页');
 
   // 接线钉在 App 源码上（错误路径依赖 send 内部吞异常，SSR 不可达）。
   const appSource = sourceOf('../src/workbench-app/App.jsx');
@@ -877,7 +981,7 @@ console.log('workbench UI: module agent panel (capabilities redaction, AIPanel o
   assert.ok(stopped.includes('data-testid="module-agent-stop"'));
   assert.ok(stopped.includes('aria-label="停止当前回答"'));
   assert.ok(stopped.includes('尚未发送的草稿'));
-  assert.ok(stopped.includes('查询已接入的日志和问题清单'));
+  assert.ok(stopped.includes('查询已接入的日志和问题清单'), '无首页插槽的日志面板应保留原有欢迎文案');
   assert.ok(!stopped.includes('如何安排一周运动'));
   assert.ok(stopped.includes('placeholder="查询日志"'));
 }

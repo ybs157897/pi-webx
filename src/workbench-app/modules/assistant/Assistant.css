@@ -7,14 +7,18 @@
 
 /* ================================================================ 1. 工作区 */
 
-.main-inner.assistant-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; max-width: 1600px; padding-bottom: var(--sp-5); }
-.assistant-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
+.main-inner.assistant-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; max-width: none; padding: 0; }
+.assistant-main-inner > .page-head { flex: none; margin: 0; padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-1); background: var(--surface-0); }
 
-.assistant-workspace { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(320px, 30%, 420px); gap: var(--sp-4); }
+.assistant-workspace { flex: 1; min-width: 0; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) clamp(340px, 27vw, 400px); gap: 0; }
+.assistant-workspace[data-chat-open="false"], .assistant-workspace[data-has-chat="false"] { grid-template-columns: minmax(0, 1fr); }
 
 .assistant-mobile-tabs { display: none; }
 
-.assistant-items { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
+.assistant-items { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: var(--sp-5) var(--sp-6) 0; overflow: hidden; }
+.assistant-content-toolbar { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.assistant-chat-toggle { flex: none; min-height: 36px; }
+.assistant-pending-count { border-radius: var(--radius-pill); background: var(--accent-soft); color: var(--accent); padding: 2px var(--sp-2); font-size: var(--fs-xs); white-space: nowrap; }
 
 /* 视图标题行 .assistant-head* 由今天 / 待办视图在 Today.css 中渲染（日期步进等细节归视图）。 */
 
@@ -63,19 +67,24 @@
 
 .assistant-tab[aria-selected="true"] .assistant-tab-count { background: var(--accent-soft); color: var(--accent); }
 
-.assistant-panel { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: var(--sp-3) var(--sp-2) var(--sp-5) 0; }
+.assistant-panel { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; padding: 0 var(--sp-1) var(--sp-6) 0; scrollbar-gutter: stable; }
 
 /* ================================================================ 2. 对话列 */
 
-.assistant-chat { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-0); overflow: hidden; }
+.assistant-chat-dock { display: flex; min-width: 0; min-height: 0; border-left: 1px solid var(--line-1); background: var(--surface-0); }
+.assistant-chat-dock[hidden] { display: none; }
+.assistant-chat { position: relative; display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; background: var(--surface-0); overflow: hidden; }
+.assistant-chat-collapse { position: absolute; top: var(--sp-3); right: var(--sp-2); z-index: 1; }
 .assistant-chat-body { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
-.assistant-chat-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 240px; overflow: hidden; }
+.assistant-chat-panel { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .assistant-chat-panel > div { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .assistant-chat-panel .ai-overlay-embedded { position: relative; inset: auto; z-index: auto; height: 100%; min-height: 0; }
 .assistant-chat-panel .ai-overlay-surface { background: var(--surface-0); }
+.assistant-chat-panel .aside-head { padding-right: calc(var(--sp-7) + var(--sp-4)); }
 .assistant-chat-panel .aside-head .grow { min-width: 0; }
 .assistant-chat-panel .aside-sub { overflow-wrap: anywhere; }
-.assistant-chat-panel .chat-empty { padding: var(--sp-4); width: min(100%, 560px); }
+.assistant-chat-panel .chat-empty { padding: var(--sp-5); width: min(100%, 560px); }
+.assistant-chat-panel .chat-empty-text { line-height: 1.7; }
 .assistant-chat-panel .composer { padding: var(--sp-3); }
 .assistant-chat-guide { color: var(--text-3); font-size: var(--fs-xs); }
 
@@ -144,55 +153,39 @@
 .assistant-plan-applied .btn,
 .assistant-plan-error .btn { flex: none; margin-inline-start: auto; }
 
-/* 移动端「待确认」细条：只在 ≤640px 的事项视图里立起来（见第 4 节）。 */
+/* 收起后的提醒由工具栏徽章承接，方案确认仍留在已挂载的对话里。 */
 .assistant-plan-peek { display: none; }
 
 /* ================================================================ 4. 响应式 */
 
 @media (max-width: 1000px) {
-  .assistant-workspace { display: flex; flex-direction: column; overflow-y: auto; }
-  .assistant-items { flex: none; overflow: visible; }
-  .assistant-panel { overflow: visible; }
-  .assistant-chat { flex: none; min-height: 520px; }
+  .assistant-workspace { display: flex; flex-direction: column; }
+  .assistant-mobile-tabs { display: flex; flex: none; align-items: center; gap: var(--sp-2); padding: var(--sp-3) var(--sp-6); border-bottom: 1px solid var(--line-1); background: var(--surface-0); }
+  .assistant-mobile-tabs button { min-height: 44px; }
+  .assistant-mobile-tabs [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  .assistant-content-toolbar .assistant-chat-toggle { display: none; }
+  .assistant-items { flex: 1; }
+  .assistant-workspace[data-mobile-view="chat"][data-has-chat="true"] .assistant-items { display: none; }
+  .assistant-chat-dock { flex: 1; border-left: 0; }
+  .assistant-chat-collapse { top: var(--sp-2); }
+  .assistant-chat-collapse, .assistant-chat-panel .aside-actions .icon-btn { width: 44px; height: 44px; }
+  .assistant-chat-panel .aside-head { padding-right: calc(44px + var(--sp-4)); min-height: 64px; }
+  .assistant-chat-panel .suggest-item { min-height: 44px; }
+  .assistant-chat-panel .send-btn { width: 44px; height: 44px; }
 }
 
 @media (max-width: 640px) {
-  .main-inner.assistant-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
-  .assistant-main-inner > .page-head { flex-direction: row; align-items: center; }
+  .main-inner.assistant-main-inner { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  .assistant-main-inner > .page-head { flex-direction: row; align-items: center; padding: var(--sp-3) var(--sp-4); }
   .assistant-main-inner .page-title { font-size: var(--fs-lg); }
   .assistant-main-inner .page-desc { font-size: var(--fs-xs); }
 
-  .assistant-mobile-tabs { display: flex; gap: var(--sp-2); }
-  .assistant-mobile-tabs [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
-
-  .assistant-workspace[data-mobile-view="chat"] .assistant-items { display: none; }
-  .assistant-workspace[data-mobile-view="chat"] .assistant-chat { flex: 1; min-height: 0; }
-  /* 事项视图：对话列整体收起，只留「待确认」细条。 */
-  .assistant-workspace[data-mobile-view="items"] .assistant-chat { flex: none; min-height: 0; border: 0; background: transparent; }
-  .assistant-workspace[data-mobile-view="items"] .assistant-chat-body { display: none; }
-  .assistant-workspace[data-mobile-view="items"] .assistant-plan-peek {
-    display: flex;
-    position: fixed;
-    inset-inline: var(--sp-3);
-    bottom: calc(64px + env(safe-area-inset-bottom));
-    z-index: var(--z-drawer);
-    align-items: center;
-    justify-content: center;
-    min-height: 44px;
-    border: 1px solid var(--accent);
-    border-radius: var(--radius-pill);
-    background: var(--surface-0);
-    color: var(--accent);
-    font-size: var(--fs-sm);
-    font-weight: 550;
-    box-shadow: var(--shadow-2);
-    cursor: pointer;
-  }
-
-  .assistant-tab { height: 34px; }
+  .assistant-items { padding: var(--sp-4) var(--sp-4) 0; }
+  .assistant-mobile-tabs { padding-inline: var(--sp-4); }
+  .assistant-tab { height: 44px; }
   .assistant-plan-entry { grid-template-columns: minmax(0, 1fr); row-gap: 2px; }
   .assistant-plan-entry-time { padding-top: 0; }
-  .assistant-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
+  .assistant-chat-panel .aside-head { padding: var(--sp-2) calc(44px + var(--sp-3)) var(--sp-2) var(--sp-3); gap: var(--sp-2); }
   .assistant-chat-panel .chat-empty { padding: var(--sp-3); }
   .assistant-chat-panel .composer { padding: var(--sp-2); }
 }

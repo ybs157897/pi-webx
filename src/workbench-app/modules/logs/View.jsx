@@ -8,10 +8,8 @@ export { logsAgentPanel } from './agent-ui.js'
 
 import { TEXT, LEVEL_OPTIONS, SOURCE_LIMIT, levelOf, isRecent, groupLabel, stampText } from './model.jsx'
 
-import Dialogs from './Dialogs.jsx'
-
 export default function View(props) {
-  const { logs, empty, onLoadDemo, demoBusy, loadDemo, openRecord, hasFilter, rows, headActions, filters, setFilters, levelCounts, toggleLevel, sourcePool, visibleSources, pickSource, setAllSources, allSources, levels, clearFilters, groups, today, openId, setOpenId, setPendingDelete, queryOpen, setQueryOpen, setQueryDraft, queryFormId, submitQuery, queryDraft, recordOpen, busy, setRecordOpen, submitRecord, record, setRecord, pendingDelete, confirmDelete } = props
+  const { logs, empty, onLoadDemo, demoBusy, loadDemo, openRecord, hasFilter, rows, filters, setFilters, levelCounts, toggleLevel, sourcePool, visibleSources, pickSource, setAllSources, allSources, levels, clearFilters, groups, today, openId, setOpenId, setPendingDelete } = props
   return (
     <div className="logs" data-module="logs">
       {logs.length === 0 ? (
@@ -47,7 +45,6 @@ export default function View(props) {
         <Card
           title={TEXT.list}
           subtitle={`${hasFilter ? TEXT.filtered(rows.length, logs.length) : TEXT.total(logs.length)} · ${TEXT.expandHint}`}
-          action={headActions}
         >
           <div className="logs-toolbar">
             <div className="logs-toolbar-row">
@@ -221,8 +218,6 @@ export default function View(props) {
           )}
         </Card>
       )}
-
-      <Dialogs {...props} />
     </div>
   )
 }
