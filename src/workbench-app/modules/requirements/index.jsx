@@ -6,6 +6,7 @@ import { IconRequirements, IconTasks } from '../../icons.jsx'
 import RequirementsChat from './RequirementsChat.jsx'
 import Records from './Records.jsx'
 import ImportDialog from './ImportDialog.jsx'
+import TraceDrawer from './TraceDrawer.jsx'
 import './Conversation.css'
 
 export default function Requirements(props) {
@@ -15,6 +16,7 @@ export default function Requirements(props) {
   const [busy, setBusy] = useState(false)
   const [importError, setImportError] = useState('')
   const [savedImport, setSavedImport] = useState(false)
+  const [traceLookupOpen, setTraceLookupOpen] = useState(false)
   const importLock = useRef(false)
 
   useEffect(() => {
@@ -66,12 +68,16 @@ export default function Requirements(props) {
         <button type="button" className={`segmented-item ${view === 'chat' ? 'is-active' : ''}`} data-testid="req-chat-tab" aria-pressed={view === 'chat'} onClick={() => setView('chat')}>需求对话</button>
         <button type="button" className={`segmented-item ${view === 'records' ? 'is-active' : ''}`} data-testid="req-records-tab" aria-pressed={view === 'records'} onClick={() => setView('records')}><IconRequirements size={15} />需求记录 · {data?.requirements?.length ?? 0}</button>
       </div>
-      <button type="button" className="btn btn-sm" data-testid="req-open-tasks" onClick={() => openTasks()}><IconTasks size={15} />待办列表</button>
+      <div className="req-workspace-actions">
+        <button type="button" className="btn btn-sm" data-testid="req-trace-by-id" onClick={() => setTraceLookupOpen(true)}>按 ID 追踪</button>
+        <button type="button" className="btn btn-sm" data-testid="req-open-tasks" onClick={() => openTasks()}><IconTasks size={15} />待办列表</button>
+      </div>
     </div>
     <div className="req-conversation-host" hidden={view !== 'chat'}>
       <RequirementsChat data={data} themeMode={themeMode} stepsMode={parseTranscriptViewMode(prefs?.transcriptView)} onRefresh={refresh} onImport={openImport} onOpenTasks={openTasks} />
     </div>
     {view === 'records' && <div className="req-records-host"><Records {...props} mutate={mutate} onImport={openImport} initialSelectedId={navigationTarget?.selectedId ?? ''} /></div>}
     {importing && <ImportDialog key={importing.id} row={importing} busy={busy} saved={savedImport} error={importError} onClose={() => { if (!busy) setImporting(null) }} onConfirm={confirmImport} />}
+    {traceLookupOpen && <TraceDrawer requirementId="" onClose={() => setTraceLookupOpen(false)} onChanged={() => refresh?.()} />}
   </div>
 }

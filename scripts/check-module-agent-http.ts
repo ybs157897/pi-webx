@@ -46,7 +46,7 @@ try {
   const assistantCapability = capabilities.agents.find(agent => agent.id === 'assistant');
   assert.equal(assistantCapability?.ok, true);
   assert.equal(assistantCapability?.enabled, true);
-  assert.deepEqual(assistantCapability?.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
+  assert.deepEqual(assistantCapability?.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'chatroom.work', 'chatroom.trace', 'chatroom.delivery', 'assistant.coordinate']);
   const concurrent = await Promise.all(Array.from({ length: 8 }, () => post({ requestId: 'same-create' })));
   assert.ok(concurrent.every(result => result.status === 200));
   const id = concurrent[0]!.body.session.id;

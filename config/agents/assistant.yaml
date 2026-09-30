@@ -16,6 +16,9 @@ tools:
   - ls
   - chatroom.send
   - chatroom.read
+  - chatroom.work
+  - chatroom.trace
+  - chatroom.delivery
   - assistant.coordinate
 mcp: []
 knowledge:

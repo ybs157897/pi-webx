@@ -3,6 +3,7 @@ import type { WorkbenchStore } from '../../workbench/store';
 import type { AgentId } from '../../module-agents/contracts';
 import type { ChatroomConsumption, ChatroomContext, ChatroomMessage, ChatroomPublicMessage, ChatroomSenderId, DeliveryStatus } from './contracts';
 import { ChatroomConsumptionStore } from './consumption-store';
+import { traceMessageCreated, traceMessageSettled } from './trace-links';
 
 type Row = {
   seq: number; id: string; workspace_key: string; thread_id: string; reply_to: string | null;
@@ -10,6 +11,7 @@ type Row = {
   sender_session_id: string; entry_key: string; request_hash: string; body: string;
   created_at: string; delivery_status: DeliveryStatus; error: string | null;
   depth: number; context: string; claimants: string | null;
+  input_requirement_id: string | null; input_requirement_version: number | null;
 };
 
 function decodeClaimants(raw: string | null): AgentId[] {
@@ -24,6 +26,8 @@ function decode(row: Row, consumptions: ChatroomConsumption[]): ChatroomMessage 
     senderSessionId: row.sender_session_id, entryKey: row.entry_key, requestHash: row.request_hash,
     body: row.body, createdAt: row.created_at, deliveryStatus: row.delivery_status,
     error: row.error, depth: row.depth, context: JSON.parse(row.context) as ChatroomContext,
+    inputRequirementId: row.input_requirement_id,
+    inputRequirementVersion: row.input_requirement_version,
     claimants: decodeClaimants(row.claimants),
     consumptions,
   };
@@ -31,7 +35,8 @@ function decode(row: Row, consumptions: ChatroomConsumption[]): ChatroomMessage 
 
 export function publicMessage(message: ChatroomMessage): ChatroomPublicMessage {
   const { id, seq, threadId, replyTo, senderId, senderName, recipientId, body, createdAt, deliveryStatus, error, consumptions } = message;
-  return { id, seq, threadId, replyTo, senderId, senderName, recipientId, body, createdAt, deliveryStatus, error, consumptions };
+  return { id, seq, threadId, collaborationTaskId: message.context.collaborationTaskId ?? null,
+    replyTo, senderId, senderName, recipientId, body, createdAt, deliveryStatus, error, consumptions };
 }
 
 /** Dedicated message table: workbench_records import/export cannot rewrite delivery history. */
@@ -39,7 +44,7 @@ export class ChatroomStore {
   readonly sqlite: Database.Database;
   readonly consumptions: ChatroomConsumptionStore;
 
-  constructor(store: WorkbenchStore, readonly workspaceKey: string) {
+  constructor(private readonly store: WorkbenchStore, readonly workspaceKey: string) {
     this.sqlite = store.sqlite;
     this.sqlite.exec(`
       CREATE TABLE IF NOT EXISTS chatroom_user_sessions (
@@ -66,6 +71,8 @@ export class ChatroomStore {
         error TEXT,
         depth INTEGER NOT NULL,
         context TEXT NOT NULL CHECK(json_valid(context)),
+        input_requirement_id TEXT,
+        input_requirement_version INTEGER,
         UNIQUE(workspace_key, sender_session_id, entry_key)
       );
       CREATE INDEX IF NOT EXISTS chatroom_messages_feed ON chatroom_messages(workspace_key, seq);
@@ -76,6 +83,14 @@ export class ChatroomStore {
     if (!(this.sqlite.pragma('table_info(chatroom_messages)') as Array<{ name: string }>)
       .some(column => column.name === 'claimants')) {
       this.sqlite.exec(`ALTER TABLE chatroom_messages ADD COLUMN claimants TEXT NOT NULL DEFAULT '[]'`);
+    }
+    if (!(this.sqlite.pragma('table_info(chatroom_messages)') as Array<{ name: string }>)
+      .some(column => column.name === 'input_requirement_version')) {
+      this.sqlite.exec('ALTER TABLE chatroom_messages ADD COLUMN input_requirement_version INTEGER');
+    }
+    if (!(this.sqlite.pragma('table_info(chatroom_messages)') as Array<{ name: string }>)
+      .some(column => column.name === 'input_requirement_id')) {
+      this.sqlite.exec('ALTER TABLE chatroom_messages ADD COLUMN input_requirement_id TEXT');
     }
     this.consumptions = new ChatroomConsumptionStore(this.sqlite, workspaceKey);
     this.transaction(() => {
@@ -143,18 +158,25 @@ export class ChatroomStore {
   }
 
   insert(message: Omit<ChatroomMessage, 'seq' | 'consumptions'>): ChatroomMessage {
-    const result = this.sqlite.prepare(`INSERT INTO chatroom_messages (
+    return this.transaction(() => {
+      const result = this.sqlite.prepare(`INSERT INTO chatroom_messages (
       id, workspace_key, thread_id, reply_to, sender_id, sender_name, recipient_id,
       sender_session_id, entry_key, request_hash, body, created_at, delivery_status,
-      error, depth, context, claimants
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      error, depth, context, claimants, input_requirement_id, input_requirement_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
       message.id, this.workspaceKey, message.threadId, message.replyTo, message.senderId,
       message.senderName, message.recipientId, message.senderSessionId, message.entryKey,
       message.requestHash, message.body, message.createdAt, message.deliveryStatus,
       message.error, message.depth, JSON.stringify(message.context),
-      JSON.stringify(message.claimants ?? []),
+      JSON.stringify(message.claimants ?? []), message.context.requirementId ?? null,
+      message.context.requirementVersion ?? null,
     );
-    return { ...message, seq: Number(result.lastInsertRowid), consumptions: [] };
+      const saved = { ...message, seq: Number(result.lastInsertRowid), consumptions: [],
+        inputRequirementId: message.context.requirementId ?? null,
+        inputRequirementVersion: message.context.requirementVersion ?? null };
+      traceMessageCreated(this.store, this.workspaceKey, saved);
+      return saved;
+    });
   }
 
   setClaimants(id: string, claimants: readonly AgentId[]): void {
@@ -169,6 +191,12 @@ export class ChatroomStore {
     return row ? this.decode(row) : undefined;
   }
 
+  pendingAfter(afterSeq: number, limit: number): ChatroomMessage[] {
+    return (this.sqlite.prepare(`SELECT * FROM chatroom_messages
+      WHERE workspace_key = ? AND delivery_status = 'pending' AND seq > ? ORDER BY seq LIMIT ?`)
+      .all(this.workspaceKey, afterSeq, limit) as Row[]).map(row => this.decode(row));
+  }
+
   claim(id: string): ChatroomMessage | undefined {
     const changed = this.sqlite.prepare(`UPDATE chatroom_messages SET delivery_status = 'running'
       WHERE workspace_key = ? AND id = ? AND delivery_status = 'pending'`).run(this.workspaceKey, id);
@@ -176,9 +204,15 @@ export class ChatroomStore {
   }
 
   settle(id: string, status: 'delivered' | 'failed', error: string | null): void {
-    this.sqlite.prepare(`UPDATE chatroom_messages SET delivery_status = ?, error = ?
+    this.transaction(() => {
+      const changed = this.sqlite.prepare(`UPDATE chatroom_messages SET delivery_status = ?, error = ?
       WHERE workspace_key = ? AND id = ? AND delivery_status = 'running'`)
-      .run(status, error, this.workspaceKey, id);
+        .run(status, error, this.workspaceKey, id);
+      if (changed.changes) {
+        const message = this.byId(id);
+        if (message) traceMessageSettled(this.store, this.workspaceKey, message, status);
+      }
+    });
   }
 
   updateContext(id: string, context: ChatroomContext): void {
@@ -197,6 +231,18 @@ export class ChatroomStore {
       WHERE workspace_key = ? AND thread_id = ? ORDER BY seq DESC LIMIT ?`)
       .all(this.workspaceKey, threadId, limit) as Row[];
     return rows.reverse().map(row => this.decode(row));
+  }
+
+  historySince(threadId: string, afterSeq: number, beforeSeq: number, limit: number): ChatroomMessage[] {
+    const rows = this.sqlite.prepare(`SELECT * FROM chatroom_messages
+      WHERE workspace_key = ? AND thread_id = ? AND seq > ? AND seq <= ? ORDER BY seq LIMIT ?`)
+      .all(this.workspaceKey, threadId, afterSeq, beforeSeq, limit) as Row[];
+    return rows.map(row => this.decode(row));
+  }
+
+  hasThread(threadId: string): boolean {
+    return this.sqlite.prepare(`SELECT 1 FROM chatroom_messages WHERE workspace_key = ? AND thread_id = ? LIMIT 1`)
+      .get(this.workspaceKey, threadId) !== undefined;
   }
 
   watch(ids: readonly string[]): ChatroomMessage[] {

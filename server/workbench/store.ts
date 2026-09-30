@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ARRAY_MODULES, emptyState, demoState, validateFields } from './schema.mjs';
 import { assertTaskSchedule, assertTaskShape } from '../modules/assistant/validation';
+import { appendDatasetReplacedMutation, installMutationJournal } from './mutation-journal';
 
 type ArrayModule = typeof ARRAY_MODULES[number];
 type RecordRow = Record<string, unknown> & { id: string };
@@ -213,6 +214,7 @@ export class WorkbenchStore {
       );
       CREATE INDEX IF NOT EXISTS workbench_records_module_seq ON workbench_records(module, seq);
     `);
+    installMutationJournal(this.db);
     this.migrateLegacyKnowledge();
     this.migrateLegacyModules();
   }
@@ -477,6 +479,7 @@ export class WorkbenchStore {
         for (const record of state[module]) insertRecord.run(module, record.id, JSON.stringify(record));
       }
       this.migrateLegacyKnowledge();
+      appendDatasetReplacedMutation(this.db, state.requirements.map(record => record.id), state.tasks.map(record => record.id));
     })();
   }
 

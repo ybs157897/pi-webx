@@ -86,6 +86,48 @@
 .chatroom-avatar.tone-2, .chatroom-member-avatar.tone-2 { background: var(--warn-soft); color: var(--warn-strong); }
 .chatroom-avatar.tone-3, .chatroom-member-avatar.tone-3 { background: var(--ok-soft); color: var(--ok-strong); }
 
+.chatroom-topic { display: flex; flex: none; align-items: center; justify-content: space-between; gap: var(--sp-3); min-width: 0; padding: var(--sp-2) var(--sp-5); border-bottom: 1px solid var(--line-1); background: var(--surface-1); }
+.chatroom-topic-copy { display: flex; align-items: baseline; gap: var(--sp-2); min-width: 0; }
+.chatroom-topic-copy strong { flex: none; color: var(--text-1); font-size: var(--fs-xs); }
+.chatroom-topic-copy span { min-width: 0; overflow: hidden; color: var(--text-2); font-size: var(--fs-xs); text-overflow: ellipsis; white-space: nowrap; }
+.chatroom-topic button { flex: none; min-height: 40px; padding: 0 var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text-1); font-size: var(--fs-xs); cursor: pointer; }
+.chatroom-topic button:hover, .chatroom-topic button:focus-visible { border-color: var(--accent); color: var(--accent); }
+
+.chatroom-tasks { flex: none; min-width: 0; border-bottom: 1px solid var(--line-1); background: var(--surface-0); }
+.chatroom-tasks-heading { display: flex; align-items: baseline; gap: var(--sp-2); padding: var(--sp-2) var(--sp-5); color: var(--text-1); font-size: var(--fs-sm); }
+.chatroom-tasks-heading > span { padding: 0 var(--sp-1); border-radius: var(--radius-pill); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-tasks-heading small { margin-left: auto; color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-tasks-empty { padding: 0 var(--sp-5) var(--sp-2); color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-task-items { display: flex; gap: var(--sp-2); max-height: 220px; padding: 0 var(--sp-5) var(--sp-3); overflow: auto; list-style: none; scrollbar-width: thin; }
+.chatroom-task { flex: 0 0 min(320px, 80vw); min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-1); border-radius: var(--radius-md); background: var(--surface-1); }
+.chatroom-task.is-selected { border-color: var(--accent); }
+.chatroom-task-topline, .chatroom-task-assignment-line { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-2); min-width: 0; }
+.chatroom-task-title { min-width: 0; padding: 0; overflow: hidden; border: 0; background: transparent; color: var(--text-1); font: inherit; font-size: var(--fs-sm); font-weight: 650; text-align: left; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.chatroom-task-title:hover, .chatroom-task-title:focus-visible { color: var(--accent); text-decoration: underline; }
+.chatroom-task-status { flex: none; color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-task-status[data-status="running"], .chatroom-task-status[data-status="waiting_for_agent"] { color: var(--info-strong); }
+.chatroom-task-status[data-status="waiting_for_user"], .chatroom-task-status[data-status="interrupted"] { color: var(--warn-strong); }
+.chatroom-task-status[data-status="failed"], .chatroom-task-status[data-status="needs_review"] { color: var(--danger-strong); }
+.chatroom-task-status[data-status="completed"] { color: var(--ok-strong); }
+.chatroom-task-assignments { display: flex; flex-direction: column; gap: var(--sp-2); margin-top: var(--sp-2); list-style: none; }
+.chatroom-task-assignment { min-width: 0; padding-top: var(--sp-2); border-top: 1px solid var(--line-1); }
+.chatroom-task-assignment-line { color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-task-assignment-line strong { min-width: 0; overflow: hidden; color: var(--text-1); text-overflow: ellipsis; white-space: nowrap; }
+.chatroom-task-summary { margin-top: var(--sp-1); color: var(--text-2); font-size: var(--fs-xs); line-height: 1.5; overflow-wrap: anywhere; }
+.chatroom-task-actions { display: flex; flex-wrap: wrap; gap: var(--sp-1); margin-top: var(--sp-2); }
+.chatroom-task-actions button { min-height: 40px; padding: 0 var(--sp-2); border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--accent); font-size: var(--fs-xs); cursor: pointer; }
+.chatroom-task-actions button:hover:not(:disabled), .chatroom-task-actions button:focus-visible { border-color: var(--accent); }
+.chatroom-task-actions button.is-danger { color: var(--danger-strong); }
+.chatroom-task-actions button:disabled { cursor: default; opacity: .5; }
+.chatroom-task-review { margin-top: var(--sp-2); padding: var(--sp-2); border-radius: var(--radius-sm); background: var(--warn-soft); color: var(--warn-strong); font-size: var(--fs-xs); line-height: 1.5; }
+.chatroom-task-review label { display: flex; align-items: flex-start; gap: var(--sp-1); margin-top: var(--sp-1); cursor: pointer; }
+.chatroom-task-review input { flex: none; margin-top: .2em; accent-color: var(--accent); }
+.chatroom-task-review button { min-height: 40px; margin-top: var(--sp-2); padding: 0 var(--sp-2); border: 1px solid var(--warn-strong); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--warn-strong); font-size: var(--fs-xs); cursor: pointer; }
+.chatroom-task-review button:hover:not(:disabled), .chatroom-task-review button:focus-visible { border-color: var(--accent); color: var(--accent); }
+.chatroom-task-review button:disabled { cursor: default; opacity: .5; }
+.chatroom-task-action-error, .chatroom-task-action-notice { margin: var(--sp-1) var(--sp-5) var(--sp-2); color: var(--danger-strong); font-size: var(--fs-xs); }
+.chatroom-task-action-notice { color: var(--ok-strong); }
+
 .chatroom-error {
   display: flex;
   flex: none;
@@ -212,6 +254,10 @@
 .chatroom-mention-menu button:hover, .chatroom-mention-menu button.is-active { background: var(--accent-soft); color: var(--accent); }
 .chatroom-mention-option-avatar { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-xs); font-weight: 700; }
 .chatroom-mention-empty { padding: var(--sp-3); color: var(--text-2); font-size: var(--fs-sm); }
+.chatroom-composer-route { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); min-width: 0; color: var(--text-2); font-size: var(--fs-xs); }
+.chatroom-composer-route span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatroom-composer-route button { flex: none; min-height: 32px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--accent); font-size: var(--fs-xs); cursor: pointer; }
+.chatroom-composer-route button:hover, .chatroom-composer-route button:focus-visible { background: var(--accent-soft); }
 
 @media (max-width: 639px) {
   .main-inner.chatroom-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
@@ -220,6 +266,12 @@
   .chatroom-heading h2 { font-size: var(--fs-md); }
   .chatroom-heading p { font-size: var(--fs-xs); }
   .chatroom-members { padding: var(--sp-2) var(--sp-3); }
+  .chatroom-topic { padding: var(--sp-2) var(--sp-3); }
+  .chatroom-topic button, .chatroom-task-actions button, .chatroom-task-review button, .chatroom-composer-route button { min-height: 44px; }
+  .chatroom-tasks-heading { padding: var(--sp-2) var(--sp-3); }
+  .chatroom-tasks-heading small { display: none; }
+  .chatroom-tasks-empty { padding-inline: var(--sp-3); }
+  .chatroom-task-items { max-height: 190px; padding-inline: var(--sp-3); }
   .chatroom-timeline { padding: var(--sp-4) var(--sp-3) var(--sp-5); }
   .chatroom-avatar { width: 34px; height: 34px; }
   .chatroom-message { gap: var(--sp-2); }

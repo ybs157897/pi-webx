@@ -3,7 +3,10 @@ import { createElement as h } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import Chatroom, { ChatroomIcon, ChatroomView, chatroomRefreshDelta } from '../src/workbench-app/modules/chatroom/index.jsx'
 import ChatroomComposer from '../src/workbench-app/modules/chatroom/Composer.jsx'
+import { parseChatroomMentions } from '../src/shared/chatroom-mentions.mjs'
 import { mergeChatroomMessages, selectWatchedMessages } from '../src/workbench-app/modules/chatroom/useChatroom.js'
+import { addressChatroomDraft } from '../src/workbench-app/modules/chatroom/useChatroomComposer.js'
+import { chatroomSendRoute } from '../src/workbench-app/modules/chatroom/useChatroomContext.js'
 
 const message = (seq: number, patch: Record<string, unknown> = {}) => ({
   seq, id: `message-${seq}`, senderId: 'requirements', senderName: '需求管理',
@@ -19,6 +22,12 @@ const members = [
   { id: 'assistant', name: '我的助理' },
   { id: 'codes', name: '代码研发' },
 ]
+const task = (id: string, status: string, agentId = 'codes', patch: Record<string, unknown> = {}) => ({
+  id, title: `任务 ${id}`, threadId: `thread-${id}`, status, version: 2,
+  createdAt: '2026-09-30T08:00:00.000Z', updatedAt: '2026-09-30T09:00:00.000Z',
+  assignments: [{ agentId, status, summary: `公开进度 ${id}`, lastRun: null }],
+  ...patch,
+})
 const render = (Component: any, props: Record<string, unknown> = {}) => renderToStaticMarkup(h(Component, props))
 
 const html = render(ChatroomView, {
@@ -78,6 +87,10 @@ assert.match(html, /data-testid="chatroom-composer"/)
 assert.match(html, /data-testid="chatroom-at-button"/)
 assert.match(html, /data-testid="chatroom-input"/)
 assert.match(html, /data-testid="chatroom-send"/)
+assert.match(html, /data-testid="chatroom-topic"/)
+assert.match(html, /data-testid="chatroom-task-list"/)
+assert.match(html, /data-testid="chatroom-new-topic"/)
+assert.match(html, /data-testid="chatroom-composer-route"/)
 assert.equal((html.match(/data-testid="chatroom-reply"/g) || []).length, 3, '每条 Agent 消息都应能回复')
 
 const ownReply = render(ChatroomView, { members: [...members, { id: 'user', name: '我' }], messages: [
@@ -97,6 +110,72 @@ for (const id of ['chatroom-mention-menu', 'chatroom-mention-option', 'chatroom-
 assert.match(composing, /aria-activedescendant="chatroom-mention-requirements"/, '输入区应声明当前键盘选择')
 const beforeSync = render(ChatroomComposer, { body: '@需求管理 请澄清' })
 assert.match(beforeSync, /<button[^>]*type="submit"[^>]*disabled=""[^>]*data-testid="chatroom-send"/, '首次 GET 尚未获取成员时不得发送')
+const pendingRoute = render(ChatroomComposer, { members, body: '继续', routeReady: false })
+assert.match(pendingRoute, /data-testid="chatroom-composer-route">.*正在恢复当前话题/)
+assert.match(pendingRoute, /<button[^>]*type="submit"[^>]*disabled=""[^>]*data-testid="chatroom-send"/, '话题尚未恢复时不得误发为新话题')
+
+const workTasks = [
+  task('running', 'running', 'codes', { assignments: [{ agentId: 'codes', status: 'running', summary: '公开进度 running',
+    lastRun: { status: 'running', error: '/private/session/path' } }] }),
+  task('waiting', 'waiting_for_user', 'assistant'),
+  task('interrupted', 'interrupted', 'requirements'),
+  task('review', 'needs_review', 'codes', { needsReview: true, privateCheckpoint: 'secret checkpoint' }),
+  task('completed', 'completed', 'assistant'),
+  task('cancelled', 'cancelled', 'codes', { needsReview: true }),
+]
+const tasksHtml = render(ChatroomView, {
+  members, tasks: workTasks,
+  messages: [message(1, { senderId: 'user', senderName: '我', threadId: 'thread-running',
+    deliveryStatus: 'delivered', consumptions: [consumption('codes', '代码研发', 'consumed')] })],
+  context: { mode: 'selected', threadId: 'thread-running', taskId: 'running' },
+})
+assert.equal((tasksHtml.match(/data-testid="chatroom-task"/g) || []).length, workTasks.length)
+for (const status of ['running', 'waiting_for_user', 'interrupted', 'needs_review', 'completed', 'cancelled'])
+  assert.match(tasksHtml, new RegExp(`data-testid="chatroom-task"[^>]*data-status="${status}"`), `${status} 任务应有独立状态`)
+assert.match(tasksHtml, /data-testid="chatroom-task-summary">公开进度 running/)
+assert.match(tasksHtml, /data-testid="chatroom-task-continue"/, '运行中任务可补充')
+assert.match(tasksHtml, /data-testid="chatroom-task-cancel"/, '运行中任务可取消')
+assert.match(tasksHtml, /data-testid="chatroom-task-resume"/, '中断任务可继续')
+assert.match(tasksHtml, /data-testid="chatroom-task-review"/, '未知副作用必须显示核对提醒')
+assert.match(tasksHtml, /data-testid="chatroom-task-reviewed"/, '未知副作用必须显式核对')
+assert.match(tasksHtml, /<button[^>]*disabled=""[^>]*data-testid="chatroom-task-review-complete">核对完成/, '未核对时不可提交核对动作')
+assert.match(tasksHtml, /data-task-id="cancelled"[^>]*data-status="cancelled"[\s\S]*?data-testid="chatroom-task-review"/, '已取消但结果不明的任务仍需核对')
+assert.match(tasksHtml, /data-testid="chatroom-topic-title">任务 running/)
+assert.match(tasksHtml, /data-testid="chatroom-clear-topic"/, '当前话题提示应可清除')
+assert.match(tasksHtml, /data-testid="chatroom-continue-thread"/, '历史消息可继续原话题')
+assert.doesNotMatch(tasksHtml, /privateCheckpoint|secret checkpoint|\/private\/session\/path/, '私有运行数据不得进入页面')
+assert.match(tasksHtml, /data-testid="chatroom-consumption"/, '消息消费仍单独显示')
+assert.match(tasksHtml, /data-testid="chatroom-task-status"[^>]*data-status="running"/, '消息已消费不等于任务已完成')
+const reviewedHtml = render(ChatroomView, { members, tasks: [task('review', 'needs_review', 'codes', { needsReview: true })],
+  taskBoardProps: { reviewed: new Set(['review:review']) } })
+assert.match(reviewedHtml, /data-testid="chatroom-task-reviewed"/, '核对选项应保留在任务卡')
+assert.doesNotMatch(reviewedHtml, /<button[^>]*disabled=""[^>]*data-testid="chatroom-task-review-complete">核对完成/, '核对后方可提交review')
+assert.deepEqual(chatroomSendRoute({ threadId: 'thread-running', taskId: 'running' }, workTasks),
+  { threadId: 'thread-running', collaborationTaskId: 'running', targetAgentId: null,
+    taskNeedsRecipient: false, taskAgentIds: ['codes'] }, '任务补充应携带话题与任务 ID')
+assert.deepEqual(chatroomSendRoute({ threadId: 'thread-completed', taskId: 'completed' }, workTasks),
+  { threadId: 'thread-completed', collaborationTaskId: null, targetAgentId: null,
+    taskNeedsRecipient: false, taskAgentIds: [] }, '已完成任务仅延续话题')
+assert.deepEqual(chatroomSendRoute({ threadId: null, taskId: null }, workTasks),
+  { threadId: null, collaborationTaskId: null, targetAgentId: null,
+    taskNeedsRecipient: false, taskAgentIds: [] }, '新话题不携带旧任务')
+const multiTask = task('multi', 'waiting_for_user', 'codes', { assignments: [
+  { agentId: 'codes', status: 'waiting_for_user', summary: '代码已准备', lastRun: null },
+  { agentId: 'assistant', status: 'waiting_for_user', summary: '协调中', lastRun: null },
+] })
+const multiHtml = render(ChatroomView, { members, tasks: [multiTask] })
+assert.match(multiHtml, /data-testid="chatroom-task-continue" data-agent-id="codes"/, '代码分工补充须携带成员身份')
+assert.match(multiHtml, /data-testid="chatroom-task-continue" data-agent-id="assistant"/, '助理分工补充须携带成员身份')
+assert.match(multiHtml, /补充时请点选成员或先 @ 成员/, '多成员任务标题选择应提示点名')
+assert.deepEqual(chatroomSendRoute({ threadId: 'thread-multi', taskId: 'multi', targetAgentId: 'assistant' }, [multiTask]),
+  { threadId: 'thread-multi', collaborationTaskId: 'multi', targetAgentId: 'assistant',
+    taskNeedsRecipient: true, taskAgentIds: ['codes', 'assistant'] }, '点选分工后续聊应锁定正确成员')
+assert.deepEqual(chatroomSendRoute({ threadId: 'thread-multi', taskId: 'multi', targetAgentId: 'logs' }, [multiTask]).targetAgentId,
+  null, '历史无效分工不可恢复为发送目标')
+const retargeted = addressChatroomDraft('@日志查询 请核对 @需求管理 的说明。', 'assistant')
+assert.equal(retargeted, '@我的助理 请核对 需求管理 的说明。', '明确选择成员时替换旧点名并保留正文')
+assert.equal(parseChatroomMentions(retargeted).recipientId, 'assistant')
+assert.equal(parseChatroomMentions(retargeted).multipleRecipients, false, '切换任务分工后不得产生多个接收人')
 
 const updated = mergeChatroomMessages([message(1), message(2, { deliveryStatus: 'running' })], [
   message(3), message(2, { deliveryStatus: 'delivered' }),

@@ -31,7 +31,10 @@ export interface ChatroomConsumption {
 
 /** Internal provenance travels with a delivery, never through the public HTTP projection. */
 export interface ChatroomContext {
+  collaborationTaskId?: string;
   requirementId?: string;
+  /** Server-resolved immutable content revision for the input this message carries. */
+  requirementVersion?: number;
   expectedUpdatedAt?: string;
   taskIds?: string[];
   taskVersions?: Record<string, string>;
@@ -44,6 +47,7 @@ export interface ChatroomSendInput {
   body: string;
   entryKey: string;
   requirementId?: string;
+  requirementVersion?: number;
   expectedUpdatedAt?: string;
   taskIds?: string[];
 }
@@ -52,12 +56,15 @@ export interface ChatroomUserSendInput {
   body: string;
   entryKey: string;
   replyTo?: string;
+  threadId?: string;
+  collaborationTaskId?: string;
 }
 
 export interface ChatroomPublicMessage {
   id: string;
   seq: number;
   threadId: string;
+  collaborationTaskId?: string | null;
   replyTo: string | null;
   senderId: ChatroomSenderId;
   senderName: string;
@@ -70,6 +77,10 @@ export interface ChatroomPublicMessage {
 }
 
 export interface ChatroomMessage extends ChatroomPublicMessage {
+  /** Immutable requirement identity of the input when the message was sent. */
+  inputRequirementId?: string | null;
+  /** Immutable requirement revision of this message's input; null means no verified revision at send time. */
+  inputRequirementVersion?: number | null;
   senderSessionId: string;
   entryKey: string;
   requestHash: string;
@@ -86,6 +97,28 @@ export interface ChatroomReadResult {
   nextCursor: number;
   hasMore: boolean;
   updates: ChatroomPublicMessage[];
+  tasks: ChatroomPublicTask[];
+}
+
+export type ChatroomTaskStatus = 'waiting' | 'running' | 'waiting_for_user' | 'waiting_for_agent'
+  | 'completed' | 'failed' | 'interrupted' | 'needs_review' | 'cancelled';
+export type ChatroomRunStatus = 'running' | 'succeeded' | 'failed' | 'interrupted' | 'needs_review' | 'cancelled';
+
+export interface ChatroomPublicTask {
+  id: string;
+  title: string;
+  threadId: string;
+  status: ChatroomTaskStatus;
+  needsReview: boolean;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  assignments: Array<{
+    agentId: AgentId;
+    status: ChatroomTaskStatus;
+    summary: string | null;
+    lastRun: { status: ChatroomRunStatus; attempt: number; startedAt: string; finishedAt: string | null; error: string | null } | null;
+  }>;
 }
 
 export type ChatroomRunner = (message: ChatroomMessage) => Promise<void>;

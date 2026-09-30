@@ -3,6 +3,7 @@
 .req-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
 .req-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-4); }
 .req-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; }
+.req-workspace-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; }
 .req-workspace-toolbar .segmented-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
 .req-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; margin-inline: auto; }
 .req-conversation-host[hidden] { display: none; }
@@ -59,6 +60,7 @@
   .req-main-inner .page-desc { font-size: var(--fs-xs); }
   .req-workspace { gap: var(--sp-2); }
   .req-workspace-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .req-workspace-actions { width: 100%; justify-content: flex-start; }
   .req-workspace-toolbar button { min-height: 44px; }
   .req-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
   .req-chat-panel .aside-head .grow { min-width: 0; }

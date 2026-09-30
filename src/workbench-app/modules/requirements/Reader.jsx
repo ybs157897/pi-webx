@@ -10,7 +10,7 @@ import { TEXT, STATUS_STEPS, priorityOf, statusOf, tagsOf } from './model.jsx'
 
 export default function Reader({
   row, linkedTasks, stepBack, stepNext, onStatus,
-  onStar, onEdit, onDelete, onMove, onNavigate, onImport,
+  onStar, onEdit, onDelete, onMove, onNavigate, onImport, onTrace,
 }) {
   const priority = priorityOf(row.priority)
   const step = statusOf(row.status)
@@ -31,6 +31,8 @@ export default function Reader({
       <header className="req-reader-head">
         <h2 className="req-reader-title" data-testid="req-reader-title">{title}</h2>
         <div className="req-reader-tools">
+          {typeof onTrace === 'function' && <button type="button" className="btn btn-sm"
+            data-testid="req-trace-open" onClick={onTrace}>全链路追踪</button>}
           {typeof onImport === 'function' && (
             <button
               type="button"

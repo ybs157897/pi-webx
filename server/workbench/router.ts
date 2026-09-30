@@ -3,6 +3,7 @@ import type { Request } from 'express';
 import { WorkbenchInputError, WorkbenchStore } from './store';
 import { importRequirementTasks } from '../modules/requirements/import-tasks';
 import { applyAssistantPlan, discardAssistantPlan } from '../modules/assistant/service';
+import { createRequirementLifecycleRouter } from '../modules/requirements/lifecycle-router';
 
 function param(request: Request, key: string): string {
   const value = request.params[key];
@@ -21,6 +22,7 @@ function assertNoSessionClaim(module: string, fields: unknown): void {
 
 export function createWorkbenchRouter(store: WorkbenchStore): Router {
   const router = Router();
+  router.use(createRequirementLifecycleRouter(store));
 
   router.get('/health', (_request, response) => {
     response.json({ ok: true, storage: 'sqlite' });

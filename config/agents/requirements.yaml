@@ -15,6 +15,9 @@ tools:
   - ls
   - chatroom.send
   - chatroom.read
+  - chatroom.work
+  - chatroom.trace
+  - chatroom.delivery
 mcp: []
 knowledge:
   homeBinding: requirements

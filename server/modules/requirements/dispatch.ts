@@ -58,7 +58,7 @@ export function dispatchRequirementTasks(store: WorkbenchStore, chatroom: Chatro
         store.sqlite.prepare('INSERT INTO requirement_chatroom_dispatches(message_id, entry_key, fingerprint, result) VALUES (?, ?, ?, ?)')
           .run(delivery.id, entryKey, fingerprint, JSON.stringify(result));
       }
-      chatroom.attachRequirement(sessionId, result.requirement);
+      chatroom.attachRequirement(sessionId, result.requirement, { newRequirement: id === undefined });
       chatroom.attachTasks(sessionId, result.tasks);
       return result;
     })();

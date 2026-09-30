@@ -2,6 +2,7 @@ import { Type } from 'typebox';
 import type { AgentToolResult, ToolDefinition } from '@earendil-works/pi-coding-agent';
 import type { WorkbenchStore } from '../../workbench/store';
 import { saveRequirementDraft } from './import-tasks';
+import { getRequirementVersion } from './lifecycle';
 
 export const REQUIREMENTS_TOOL_NAMES: Readonly<Record<string, string>> = {
   'requirements.saveDraft': 'requirements_save_draft',
@@ -35,7 +36,8 @@ export function createRequirementsTools(deps: { store: WorkbenchStore; limits: {
     }, { additionalProperties: false }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
       const record = saveRequirementDraft(deps.store, ctx.sessionManager.getSessionId(), params);
-      return result({ record }, deps.limits.maxToolOutputChars);
+      const requirementVersion = getRequirementVersion(deps.store, record.id);
+      return result({ record: { ...record, requirementVersion }, requirementId: record.id, requirementVersion }, deps.limits.maxToolOutputChars);
     },
   }];
 }

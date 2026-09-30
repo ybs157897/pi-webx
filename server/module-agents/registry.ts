@@ -14,6 +14,7 @@ import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
 import { REQUIREMENTS_TOOL_NAMES, createRequirementsTools } from '../modules/requirements';
 import { ASSISTANT_TOOL_NAMES, createAssistantTools } from '../modules/assistant';
 import { CHATROOM_TOOL_NAMES } from '../modules/chatroom/tools';
+import { REQUIREMENT_LIFECYCLE_TOOL_NAMES } from '../modules/requirements/lifecycle-tools';
 
 export interface ModuleAgentToolDeps {
   knowledge: KnowledgeAccess;
@@ -46,6 +47,6 @@ export function moduleAgentDefinition(id: AgentId): ModuleAgentDefinition | unde
  */
 export function resolveToolNames(id: AgentId, configured: readonly string[]): string[] {
   const map = moduleAgentDefinition(id)?.toolNameMap ?? {};
-  const common: Record<string, string> = { 'skills.read': 'skills_read', ...CHATROOM_TOOL_NAMES };
+  const common: Record<string, string> = { 'skills.read': 'skills_read', ...CHATROOM_TOOL_NAMES, ...REQUIREMENT_LIFECYCLE_TOOL_NAMES };
   return configured.map((name) => common[name] ?? map[name] ?? name);
 }

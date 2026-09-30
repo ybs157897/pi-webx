@@ -130,9 +130,10 @@ try {
   const host = {
     sessions: new Map(),
     get: () => undefined,
-    async create() {
+    async create(options: { sessionPath: string }) {
       if (failFirst) { enter(); await blocked; failFirst = false; throw new HostError(503, 'fixture failure'); }
-      return { id: 'restored-fixture' };
+      const manager = SessionManager.open(options.sessionPath);
+      return { id: manager.getSessionId(), cwd: manager.getHeader()!.cwd, session: { sessionManager: manager } };
     },
     summary: (hosted: { id: string }) => ({ id: hosted.id }),
   };

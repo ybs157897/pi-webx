@@ -5,10 +5,18 @@ export default function ChatroomComposer({
   onSelectMention = () => {}, replyingTo = null, onCancelReply = () => {},
   sending = false, sendError = '', onRetrySend = () => {}, onDismissSendError = () => {},
   canRetrySend = false,
-  onSend = () => {}, textareaRef,
+  onSend = () => {}, textareaRef, topicTitle = '新话题', hasCurrentTopic = false, taskRouteActive = false,
+  taskNeedsRecipient = false, targetAgentName = '', onNewTopic = () => {}, routeReady = true,
 }) {
-  const canSend = body.trim().length > 0 && members.length > 0 && !sending
+  const canSend = body.trim().length > 0 && members.length > 0 && routeReady && !sending
   return <form className="chatroom-composer" data-testid="chatroom-composer" onSubmit={event => { event.preventDefault(); onSend() }}>
+    <div className="chatroom-composer-route" data-testid="chatroom-composer-route">
+      <span>{!routeReady ? '正在恢复当前话题…' : taskRouteActive && taskNeedsRecipient && !targetAgentName
+        ? `补充到任务：${topicTitle} · 请先 @ 一位任务成员`
+        : hasCurrentTopic ? `${taskRouteActive ? '补充到任务' : '继续话题'}${targetAgentName ? ` · ${targetAgentName}` : ''}：${topicTitle}`
+          : '发送后开始新话题'}</span>
+      {hasCurrentTopic && <button type="button" onClick={onNewTopic} data-testid="chatroom-clear-topic">清除并新建话题</button>}
+    </div>
     {replyingTo && <div className="chatroom-reply-target" data-testid="chatroom-reply-target">
       <div>
         <strong>回复 {replyingTo.senderName || '群成员'}</strong>

@@ -37,7 +37,8 @@ export function mergeChatroomMessages(current, incoming) {
     return old.seq === message.seq && old.id === message.id && old.body === message.body
       && old.senderId === message.senderId && old.senderName === message.senderName
       && old.recipientId === message.recipientId && old.createdAt === message.createdAt
-      && old.threadId === message.threadId && old.deliveryStatus === message.deliveryStatus
+      && old.threadId === message.threadId && old.collaborationTaskId === message.collaborationTaskId
+      && old.deliveryStatus === message.deliveryStatus
       && old.error === message.error && sameConsumptions(old.consumptions, message.consumptions)
   })) return current
   return ordered
@@ -59,6 +60,7 @@ export function useChatroom() {
   const [room, setRoom] = useState({ id: 'internal', name: '内部聊天室' })
   const [members, setMembers] = useState([])
   const [messages, setMessages] = useState([])
+  const [tasks, setTasks] = useState([])
   const [syncStatus, setSyncStatus] = useState('loading')
   const [error, setError] = useState('')
   const cursorRef = useRef(null)
@@ -84,6 +86,7 @@ export function useChatroom() {
           if (!active) return
           setRoom(payload.room?.name ? payload.room : { id: 'internal', name: '内部聊天室' })
           setMembers(Array.isArray(payload.members) ? payload.members : [])
+          setTasks(Array.isArray(payload.tasks) ? payload.tasks : [])
           const merged = mergeChatroomMessages(messagesRef.current, [
             ...payload.messages,
             ...(Array.isArray(payload.updates) ? payload.updates : []),
@@ -132,5 +135,14 @@ export function useChatroom() {
     }
   }
 
-  return { room, members, messages, syncStatus, error, retry: () => requestRef.current(), ingest }
+  function ingestTask(task) {
+    if (!task?.id) return
+    setTasks(current => {
+      const next = current.filter(item => item.id !== task.id)
+      next.push(task)
+      return next
+    })
+  }
+
+  return { room, members, messages, tasks, syncStatus, error, retry: () => requestRef.current(), ingest, ingestTask }
 }

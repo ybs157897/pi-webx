@@ -40,8 +40,10 @@ const store = new WorkbenchStore(join(root, 'workbench.sqlite'));
 const host = new PiHost({ sessionDir: join(root, 'sessions'), teamJournalDir: join(root, 'teams') });
 const chatroom = getChatroomService(store);
 const sessionService = createModuleAgentSessionService({ host, store, profiles, workspaceKey: 'default', storedSessions: async () => [] });
+const liveTurnTimeoutMs = Number(process.env.PI_WEBX_CHATROOM_LIVE_TIMEOUT_MS ?? 120_000);
+assert.ok(Number.isSafeInteger(liveTurnTimeoutMs) && liveTurnTimeoutMs >= 1000 && liveTurnTimeoutMs <= 600_000);
 const runtime = createModuleAgentChatroomRuntime({ host, profiles, chatroom, sessionService, workspaceKey: 'default',
-  admissionTimeoutMs: 30_000, turnTimeoutMs: 120_000, claimTimeoutMs: 60_000 });
+  admissionTimeoutMs: 30_000, turnTimeoutMs: liveTurnTimeoutMs, claimTimeoutMs: 60_000 });
 const app = express();
 app.use(express.json());
 app.use('/api/chatroom', createChatroomRouter(chatroom));
@@ -60,7 +62,7 @@ async function send(body: string, entryKey: string): Promise<ChatroomPublicMessa
   assert.equal(response.status, 201);
   const { message } = await response.json() as { message: ChatroomPublicMessage };
   appendFileSync(logFile, `${JSON.stringify({ event: 'send', id: message.id, seq: message.seq, body })}\n`);
-  const deadline = Date.now() + 240_000;
+  const deadline = Date.now() + liveTurnTimeoutMs + 120_000;
   while (Date.now() < deadline) {
     const watch = await fetch(`${url}?after=${message.seq}&watch=${message.seq}`, { headers: { cookie } });
     assert.equal(watch.status, 200);
@@ -89,12 +91,17 @@ try {
   assert.ok(broadcast.consumptions.every(item => ['consumed', 'skipped', 'failed'].includes(item.status)));
   assert.equal(readFileSync(join(root, 'workspaces', 'codes', 'mq-broadcast.txt'), 'utf8').trim(), 'BROADCAST_OK');
   assert.match(readFileSync(logFile, 'utf8'), /"status":"consumed"/);
+  for (const message of [directed, broadcast]) {
+    const task = chatroom.work.publicTask(message.collaborationTaskId!);
+    assert.ok(task, 'configured model accepts explicit work');
+    assert.equal(task.status, 'completed', 'configured model explicitly records completion after verification');
+  }
   await chatroom.drain();
   const final = await fetch(url, { headers: { cookie } });
   assert.equal(final.status, 200);
   const feed = await final.json() as ChatroomReadResult;
   writeFileSync(resultFile, JSON.stringify({ root, logFile, messages: results,
-    replies: feed.messages.filter(message => message.senderId !== 'user') }, null, 2));
+    tasks: feed.tasks, turnTimeoutMs: liveTurnTimeoutMs, replies: feed.messages.filter(message => message.senderId !== 'user') }, null, 2));
   console.log('PASS live chatroom: HTTP sends, configured models, member consumption logs, public replies and real file writes');
 } finally {
   await runtime.stop();

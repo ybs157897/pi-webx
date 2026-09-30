@@ -26,7 +26,7 @@ const TEXT = {
   filterAll: '全部',
   todo: '待启动',
   doing: '推进中',
-  done: '已交付',
+  done: '业务完成',
   clearFilter: '清空筛选',
   totalText: total => `共 ${total} 条`,
   filteredText: (hits, total) => `筛选出 ${hits} / ${total} 条`,

@@ -13,6 +13,9 @@ tools:
   - bash
   - chatroom.send
   - chatroom.read
+  - chatroom.work
+  - chatroom.trace
+  - chatroom.delivery
 mcp: []
 knowledge:
   homeBinding: codes

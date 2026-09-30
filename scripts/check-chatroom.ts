@@ -195,12 +195,18 @@ try {
     }
   });
   await service.drain();
-  assert.equal(peak, 1, 'one pending message is consumed at a time');
+  assert.ok(peak > 1 && peak <= 4, 'independent messages overlap within the bounded delivery limit');
   assert.deepEqual(service.history(selfHandoff.threadId).map(message => message.body), [
     '@需求管理 请用独立接收会话处理', '请 @需求管理 回复验收条件，稍后 @代码开发',
   ], 'runtime answer keeps quoted @ visible without dispatch');
-  assert.deepEqual(received.map(message => message.recipientId), ['requirements', null, 'assistant', 'codes', 'assistant', 'assistant', null, null],
-    '群发布（含成员的收悉广播）进入队列并由认领成员处理');
+  assert.equal(new Set(received.map(message => message.id)).size, received.length, '每条投递只执行一次');
+  assert.deepEqual(received.map(message => message.recipientId ?? 'broadcast').sort(),
+    ['requirements', 'broadcast', 'assistant', 'codes', 'assistant', 'assistant', 'broadcast', 'broadcast'].sort(),
+    '点名与群发布全部投递，独立成员可以交错执行');
+  for (const agentId of ['requirements', 'codes', 'assistant', 'logs']) {
+    const directedSeqs = received.filter(message => message.recipientId === agentId).map(message => message.seq);
+    assert.deepEqual(directedSeqs, [...directedSeqs].sort((a, b) => a - b), '每个成员的点名消息保持 FIFO');
+  }
   const chain = service.history(first.threadId);
   assert.deepEqual(chain.map(message => message.body), [
     '@我的助理 请把这个需求拆成待办', '@代码开发 请研发完成这个待办', '@我的助理 研发已处理，请更新状态',

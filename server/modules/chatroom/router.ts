@@ -3,6 +3,7 @@ import type { Request, Response } from 'express';
 import { WorkbenchInputError } from '../../workbench/store';
 import type { ChatroomService } from './service';
 import type { ChatroomUserSendInput } from './contracts';
+import type { WorkTaskActionInput } from './work-contracts';
 import { publicMessage } from './store';
 
 const USER_COOKIE = 'pi_webx_chatroom_user';
@@ -58,6 +59,18 @@ export function createChatroomRouter(service: ChatroomService): Router {
       const sessionKey = userSession(request, response, service);
       const message = service.sendUser(sessionKey, request.body as ChatroomUserSendInput);
       response.status(201).json({ message: publicMessage(message) });
+    } catch (error) {
+      response.status(error instanceof WorkbenchInputError ? error.status : 500)
+        .json({ error: error instanceof Error ? error.message : String(error) });
+    }
+  });
+  router.post('/tasks/:id/actions', async (request: Request, response: Response) => {
+    try {
+      const sessionKey = userSession(request, response, service);
+      const taskId = request.params.id;
+      if (typeof taskId !== 'string' || !taskId.trim() || taskId.length > 200) throw new WorkbenchInputError('协作任务 ID 不合法');
+      const result = await service.taskAction(sessionKey, taskId, request.body as WorkTaskActionInput);
+      response.json({ task: result.task, ...(result.message ? { message: publicMessage(result.message) } : {}) });
     } catch (error) {
       response.status(error instanceof WorkbenchInputError ? error.status : 500)
         .json({ error: error instanceof Error ? error.message : String(error) });

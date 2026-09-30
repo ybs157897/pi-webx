@@ -55,13 +55,15 @@ host.create = async options => {
   if (broadcastPhase) {
     if (agentId === 'codes') {
       scripted(hosted.session, turn => {
-        if (turn === 1) {
+        if (hosted.session.getActiveToolNames().length === 0) {
           codesClaimRuns += 1;
           assert.deepEqual(hosted.session.getActiveToolNames(), [], '认领判定阶段不开放业务工具');
           return text(codesClaims ? '{"claim": true, "reason": "属于代码实施"}' : '{"claim": false, "reason": "与代码职责无关"}');
         }
-        if (turn === 2) {
+        if (turn === 1) {
           assert.ok(hosted.session.getActiveToolNames().includes('write'), '认领后恢复配置允许的业务工具');
+          assert.ok(!JSON.stringify(hosted.session.messages).includes('"claim": true'),
+            '认领 JSON 不进入持久工作会话');
           return call('write', { path: 'chatroom-claim-result.txt', content: '认领后由代码 Agent 写入\n' }, 'write-claim');
         }
         return text('已写入 chatroom-claim-result.txt，验证为读取文件内容。');
@@ -323,7 +325,7 @@ try {
   let delayedFullTurn = false;
   host.command = async (sessionId, command) => {
     const response = await originalCommand(sessionId, command);
-    if (command.type === 'prompt' && command.id === `chatroom:${slowBroadcastId}` && !delayedFullTurn) {
+    if (command.type === 'prompt' && command.id === `chatroom:${slowBroadcastId}:codes` && !delayedFullTurn) {
       delayedFullTurn = true;
       await new Promise(resolve => setTimeout(resolve, 1200));
     }

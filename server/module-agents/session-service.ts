@@ -11,9 +11,8 @@ import type { WorkbenchStore } from '../workbench/store';
 import { assembleModuleAgent } from './assemble';
 import type { AgentId, ProfileLoadResult, ResolvedAgentProfile } from './contracts';
 import { ProfileSnapshots } from './snapshots';
+import { findModuleSession, ModuleSessionIndex } from './session-index';
 import { assertWorkspaceAvailable, canonicalWorkspacePath, effectiveWorkspace, WorkspaceError, workspacePathsOverlap } from './workspace';
-
-const STORED_LOOKUP_LIMIT = 200;
 
 export interface ModuleAgentSessionServiceDeps {
   host: PiHost;
@@ -42,10 +41,12 @@ export async function assertCodesWorkspace(value: unknown): Promise<string> {
 /** One admission path for UI and room-driven module sessions. */
 export class ModuleAgentSessionService {
   private readonly snapshots: ProfileSnapshots;
+  private readonly index: ModuleSessionIndex;
   private readonly workspaceClaims = new Map<symbol, { agentId: AgentId; path: string }>();
 
   constructor(private readonly deps: ModuleAgentSessionServiceDeps) {
     this.snapshots = deps.snapshots ?? new ProfileSnapshots(path.join(path.dirname(deps.store.sqlite.name), 'module-agent-profiles'));
+    this.index = new ModuleSessionIndex(deps.store, deps.workspaceKey);
   }
 
   async openOrCreate(agentId: AgentId, profile: ResolvedAgentProfile, sessionId?: string, assertedCwd?: string) {
@@ -60,12 +61,18 @@ export class ModuleAgentSessionService {
           throw new HostError(409, '会话属于其他项目目录');
         }
         await this.available(agentId, hosted.cwd);
-        return hosted;
+        return this.index.remember(agentId, hosted);
       }
-      const stored = (await (this.deps.storedSessions ?? listStoredSessions)({ limit: STORED_LOOKUP_LIMIT }))
-        .find((entry) => entry.id === sessionId);
+      const indexed = this.index.get(sessionId);
+      if (indexed && indexed.agentId !== agentId) throw new HostError(409, '会话不属于该模块 Agent');
+      const stored = indexed ?? (this.deps.storedSessions
+        ? (await this.deps.storedSessions({ limit: 200 })).find(entry => entry.id === sessionId)
+        : await findModuleSession(sessionId, host.sessionDir));
       if (stored === undefined) throw new HostError(404, `no stored session with id ${sessionId}`);
+      try { await stat(stored.path); }
+      catch { throw new HostError(404, `no stored session with id ${sessionId}`); }
       const manager = SessionManager.open(stored.path);
+      if (manager.getSessionId() !== sessionId) throw new HostError(409, '会话索引与日志身份不匹配');
       const identity = readModuleAgentEntry(manager);
       if (identity?.agentId !== agentId || identity?.workspaceKey !== workspaceKey || !identity.profileRevision) {
         throw new HostError(409, '会话身份不匹配，不能恢复');
@@ -81,7 +88,7 @@ export class ModuleAgentSessionService {
       const release = await this.claim(agentId, historicalCwd);
       try {
         const assembled = await this.assemble(agentId, original, stored.cwd);
-        try { return await host.create({ sessionPath: stored.path, cwd: stored.cwd, moduleAgent: assembled }); }
+        try { return this.index.remember(agentId, await host.create({ sessionPath: stored.path, cwd: stored.cwd, moduleAgent: assembled })); }
         catch (error) { await assembled.dispose().catch(() => undefined); throw error; }
       } finally { release(); }
     }
@@ -94,7 +101,7 @@ export class ModuleAgentSessionService {
     try {
       await this.snapshots.save(profile);
       const assembled = await this.assemble(agentId, profile);
-      try { return await host.create({ moduleAgent: assembled }); }
+      try { return this.index.remember(agentId, await host.create({ moduleAgent: assembled })); }
       catch (error) { await assembled.dispose().catch(() => undefined); throw error; }
     } finally { release(); }
   }

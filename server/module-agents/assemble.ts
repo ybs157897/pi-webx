@@ -27,6 +27,7 @@ import { getChatroomService } from '../modules/chatroom/service';
 import { createChatroomTools } from '../modules/chatroom/tools';
 import { createAssistantCoordinationTool } from '../modules/assistant/coordination';
 import { createRequirementsDispatchTool } from '../modules/requirements/dispatch';
+import { createRequirementLifecycleTools } from '../modules/requirements/lifecycle-tools';
 
 export interface AssembleModuleAgentInput {
   store: WorkbenchStore;
@@ -93,6 +94,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits });
     const chatroom = getChatroomService(store, workspaceKey);
     produced.push(...createChatroomTools({ service: chatroom, agentId, limits: profile.config.limits }));
+    produced.push(...createRequirementLifecycleTools({ store, chatroom, agentId, limits: profile.config.limits }));
     if (agentId === 'assistant') produced.push(createAssistantCoordinationTool(store, chatroom));
     if (agentId === 'requirements') produced.push(createRequirementsDispatchTool(store, chatroom));
     if (profile.skills.length) produced.push(skillTool(profile.skills));

@@ -25,8 +25,9 @@ import {
 } from './model.jsx'
 
 import Dialogs from './Dialogs.jsx'
+import TraceDrawer from './TraceDrawer.jsx'
 
-export default function Records({ data, mutate, notify, navigate, onImport, initialSelectedId = '', empty = false, onLoadDemo }) {
+export default function Records({ data, mutate, notify, refresh, navigate, onImport, initialSelectedId = '', empty = false, onLoadDemo }) {
   const requirements = Array.isArray(data?.requirements) ? data.requirements : []
   const tasks = Array.isArray(data?.tasks) ? data.tasks : []
 
@@ -35,6 +36,7 @@ export default function Records({ data, mutate, notify, navigate, onImport, init
   const [selectedId, setSelectedId] = useState(initialSelectedId)
   const [form, setForm] = useState(null)
   const [pendingDelete, setPendingDelete] = useState(null)
+  const [tracingId, setTracingId] = useState('')
   const [busy, setBusy] = useState(false)
   const [demoBusy, setDemoBusy] = useState(false)
   // 新建记录的 id 在 action 内部暂存（mutate 只回布尔值），刷新落地后再选中它。
@@ -319,6 +321,7 @@ export default function Records({ data, mutate, notify, navigate, onImport, init
                   onMove={move}
                   onNavigate={navigate}
                   onImport={typeof onImport === 'function' ? () => onImport(selected) : undefined}
+                  onTrace={() => setTracingId(selected.id)}
                 />
               )}
           </div>
@@ -326,6 +329,8 @@ export default function Records({ data, mutate, notify, navigate, onImport, init
       </div>
 
       <Dialogs {...{ form, busy, setForm, submitForm, pendingDelete, setPendingDelete, confirmDelete }} />
+      {tracingId && <TraceDrawer key={tracingId} requirementId={tracingId}
+        onClose={() => setTracingId('')} onChanged={() => refresh?.()} />}
     </div>
   )
 }

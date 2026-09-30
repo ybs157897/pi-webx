@@ -86,7 +86,7 @@ try {
   assert.equal(assistant.config.model, undefined, 'assistant 沿用用户选择的默认模型');
   assert.equal(assistant.config.knowledge.homeBinding, 'assistant');
   assert.deepEqual(assistant.config.knowledge.sharedReadBindings, []);
-  assert.deepEqual(assistant.config.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
+  assert.deepEqual(assistant.config.tools, ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'chatroom.work', 'chatroom.trace', 'chatroom.delivery', 'assistant.coordinate']);
   assert.deepEqual(assistant.config.limits, { maxRunningSessions: 1, maxToolOutputChars: 24000 },
     '资源上限沿用生活秘书的历史值');
   assert.ok(assistant.promptText.includes('我的助理'));
@@ -97,7 +97,7 @@ try {
   const hosted = await host.create({ provider: model.provider, model: model.id, moduleAgent: option });
   const names = hosted.session.getAllTools().map(tool => tool.name).sort();
   const expected = ['assistant_capture', 'assistant_context', 'assistant_coordinate', 'assistant_propose_plan',
-    'bash', 'chatroom_read', 'chatroom_send', 'edit', 'find', 'grep', 'ls', 'read', 'write'];
+    'bash', 'chatroom_read', 'chatroom_send', 'chatroom_work', 'chatroom_trace', 'chatroom_delivery', 'edit', 'find', 'grep', 'ls', 'read', 'write'].sort();
   assert.deepEqual(names, expected);
   assert.deepEqual([...Object.values(ASSISTANT_TOOL_NAMES)].sort(), ['assistant_capture', 'assistant_context', 'assistant_propose_plan'], '配置名映射必须与 SDK 工具名一一对应');
   assert.deepEqual(hosted.session.getActiveToolNames().sort(), expected);
@@ -195,7 +195,7 @@ try {
   const capabilities = await (await fetch(base)).json() as { agents: Array<{ id: string; tools?: string[] }> };
   assert.deepEqual(capabilities.agents.map(agent => agent.id), ['requirements', 'codes', 'logs', 'assistant']);
   assert.deepEqual(capabilities.agents.find(agent => agent.id === 'assistant')?.tools,
-    ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'assistant.coordinate']);
+    ['assistant.context', 'assistant.capture', 'assistant.proposePlan', 'read', 'write', 'edit', 'bash', 'grep', 'find', 'ls', 'chatroom.send', 'chatroom.read', 'chatroom.work', 'chatroom.trace', 'chatroom.delivery', 'assistant.coordinate']);
 
   assert.equal(store.listRecords('tasks').length, 3);
   console.log('PASS assistant Agent: four profiles only, offline SDK tools and workspace, draft-only plan, session identity and retired ids');
