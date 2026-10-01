@@ -222,8 +222,10 @@ export class ChatroomService {
       if (parent?.context.collaborationTaskId && input.collaborationTaskId
         && parent.context.collaborationTaskId !== input.collaborationTaskId) bad('不能把回复改绑其他协作任务', 409);
       const threadId = parent?.threadId ?? input.threadId ?? explicitTask?.thread_id ?? id;
-      if ((input.threadId && !this.storage.hasThread(input.threadId))
-        || (explicitTask && explicitTask.thread_id !== threadId)) bad('协作任务与群话题不匹配', 409);
+      if (input.threadId && !this.storage.hasThread(input.threadId)) {
+        bad('群话题不存在或已被清理，请清除当前话题后重新发送', 409);
+      }
+      if (explicitTask && explicitTask.thread_id !== threadId) bad('协作任务与群话题不匹配', 409);
       const inheritedTaskId = parent?.context.collaborationTaskId;
       const taskId = input.collaborationTaskId ?? inheritedTaskId;
       const task = taskId ? this.work.storage.task(taskId) : undefined;

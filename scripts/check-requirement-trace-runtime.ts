@@ -53,10 +53,9 @@ try {
   assert.equal(verification.exitCode, 0);
   assert.ok(!JSON.stringify(trace).includes('trace fixture verified'),
     '公开追溯不保存工具原始内容或参数');
-  const handoffs = fixture.store.sqlite.prepare(`SELECT entity_id FROM requirement_lifecycle_links
-    WHERE requirement_id = ? AND kind = 'chatroom_handoff'`).all(requirementId) as Array<{ entity_id: string }>;
-  assert.ok(handoffs.some(item => item.entity_id === codeHandoff.id));
-  assert.ok(handoffs.some(item => item.entity_id === assistantHandoff.id));
+  assert.ok(trace.links.handoffs.some(item => item.id === codeHandoff.id && item.parentAgentId === 'requirements'),
+    '交接父 Run 归属发送方会话');
+  assert.ok(trace.links.handoffs.some(item => item.id === assistantHandoff.id && item.parentAgentId === 'codes'));
   assert.ok(trace.links.runs.some(item => item.agentId === 'requirements' && item.requirementVersion === null));
   assert.ok(trace.events.some(item => item.type === 'chatroom_tool_finished' && item.refs.toolCallId === writeToolCallId));
   const submitted = trace.deliveries.find(item => item.id === deliveryId)!;
@@ -122,11 +121,9 @@ try {
   assert.ok(branchRun);
   assert.equal(branchRun.requirementVersion, getRequirementVersion(fixture.store, branchRootId));
   assert.ok(!oldTrace.links.runs.some(item => item.id === branchRun.id));
-  const branchHandoff = fixture.store.sqlite.prepare(`SELECT refs FROM requirement_lifecycle_links
-    WHERE requirement_id = ? AND kind = 'chatroom_handoff'`)
-    .get(branchRootId) as { refs: string } | undefined;
+  const branchHandoff = branchTrace.links.handoffs.find(item => item.parentRequirementId === secondRootId);
   assert.ok(branchHandoff);
-  assert.equal(JSON.parse(branchHandoff.refs).parentRunId, originRun.id,
+  assert.equal(branchHandoff.parentRunId, originRun.id,
     '跨根交接保留旧根父 Run 引用，新消息归新根');
   assert.equal(await readFile(join(fixture.codeDir, 'branch-result.txt'), 'utf8'), 'independent root\n');
   await fixture.chatroom.taskAction(userSessionKey, cancellationTask.id, {

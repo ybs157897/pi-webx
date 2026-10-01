@@ -107,6 +107,12 @@ const composing = render(ChatroomComposer, {
 })
 for (const id of ['chatroom-mention-menu', 'chatroom-mention-option', 'chatroom-reply-target', 'chatroom-cancel-reply', 'chatroom-send-error', 'chatroom-send-retry'])
   assert.match(composing, new RegExp(`data-testid="${id}"`), `输入区缺 ${id}`)
+assert.doesNotMatch(composing, /data-testid="chatroom-send-new-topic"/, '非话题失效错误不提供转新话题重发')
+const staleTopic = render(ChatroomComposer, { members, body: '继续', replyingTo: message(1),
+  sendError: '上一条消息未确认送达：群话题不存在或已被清理，请清除当前话题后重新发送',
+  canRetrySend: true, canResendAsNewTopic: true })
+for (const id of ['chatroom-send-error', 'chatroom-send-retry', 'chatroom-send-new-topic'])
+  assert.match(staleTopic, new RegExp(`data-testid="${id}"`), `话题失效恢复缺 ${id}`)
 assert.match(composing, /aria-activedescendant="chatroom-mention-requirements"/, '输入区应声明当前键盘选择')
 const beforeSync = render(ChatroomComposer, { body: '@需求管理 请澄清' })
 assert.match(beforeSync, /<button[^>]*type="submit"[^>]*disabled=""[^>]*data-testid="chatroom-send"/, '首次 GET 尚未获取成员时不得发送')

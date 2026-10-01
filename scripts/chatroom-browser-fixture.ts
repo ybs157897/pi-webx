@@ -102,7 +102,7 @@ app.use('/api/chatroom', createChatroomRouter(chatroom));
 app.use('/api/module-agents', createModuleAgentsRouter({ host, store, profiles, workspaceKey: 'default', sessionService }));
 app.use('/api', createApiRouter(host));
 const vite = await createServer({ configFile: false, root: process.cwd(), appType: 'spa',
-  server: { middlewareMode: true }, plugins: [(await import('@vitejs/plugin-react')).default()] });
+  server: { middlewareMode: true, hmr: { port: 21000 + Math.floor(Math.random() * 20000) } }, plugins: [(await import('@vitejs/plugin-react')).default()] });
 app.use(vite.middlewares);
 const server = app.listen(Number(process.env.PI_WEBX_CHATROOM_FIXTURE_PORT ?? 18880), '127.0.0.1', () => {
   console.log(JSON.stringify({ url: 'http://127.0.0.1:18880/#/chatroom', fixtureRoot: root, model: 'offline-scripted-real-sdk' }));

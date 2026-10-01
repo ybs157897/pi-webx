@@ -16,8 +16,9 @@ export function formatChatroomPrompt(message: ChatroomMessage, history: Chatroom
   const sender = message.senderId === 'user' ? '用户本人' : message.senderName;
   return [
     '你收到工作台内部聊天室的一条消息。发送者身份由服务器记录。按你的模块职责和已提供工具处理最后一条消息；需要联系其他 Agent 时使用聊天室工具。完成后给出简洁正文。',
+    '一旦明确接下可交付的工作，先调用 chatroom_work(action="accept") 建立协作任务，再开始实际操作；闲聊与澄清不要建任务。',
     ...(options.scope === 'assignment' && options.taskId
-      ? [`当前工作分工：任务 ${options.taskId}，分工 ${options.assignmentId}。普通回复只确认这一回合；仅在交付物完成且验证后调用 chatroom_work 明确完成任务。`] : []),
+      ? [`当前工作分工：任务 ${options.taskId}，分工 ${options.assignmentId}。普通回复只确认这一回合；仅在交付物完成且验证后调用 chatroom_work 明确完成任务。needs_review 只用于结果不明或存在未核对的外部操作；等待用户审阅交付不是 needs_review，不得以此结束自己的分工。`] : []),
     ...(options.omitted ? [`本次仅注入最近 ${lines.length} 条增量消息；另有 ${options.omitted} 条较早群消息可通过 chatroom_read 检索。`] : []),
     ...(lines.length ? ['\n本讨论串较早的消息：', ...lines] : []),
     `\n当前消息 #${message.seq}，来自 ${sender}：\n${message.body}`,

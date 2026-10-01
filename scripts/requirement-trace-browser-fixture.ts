@@ -18,7 +18,7 @@ app.use('/api/module-agents', createModuleAgentsRouter({ host: fixture.host, sto
   profiles: fixture.profiles, workspaceKey: 'default', sessionService: fixture.sessionService }));
 app.use('/api', createApiRouter(fixture.host));
 const vite = await createServer({ configFile: false, root: process.cwd(), appType: 'spa',
-  server: { middlewareMode: true }, plugins: [(await import('@vitejs/plugin-react')).default()] });
+  server: { middlewareMode: true, hmr: { port: 21000 + Math.floor(Math.random() * 20000) } }, plugins: [(await import('@vitejs/plugin-react')).default()] });
 app.use(vite.middlewares);
 const port = Number(process.env.PI_WEBX_REQUIREMENT_TRACE_PORT ?? 18881);
 const server = app.listen(port, '127.0.0.1', () => {

@@ -48,6 +48,7 @@ export function useChatroomComposer(members, { ingest, retry }, route = {}, onSe
   const [sending, setSending] = useState(false)
   const [sendError, setSendError] = useState('')
   const [failedSubmission, setFailedSubmission] = useState(null)
+  const [staleTopicRoute, setStaleTopicRoute] = useState(false)
   const [hydratedRoom, setHydratedRoom] = useState(null)
   const textareaRef = useRef(null)
   const bodyRef = useRef('')
@@ -236,7 +237,11 @@ export function useChatroomComposer(members, { ingest, retry }, route = {}, onSe
         }),
       })
       const payload = await response.json().catch(() => null)
-      if (!response.ok) throw new Error(payload?.error ?? `发送失败（${response.status}）`)
+      if (!response.ok) {
+        // 409 且提交只带旧 threadId：多半是本机保存的话题在服务端已不存在，给出换新话题重发的出口。
+        if (response.status === 409 && submission.threadId && !submission.collaborationTaskId) setStaleTopicRoute(true)
+        throw new Error(payload?.error ?? `发送失败（${response.status}）`)
+      }
       if (!payload?.message) throw new Error('聊天室没有返回消息')
       ingest(payload.message)
       retry()
@@ -251,6 +256,7 @@ export function useChatroomComposer(members, { ingest, retry }, route = {}, onSe
       }
       failedRef.current = null
       setFailedSubmission(null)
+      setStaleTopicRoute(false)
       setSendError('')
     } catch (cause) {
       failedRef.current = submission
@@ -301,7 +307,14 @@ export function useChatroomComposer(members, { ingest, retry }, route = {}, onSe
     },
     canRetrySend: Boolean(failedSubmission) && sendError.startsWith('上一条')
       && sameDraft(failedSubmission, body, replyingTo, route),
-    onDismissSendError: () => setSendError(''),
+    onDismissSendError: () => { setSendError(''); setStaleTopicRoute(false) },
+    canResendAsNewTopic: staleTopicRoute && Boolean(failedSubmission),
+    onResendAsNewTopic: () => {
+      const snapshot = failedRef.current
+      if (!snapshot || sendingRef.current) return
+      setStaleTopicRoute(false)
+      void send({ ...snapshot, threadId: null, collaborationTaskId: null, targetAgentId: null, entryKey: entryKey() })
+    },
     onSend: () => { void send() }, textareaRef,
     focusInput: () => textareaRef.current?.focus(),
   }

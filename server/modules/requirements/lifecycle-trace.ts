@@ -70,6 +70,16 @@ function hydrate(store: LifecycleStore, link: LinkRow): Value {
       status: value?.finished_at ? value.is_error ? 'failed' : 'succeeded' : 'running',
       isError: value?.is_error === 1 };
   }
+  if (link.kind === 'chatroom_handoff') {
+    const message = row(store, 'chatroom_messages', link.entity_id);
+    const parentRunId = typeof refs.parentRunId === 'string' ? refs.parentRunId : null;
+    const parentRun = parentRunId && table(store, 'chatroom_work_runs')
+      ? store.sqlite.prepare('SELECT * FROM chatroom_work_runs WHERE id=?').get(parentRunId) as Value | undefined
+      : undefined;
+    return { ...base, recorded: !!(message && parentRun), threadId: message?.thread_id ?? refs.threadId,
+      senderId: message?.sender_id ?? refs.senderId, parentAgentId: parentRun?.agent_id ?? refs.parentAgentId ?? null,
+      parentStatus: parentRun?.status ?? refs.parentStatus ?? null };
+  }
   return base;
 }
 
@@ -108,7 +118,8 @@ export function readRequirementTrace(store: LifecycleStore, id: string,
     .all(root.requirement_id) as LinkRow[];
   const byKind = (kind: string) => entries.filter(entry => entry.kind === kind).map(entry => hydrate(store, entry));
   const links = { tasks: byKind('task'), collaborationTasks: byKind('chatroom_task'), assignments: byKind('chatroom_assignment'),
-    runs: byKind('chatroom_run'), messages: byKind('chatroom_message'), tools: byKind('chatroom_tool') };
+    runs: byKind('chatroom_run'), messages: byKind('chatroom_message'), tools: byKind('chatroom_tool'),
+    handoffs: byKind('chatroom_handoff') };
   const deliveries = publicDeliveries(store, root.requirement_id);
   const blockers = acceptanceBlockers(root, links);
   let stage: RequirementTrace['stage'] = 'draft';

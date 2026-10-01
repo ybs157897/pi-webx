@@ -44,7 +44,8 @@ export interface RequirementTrace {
     summary: string; refs: Record<string, unknown>; requirementVersion: number | null }>;
   links: { tasks: Array<Record<string, unknown>>; collaborationTasks: Array<Record<string, unknown>>;
     assignments: Array<Record<string, unknown>>; runs: Array<Record<string, unknown>>;
-    messages: Array<Record<string, unknown>>; tools: Array<Record<string, unknown>> };
+    messages: Array<Record<string, unknown>>; tools: Array<Record<string, unknown>>;
+    handoffs: Array<Record<string, unknown>> };
   deliveries: PublicDelivery[]; acceptanceReady: boolean; blockers: string[];
   coverage: { historical: boolean; warnings: string[] };
 }

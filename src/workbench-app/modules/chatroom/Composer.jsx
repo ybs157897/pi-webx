@@ -4,7 +4,7 @@ export default function ChatroomComposer({
   onMentionButton = () => {}, mentionOpen = false, mentionOptions = [], activeMentionIndex = 0,
   onSelectMention = () => {}, replyingTo = null, onCancelReply = () => {},
   sending = false, sendError = '', onRetrySend = () => {}, onDismissSendError = () => {},
-  canRetrySend = false,
+  canRetrySend = false, canResendAsNewTopic = false, onResendAsNewTopic = () => {},
   onSend = () => {}, textareaRef, topicTitle = '新话题', hasCurrentTopic = false, taskRouteActive = false,
   taskNeedsRecipient = false, targetAgentName = '', onNewTopic = () => {}, routeReady = true,
 }) {
@@ -27,6 +27,7 @@ export default function ChatroomComposer({
     {sendError && <div className="chatroom-send-error" role="alert" data-testid="chatroom-send-error">
       <span>{sendError}</span>
       {canRetrySend && <button type="button" onClick={onRetrySend} disabled={sending || members.length === 0} data-testid="chatroom-send-retry">重试上一条</button>}
+      {canResendAsNewTopic && <button type="button" onClick={onResendAsNewTopic} disabled={sending || members.length === 0} data-testid="chatroom-send-new-topic">转新话题重发</button>}
       <button type="button" onClick={onDismissSendError} aria-label="关闭发送错误" data-testid="chatroom-send-error-dismiss">×</button>
     </div>}
     {mentionOpen && <div className="chatroom-mention-menu" id="chatroom-mention-menu" role="listbox" aria-label="点名成员" data-testid="chatroom-mention-menu">
