@@ -2,10 +2,12 @@ schemaVersion: 1
 id: requirements
 enabled: true
 promptFile: ./prompts/requirements.md
-skills: []
+skills:
+  - ./skills/requirements/product-requirements/SKILL.md
 tools:
   - requirements.saveDraft
   - requirements.dispatch
+  - skills.read
   - read
   - write
   - edit

@@ -3,7 +3,7 @@
 > 给人和 AI 的功能定位地图：想找某个功能的代码，先查这里。
 > 维护纪律：**新增/移动功能时同步更新本文件**；它过期的那一刻就开始误导人。
 
-更新日期：2026-09-30。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共九个导航入口，业务实现按模块目录归位。
+更新日期：2026-10-01。生活秘书与工作助理已合并为「我的助理」：一份待办（tasks）、一根今天的时间轴、一套方案确认流（plans）；共九个导航入口，业务实现按模块目录归位。
 
 ## 总体架构
 
@@ -145,6 +145,7 @@
 | 功能 | 位置 |
 | --- | --- |
 | 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id |
+| 需求 Agent 提示词与方法 Skill | `config/agents/prompts/requirements.md` 保留身份、证据/授权边界与协作纪律；`config/agents/skills/requirements/product-requirements/` 的 `SKILL.md` 按需读取需求质量/规格、产物/交接参考，正文映射到 note + taskDrafts，由 `requirements.yaml` 显式挂载 |
 | 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
 | 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要） | `server/module-agents/profiles.ts` |
 | 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆；新对话使用新配置 |
