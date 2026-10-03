@@ -133,6 +133,7 @@
 | 功能 | 位置 |
 | --- | --- |
 | 会话宿主（注册/事件扇出/命令分发） | `server/pi/host.ts`（host-* 系列是它的拆分服务：commands/events/session-assembly/teams/contract） |
+| 发送去重与用户回显关联 | `pi/session-journal.ts` 的 `PromptRequests` 保留去重 ID，宿主队列延后关联、实际投递激活、移除结清；`host-events.ts` 队列行保存原请求 ID，失败插话恢复行；`host-commands.ts` 在实际 SDK 调用前激活关联 |
 | HTTP 面 | `server/routes.ts`（**提交门禁冻结**）、`server/ws.ts`、`server/static.ts` |
 | 会话持久化 | `server/stored-sessions.ts`、`server/pi/session-journal.ts` |
 | 附件 | `server/attachment/store.ts` |
@@ -160,7 +161,7 @@
 | 数据源统一契约与适配器 | `server/data-sources/contracts.ts`、`registry.ts`、`workbench.ts`、`http-json.ts`、`mapping.ts`；接入说明 `docs/architecture/data-source-adapters.md` |
 | 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts`；文本可经 `skills_read` 读取，二进制配套资源以 base64 留存固定版本 |
 | MCP 适配（envRefs/headerRefs 注入、工具桥接、dispose） | `server/module-agents/mcp.ts`；stdio fixture `scripts/mcp-fixture-server.ts` |
-| 前端会话 hook（懒创建、双存储恢复指针、requestId 幂等） | `src/workbench-app/agents/useModuleAgentChat.jsx` |
+| 前端会话 hook（懒创建、双存储恢复指针、排队与插话） | `src/workbench-app/agents/useModuleAgentChat.jsx`：等待当前 SID 的 Pi 客户端就绪后复用 prompt 乐观回显；普通发送交给宿主排队，显式 steer 插入当前回合，暴露队列编辑/删除/插话及独立发送/停止状态 |
 | 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`definitions.js`、`AgentCapabilities.jsx`；日志专属文案在 `modules/logs/agent-ui.js`（App.jsx 以 `agentPanel` 态与通用浮层互斥；日志页已对话化，`logs-agent-open` 侧挂入口退役） |
 | 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
@@ -176,8 +177,9 @@
 | 模块实现 | `src/workbench-app/modules/{dashboard,assistant,today,tasks,fixes,logs,requirements,codes,chatroom,knowledge}/`：各自 `index.jsx` 公开页面，专属 JSX、model、CSS 同目录；today / tasks 是 assistant 页签的内容组件；其余 `modules/X.jsx` 无业务逻辑，仅兼容旧 deep import。旧 `modules/{Tasks,Works}.jsx` 与 `modules/{life,works}/` 已随合并退役 |
 | 日志查询（对话优先，2026-09 与需求管理同形态） | `modules/logs/index.jsx`（日志对话/日志记录页签 + 跨视图查询/记录按钮，弹窗挂根）、`LogsChat.jsx`（`useModuleAgentChat('logs')` + AIPanel，`supportsImages` 开）、`Landing.jsx`（首页三件套 + 快捷检索 chips）、`View.jsx`（密集结果表，保留 `logs-*` 旧 testid）、`Dialogs.jsx`（查询/记录/删除三弹窗）；布局在 `Logs.css`；`navigationTarget.selectedId` 直落记录视图 |
 | Agent 配置页 | `src/workbench-app/modules/agent-settings/`：`index.jsx` 页面与离页草稿保护，`Editor.jsx` 组合编辑区，`WorkspaceEditor.jsx` 独立目录与系统原生文件夹选择绑定（复用 `src/lib/api.ts` → `POST /api/workspace/pick` → `server/directory-picker/`），`ModuleTabs.jsx` 模块卡片切换（四份注册 Agent：assistant / logs / requirements / codes，assistant 首位），`PromptEditor.jsx` 提示词编辑与润色预览，`SkillList.jsx` 勾选/详情/正文编辑/目录导入，`skill-import.js` 目录分组与上传编码，`useAgentSettings.js` 加载与保存；UI 门禁 `scripts/check-module-agent-settings-ui.tsx` |
-| 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`（AI 对话展开后占据整屏、正文列居中，复用 /chat 的 `TranscriptView`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
-| 模块对话输入框附件（图片 + 文本文件） | `shell/composer-attachments.mjs`（准入/转换/内联格式/卡片元数据 `attachmentBadge`，图片复用 `src/shared/attachments` 限额）+ `shell/AIPanel.jsx` 的 `supportsImages` 开关：回形针、粘贴、拖拽落点（`composer-drop` + 悬浮层）三个入口，文件以卡片展示（类型角标 + 文件名 + 类型标签）；`agents/useModuleAgentChat.jsx` 的 `send(text, attachments)` 把文本内联进消息、图片走 prompt 信封 `images`；借鉴 ZCode prompt-attachment 的「文本内联 + 注入防护」思路，PDF 等二进制暂拒 |
+| 外壳（侧导航/顶栏/AI 全屏对话浮层/命令面板/设置） | `src/workbench-app/shell/`；`AIPanel.jsx` 保留公开 barrel，`AIPanelView.jsx` 组合转写/提问/队列，`AgentComposer.jsx` 管理输入、附件与忙时发送（复用 /chat 的 `TranscriptView` / `QueueDock`；规范见 `docs/workbench-ai-chat-compact-mode.md`） |
+| 模块对话输入框附件（图片 + 文本文件） | `shell/composer-attachments.mjs`（准入/转换/内联格式/卡片元数据 `attachmentBadge`，图片复用 `src/shared/attachments` 限额）+ `shell/AgentComposer.jsx` 的 `supportsImages` 开关：回形针、粘贴、拖拽落点（`composer-drop` + 悬浮层）三个入口，文件以卡片展示（类型角标 + 文件名 + 类型标签）；`agents/useModuleAgentChat.jsx` 的 `send(text, attachments, options)` 把文本内联进消息、图片走 Pi prompt 的 `images`；普通发送和插话共用附件管线，PDF 等二进制暂拒 |
+| 独立 Agent 忙时发送门禁与浏览器夹具 | `scripts/check-module-agent-send.ts` 用真实 HTTP/SDK 验证四类 Agent 的排队/插话/附件/停止；`check-module-agent-send-ui.tsx` 验证 SSR 控件，`module-agent-send-fixture.ts` 提供临时 Vite/API/SDK 流及延迟发送回执控制，不使用用户数据或 IDE 网关 |
 | 嵌入聊天（问小台） | `src/workbench-app/pi-webx/`（`useWorkbenchPiChat` 等） |
 | 前端 API 客户端 | `src/workbench-app/api.mjs` |
 | SQLite 存储与 HTTP | `server/workbench/store.ts`、`router.ts`；`schema.mjs` 保留 `ARRAY_MODULES`、公共校验和演示数据，`schema-fields.mjs` 放共享字段，`server/modules/<id>/schema.mjs` 放模块字段（`knowledgeBases` / `knowledgeFolders` 归 knowledge） |
@@ -204,11 +206,13 @@
 | 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css`；`Landing.jsx` 维护居中首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
 | 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
-| 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览需求与待办、编辑/勾选、键盘焦点和错误反馈 |
+| 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览、编辑/勾选、焦点与错误反馈；`index.jsx` 管理 409 后保留编辑、显式读取最新需求及关联任务、再次确认；已关联任务转为只读查看 |
 | 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复 |
+| 草稿保存幂等回执 | `server/modules/requirements/draft-idempotency.ts` 按会话与 toolCallId / 可选 entryKey 关联成功回执，保存、版本与回执在同一事务中完成；`import-tasks.ts` 提供固定字段顺序的归一化，不按相同内容合并新需求 |
+| 需求关联上下文与读取边界 | `server/modules/requirements/context.ts` 提供宿主工作台与公开需求的有限只读投影；`conversation.ts` 注入目标定位/澄清顺序并限制群读取为当前话题；`files.ts` 将 read/write/edit/ls 限于绑定工作区，`module-agents/assemble.ts` 对旧快照同样移除需求会话 shell/跨目录搜索 |
 | 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
 | 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`shell/navigation.mjs`（tasks → assistant 的「待办」页签）、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
-| 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/幂等；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖真实 SSR DOM |
+| 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/导入幂等；`check-requirements-draft-idempotency.ts` 覆盖保存回执、重启/回滚及真实 SDK 重试；`requirements-boundary-browser-fixture.ts` 提供隔离冲突恢复夹具；`check-requirements-agent-context.ts` 覆盖 SDK 上下文、旧快照及路径/话题边界；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖 SSR DOM |
 
 ### 我的助理：待办与今天
 
