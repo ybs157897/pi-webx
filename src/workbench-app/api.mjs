@@ -3,20 +3,27 @@ const ROOT = '/api/workbench'
 const JSON_HEADERS = { 'content-type': 'application/json' }
 const IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
 
-async function request(path, { method = 'GET', body } = {}) {
+async function request(path, { method = 'GET', body, cache } = {}) {
   const response = await fetch(`${ROOT}${path}`, {
     method,
     headers: body === undefined ? undefined : JSON_HEADERS,
     body: body === undefined ? undefined : JSON.stringify(body),
+    cache,
   })
   const text = await response.text()
   let payload
   try {
     payload = text === '' ? null : JSON.parse(text)
   } catch {
-    throw new Error(`工作台服务返回了非 JSON 内容（${response.status}）`)
+    const error = new Error(`工作台服务返回了非 JSON 内容（${response.status}）`)
+    error.status = response.status
+    throw error
   }
-  if (!response.ok) throw new Error(payload?.error ?? `工作台请求失败（${response.status}）`)
+  if (!response.ok) {
+    const error = new Error(payload?.error ?? `工作台请求失败（${response.status}）`)
+    error.status = response.status
+    throw error
+  }
   if (payload === null) throw new Error('工作台服务返回了空响应')
   return payload
 }
@@ -43,8 +50,31 @@ async function imageDataUrl(file) {
   })
 }
 
+async function getRequirementImportContext(id) {
+  const payload = await request('/state', { cache: 'no-store' })
+  const requirements = payload?.data?.requirements
+  const tasks = payload?.data?.tasks
+  if (!Array.isArray(requirements) || !Array.isArray(tasks)) {
+    throw new Error('工作台状态缺少需求或待办记录列表')
+  }
+  return {
+    record: requirements.find((record) => record?.id === id) ?? null,
+    linkedTasks: tasks
+      .filter((task) => Array.isArray(task?.refs)
+        && task.refs.some((ref) => ref?.type === 'requirements' && ref?.id === id))
+      .map((task) => ({
+        id: task.id,
+        title: String(task.title ?? ''),
+        due: task.due ?? null,
+        done: Boolean(task.done),
+      })),
+  }
+}
+
 export const api = {
   state: () => request('/state'),
+  getRequirementImportContext,
+  getRequirement: async (id) => (await getRequirementImportContext(id)).record,
   exportData: () => request('/export'),
   importData: (data) => request('/import', { method: 'POST', body: data }),
   addRecord: (module, fields) => request(`/${module}`, { method: 'POST', body: fields }),

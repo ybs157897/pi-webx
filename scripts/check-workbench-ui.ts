@@ -611,13 +611,13 @@ console.log('workbench UI: 9 modules (widget board, assistant todos+today, fix l
   assert.equal(attachmentBadge({ name: 'run-2026-09-29.log' }).tone, 'slate');
   assert.deepEqual(attachmentBadge({ name: '无扩展名' }).label, 'FILE');
   // 拖拽是交互分支，SSR 不可达：落点/悬浮层/取文件钉在源码上。
-  const aipanelDropSource = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  const aipanelDropSource = (sourceOf('../src/workbench-app/shell/AIPanelView.jsx') + sourceOf('../src/workbench-app/shell/AgentComposer.jsx'));
   assert.ok(aipanelDropSource.includes('composer-drop') && aipanelDropSource.includes('onDrop='), '输入区缺拖拽落点');
   assert.ok(aipanelDropSource.includes('dataTransfer?.files'), '拖拽未取 dataTransfer 文件');
   assert.ok(aipanelDropSource.includes('attach-drag-overlay') && aipanelDropSource.includes('attach-file-icon'), '拖拽悬浮层或文件卡片未落地');
   const moduleChatSource = sourceOf('../src/workbench-app/agents/useModuleAgentChat.jsx');
   assert.ok(moduleChatSource.includes('attachments?.images') && moduleChatSource.includes('attachments?.files'), '模块 Agent send 未接附件参数');
-  assert.ok(moduleChatSource.includes("type: 'prompt'") && moduleChatSource.includes('images'), 'prompt 信封未带图片');
+  assert.ok(moduleChatSource.includes('client.prompt(message') && moduleChatSource.includes('images'), '模块消息应复用 Pi 客户端 prompt 并传递图片');
   const modulePanelSource = sourceOf('../src/workbench-app/agents/ModuleAgentPanel.jsx')
     + sourceOf('../src/workbench-app/modules/requirements/RequirementsChat.jsx');
   assert.ok(modulePanelSource.includes('supportsImages'), '模块 Agent 面板与需求对话应打开附件能力');
@@ -660,7 +660,7 @@ console.log('workbench UI: 9 modules (widget board, assistant todos+today, fix l
   assert.ok(appSource.includes('AI_TEXT.askFailed'), '失败路径的友好错误文案未接线');
 
   // 正文同源 + 简洁模式规范钉在源码与文档上：改 AIPanel 前先读 docs/workbench-ai-chat-compact-mode.md。
-  const panelSource = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  const panelSource = (sourceOf('../src/workbench-app/shell/AIPanelView.jsx') + sourceOf('../src/workbench-app/shell/AgentComposer.jsx'));
   assert.ok(panelSource.includes("from '../../components/TranscriptView'"), '正文必须复用 /chat 的 TranscriptView，不得自绘');
   assert.ok(panelSource.includes("from '../../components/QuestionComposer'"), '提问必须复用 /chat 的 QuestionComposer（输入框座位），不得自绘');
   assert.ok(!panelSource.includes('PiDialog') && !appSource.includes('PiDialog'), '提问不得回到弹窗（PiDialog 已删）');
@@ -896,7 +896,7 @@ console.log('workbench UI: AI overlay (fullscreen centered + transcript reuse + 
   assert.ok(appSource.includes("id: 'agent-settings'") && appSource.includes('onNavigateConfirmed={activateModule}'), 'App 应注册配置模块和离页确认接线');
   assert.ok(appSource.includes('parseTranscriptViewMode(prefs.transcriptView)'), 'App 应从 prefs 解析工作步骤展示模式');
   assert.ok(appSource.includes('stepsMode={stepsMode}'), 'App 应把模式传给 AI 浮层');
-  const panelSource2 = sourceOf('../src/workbench-app/shell/AIPanel.jsx');
+  const panelSource2 = (sourceOf('../src/workbench-app/shell/AIPanelView.jsx') + sourceOf('../src/workbench-app/shell/AgentComposer.jsx'));
   assert.ok(panelSource2.includes('mode={stepsMode}'), 'AIPanel 应把模式透传给 TranscriptView');
   const policySource = sourceOf('../src/lib/transcript/presentation.ts');
   assert.ok(policySource.includes("mode: 'compact'") && policySource.includes("mode: 'verbose'"), '策略表应保留 dsh 四档定义');

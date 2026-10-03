@@ -16,7 +16,7 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
   const [refreshError, setRefreshError] = useState('')
   const panelRef = useRef(null)
   const starterPrefix = useRef('')
-  const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
+  const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, sendDisabled, updateQueue, canNewConversation, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
   const savedTools = (transcript?.entries ?? []).flatMap(entry => entry.kind === 'assistant' ? entry.tools ?? [] : entry.kind === 'toolResult' ? [entry.run] : [])
     .filter(tool => tool.toolName === 'requirements_save_draft' && tool.status === 'success')
     .map(tool => tool.toolCallId).join('|')
@@ -50,9 +50,10 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
     <div className="req-chat-panel" ref={panelRef}>
       <AIPanel {...requirementsAgentPanel} embedded supportsImages subtitle="需求助手" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
         dialog={dialog} onRespondDialog={respondToDialog} onSend={send} onAction={send} onNew={newConversation} onRetry={retry} onRefreshData={refreshDrafts}
+        sendDisabled={sendDisabled} onUpdateQueue={updateQueue} canNewConversation={canNewConversation}
         onStop={canStop ? stop : undefined} stopping={stopping} draft={draft} onDraftChange={setDraft}
         emptyState={<RequirementsWelcome error={configError} />}
-        composerLeading={<RequirementsNewConversation busy={busy} onNew={newConversation} />}
+        composerLeading={<RequirementsNewConversation busy={busy || canNewConversation === false} onNew={newConversation} />}
         composerFooter={<RequirementsStarterActions busy={busy} status={status} modelName={modelName} onChoose={chooseStarter} />} />
     </div>
     {refreshError && <p role="alert" className="req-chat-error" data-testid="req-refresh-error">草稿刷新失败：{refreshError}<button className="btn btn-sm" type="button" onClick={refreshDrafts}>重试</button></p>}

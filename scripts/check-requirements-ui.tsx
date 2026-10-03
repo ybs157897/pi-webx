@@ -60,6 +60,40 @@ const savedDialog = render(ImportDialog, {
 assert.match(savedDialog, /role="alert"[^>]*>待办已保存，但列表刷新失败/)
 assert.match(savedDialog, /重新加载待办/)
 assert.match(savedDialog, /<fieldset(?=[^>]*data-testid="req-import-item")(?=[^>]*disabled)[^>]*>/)
+const conflictDialog = render(ImportDialog, {
+  row: requirement, conflict: true, conflictError: '需求已关联待办', onClose: () => {}, onConfirm: () => {}, onReloadLatest: () => {},
+})
+assert.match(conflictDialog, /data-testid="req-import-conflict-message"/)
+assert.match(conflictDialog, /当前预览与服务端记录有冲突/)
+assert.match(conflictDialog, /data-testid="req-import-conflict-server-error"[^>]*>服务端说明：需求已关联待办/)
+assert.match(conflictDialog, /重新载入会用最新需求草稿替换当前预览/)
+assert.match(conflictDialog, /data-testid="req-import-reload-latest"[^>]*>重新载入并预览/)
+assert.match(conflictDialog, /<button(?=[^>]*data-testid="req-import-confirm")(?=[^>]*disabled)[^>]*>/)
+const reloadFailureDialog = render(ImportDialog, {
+  row: requirement, conflict: true, reloadError: '网络连接失败', onClose: () => {}, onConfirm: () => {}, onReloadLatest: () => {},
+})
+assert.match(reloadFailureDialog, /data-testid="req-import-reload-error"[^>]*>最新需求载入失败[^<]*网络连接失败/)
+assert.match(reloadFailureDialog, /data-testid="req-import-reload-latest"[^>]*>重新载入并预览/)
+const deletedDialog = render(ImportDialog, {
+  row: requirement, deleted: true, onClose: () => {}, onConfirm: () => {},
+})
+assert.match(deletedDialog, /data-testid="req-import-deleted-message"/)
+assert.doesNotMatch(deletedDialog, /data-testid="req-import-confirm"/)
+const linkedTasksDialog = render(ImportDialog, {
+  row: requirement,
+  linkedTasks: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', title: '已关联待办', due: null, done: false }],
+  onClose: () => {}, onConfirm: () => {}, onViewExistingTasks: () => {},
+})
+assert.match(linkedTasksDialog, /data-testid="req-import-existing-tasks"/)
+assert.match(linkedTasksDialog, /已有 1 条关联待办/)
+assert.match(linkedTasksDialog, /data-testid="req-import-view-existing-tasks"[^>]*>查看已有关联待办/)
+assert.doesNotMatch(linkedTasksDialog, /data-testid="req-import-confirm"/)
+const linkedTasksErrorDialog = render(ImportDialog, {
+  row: requirement,
+  linkedTasks: [{ id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', title: '已关联待办', due: null, done: false }],
+  viewTasksError: '网络连接失败', onClose: () => {}, onConfirm: () => {}, onViewExistingTasks: () => {},
+})
+assert.match(linkedTasksErrorDialog, /data-testid="req-import-view-existing-tasks-error"[^>]*>刷新关联待办失败[^<]*网络连接失败/)
 
 const selected = selectedTaskDrafts([
   { selected: true, title: ' 编辑后 ', priority: 'low', due: '', tag: ' 测试 ' },

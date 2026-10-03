@@ -28,6 +28,8 @@ import { createChatroomTools } from '../modules/chatroom/tools';
 import { createAssistantCoordinationTool } from '../modules/assistant/coordination';
 import { createRequirementsDispatchTool } from '../modules/requirements/dispatch';
 import { createRequirementLifecycleTools } from '../modules/requirements/lifecycle-tools';
+import { createRequirementsFileTools } from '../modules/requirements/files';
+import { REQUIREMENTS_UNSCOPED_TOOLS, requirementsConversationPrompt, scopeRequirementsChatroomRead } from '../modules/requirements/conversation';
 
 export interface AssembleModuleAgentInput {
   store: WorkbenchStore;
@@ -93,16 +95,22 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     }
     produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits });
     const chatroom = getChatroomService(store, workspaceKey);
-    produced.push(...createChatroomTools({ service: chatroom, agentId, limits: profile.config.limits }));
+    produced.push(...createChatroomTools({ service: chatroom, agentId, limits: profile.config.limits })
+      .filter(tool => agentId !== 'requirements' || tool.name !== 'chatroom_read'));
     produced.push(...createRequirementLifecycleTools({ store, chatroom, agentId, limits: profile.config.limits }));
     if (agentId === 'assistant') produced.push(createAssistantCoordinationTool(store, chatroom));
-    if (agentId === 'requirements') produced.push(createRequirementsDispatchTool(store, chatroom));
+    if (agentId === 'requirements') {
+      produced.push(createRequirementsDispatchTool(store, chatroom), scopeRequirementsChatroomRead(chatroom, profile.config.limits.maxToolOutputChars));
+      produced.push(...createRequirementsFileTools(workspaceDir));
+    }
     if (profile.skills.length) produced.push(skillTool(profile.skills));
     if (profile.skills.length && !profile.config.tools.includes('skills.read')) throw new HostError(503, '配置了 Skills 时必须允许 skills.read');
     const producedNames = new Set(produced.map((tool) => tool.name));
     // 手写 YAML 可能关闭全部 Skill，却仍保留旧的 skills.read 声明。
     const configuredTools = profile.skills.length ? profile.config.tools : profile.config.tools.filter(name => name !== 'skills.read');
-    resolved = resolveToolNames(agentId, configuredTools);
+    // Old profile snapshots must not restore the unscoped shell/search tools.
+    resolved = resolveToolNames(agentId, configuredTools)
+      .filter(name => agentId !== 'requirements' || !REQUIREMENTS_UNSCOPED_TOOLS.has(name));
     for (const name of resolved) {
       if (!producedNames.has(name) && !BUILTIN_TOOL_NAMES.has(name)) {
         throw new HostError(503, `模块 Agent「${agentId}」配置了未知工具：${name}`);
@@ -118,7 +126,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
   // MCP 连接按声明顺序装配：required 失败整包失败并回收已连；其余记 degraded。
   const connected: ConnectedMcp[] = [];
   const degraded: { id: string; error: string }[] = [];
-  const systemPromptAppend: string[] = [];
+  const systemPromptAppend: string[] = agentId === 'requirements' ? [requirementsConversationPrompt(store)] : [];
   const disposeAll = async () => {
     await disposeSources();
     for (const conn of connected.splice(0)) {
@@ -162,7 +170,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     profile,
     customTools,
     // SDK 的 tools 是注册白名单：领域与 MCP 工具名由装配线补入，这里只给内置子集。
-    allowedToolNames: resolved.filter((name) => BUILTIN_TOOL_NAMES.has(name)),
+    allowedToolNames: resolved.filter((name) => BUILTIN_TOOL_NAMES.has(name) && !customTools.some(tool => tool.name === name)),
     systemPromptAppend,
     mcp: { connected, degraded },
     dispose: disposeAll,

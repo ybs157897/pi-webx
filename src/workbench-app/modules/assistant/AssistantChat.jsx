@@ -30,7 +30,7 @@ export default function AssistantChat({ data, themeMode, stepsMode, refresh, mut
   const chat = useModuleAgentChat('assistant')
   const { showChat, hideChat, reportPendingPlans } = useAssistantMobileView()
   const [refreshError, setRefreshError] = useState('')
-  const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
+  const { sessionId, transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, sendDisabled, updateQueue, canNewConversation, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
   const writes = (transcript?.entries ?? []).flatMap(entry => entry.kind === 'assistant' ? entry.tools ?? [] : entry.kind === 'toolResult' ? [entry.run] : [])
     .filter(tool => WRITE_TOOLS.includes(tool.toolName) && tool.status === 'success')
     .map(tool => tool.toolCallId).join('|')
@@ -62,6 +62,7 @@ export default function AssistantChat({ data, themeMode, stepsMode, refresh, mut
       <div className="assistant-chat-panel"><AIPanel {...assistantAgentPanel} embedded subtitle="收集 · 整理 · 安排" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
         dock={docked ? <PlanReview plans={plans} tasks={data?.tasks ?? []} sessionId={sessionId} refresh={refresh} notify={notify} /> : null}
         dialog={dialog} onRespondDialog={respondToDialog} onSend={send} onAction={send} onNew={newConversation} onRetry={retry} onRefreshData={refreshData}
+        sendDisabled={sendDisabled} onUpdateQueue={updateQueue} canNewConversation={canNewConversation}
         onStop={canStop ? stop : undefined} stopping={stopping} draft={draft} onDraftChange={setDraft}
         emptyExtra={<p className="assistant-chat-guide">随口记录不必填齐信息；安排建议确认后才写进日程。</p>} /></div>
       {configError && <p role="alert" className="assistant-error" data-testid="assistant-agent-error">{configError}</p>}

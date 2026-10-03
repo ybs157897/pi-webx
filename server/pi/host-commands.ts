@@ -52,9 +52,11 @@ export async function handleCommand(
   if (idempotent && !hosted.promptRequests.add(requestId)) {
     return ok(command.type, { accepted: true, deduplicated: true }, requestId);
   }
+  if (idempotent && requestId !== undefined) hosted.promptRequests.defer(requestId);
 
   try {
     const response = await dispatchCommand(host, hosted, command);
+    if (idempotent && requestId !== undefined && !response.success) hosted.promptRequests.forget(requestId);
     return command.id === undefined ? response : { ...response, id: command.id };
   } catch (error) {
     if (idempotent && requestId !== undefined) hosted.promptRequests.forget(requestId);
@@ -105,7 +107,7 @@ async function dispatchCommand(
           return fail(command.type, errorText(error), command.id);
         }
         if (command.streamingBehavior === undefined && session.isStreaming) {
-          const queued = enqueue(host, hosted, command.message, prepared.images as unknown as ImageContent[]);
+          const queued = enqueue(host, hosted, command.message, prepared.images as unknown as ImageContent[], command.id);
           return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
         }
         // 空闲时忽略显式 steer：pi 的 steer 只在当前轮里有投递窗口，空闲会话上
@@ -128,13 +130,19 @@ async function dispatchCommand(
         /** Why the preflight said no — the client needs it to tell a race from a real refusal. */
         let reason: string | null = null;
         const accepted = new Promise<boolean>((resolve) => {
+          if (command.id !== undefined) hosted.promptRequests.activate(command.id);
           void session
             .prompt(command.message, {
               ...(prepared.images.length > 0
                 ? { images: prepared.images as unknown as import('@earendil-works/pi-ai').ImageContent[] }
                 : {}),
               ...(behavior ? { streamingBehavior: behavior } : {}),
-              preflightResult: resolve,
+              // Older SDKs report a boolean; newer ones report a disposition.
+              // Handled commands emit no user message to claim this request ID.
+              preflightResult: (disposition: unknown) => {
+                if (disposition === 'handled' && command.id !== undefined) hosted.promptRequests.settle(command.id);
+                resolve(disposition !== false);
+              },
             })
             .catch((error: unknown) => {
               reason = errorText(error);
@@ -143,6 +151,7 @@ async function dispatchCommand(
               if (!(command.streamingBehavior === undefined && isAlreadyProcessing(reason))) {
                 broadcastError(host, hosted, reason);
               }
+              resolve(false);
             });
         });
         const success = await accepted.finally(() => {
@@ -154,8 +163,8 @@ async function dispatchCommand(
          * 用户的本意是「接着说」，所以排进待发送而不是回一条错误。
          */
         if (!success && command.streamingBehavior === undefined && reason !== null && isAlreadyProcessing(reason)) {
-          if (command.id !== undefined) hosted.promptRequests.forget(command.id);
-          const queued = enqueue(host, hosted, command.message, prepared.images as unknown as import('@earendil-works/pi-ai').ImageContent[]);
+          if (command.id !== undefined) hosted.promptRequests.defer(command.id);
+          const queued = enqueue(host, hosted, command.message, prepared.images as unknown as import('@earendil-works/pi-ai').ImageContent[], command.id);
           return ok(command.type, { accepted: true, deliveredAs: 'queue', queuedId: queued.id });
         }
         // A rejected preflight never becomes a durable user message: release
@@ -172,10 +181,12 @@ async function dispatchCommand(
         });
       }
       case 'steer':
+        if (command.id !== undefined) hosted.promptRequests.activate(command.id);
         await session.steer(command.message);
         return ok(command.type);
       case 'follow_up':
         await refreshSubagentTool(host, hosted);
+        if (command.id !== undefined) hosted.promptRequests.activate(command.id);
         await session.followUp(command.message);
         return ok(command.type);
       case 'update_queue': {
@@ -191,6 +202,9 @@ async function dispatchCommand(
         await session.abort();
         return ok(command.type);
       case 'clear_queue': {
+        for (const item of hosted.queue) {
+          if (item.requestId !== undefined) hosted.promptRequests.settle(item.requestId);
+        }
         hosted.queue = [];
         broadcastQueue(host, hosted);
         return { type: 'response', command: command.type, success: true, data: session.clearQueue() };

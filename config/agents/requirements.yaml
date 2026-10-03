@@ -5,15 +5,13 @@ promptFile: ./prompts/requirements.md
 skills:
   - ./skills/requirements/product-requirements/SKILL.md
 tools:
+  - requirements.context
   - requirements.saveDraft
   - requirements.dispatch
   - skills.read
   - read
   - write
   - edit
-  - bash
-  - grep
-  - find
   - ls
   - chatroom.send
   - chatroom.read

@@ -15,7 +15,7 @@ export default function ModuleAgentPanel({ definition, themeMode, stepsMode, onC
   const {
     transcript, localRows, busy, modelName, status,
     send, newConversation, retry, dialog, respondToDialog,
-    capability, capabilityError, stop, canStop, stopping, draft, setDraft,
+    capability, capabilityError, stop, canStop, stopping, sendDisabled, updateQueue, canNewConversation, draft, setDraft,
   } = useModuleAgentChat(agentId, { cwd })
 
   return (
@@ -38,6 +38,9 @@ export default function ModuleAgentPanel({ definition, themeMode, stepsMode, onC
         dialog={dialog}
         onRespondDialog={respondToDialog}
         onSend={send}
+        canNewConversation={canNewConversation}
+        sendDisabled={sendDisabled}
+        onUpdateQueue={updateQueue}
         onStop={canStop ? stop : undefined}
         stopping={stopping}
         draft={draft}

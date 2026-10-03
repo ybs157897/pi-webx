@@ -104,13 +104,16 @@ export function enqueue(
   hosted: HostedSession,
   text: string,
   images?: readonly ImageContent[],
+  requestId?: string,
 ): QueuedPrompt {
   const item: QueuedPrompt = {
     id: crypto.randomUUID(),
+    ...(requestId === undefined ? {} : { requestId }),
     text,
     ...(images !== undefined && images.length > 0 ? { images: [...images] } : {}),
     createdAt: Date.now(),
   };
+  if (requestId !== undefined) hosted.promptRequests.defer(requestId);
   hosted.queue.push(item);
   broadcastQueue(host, hosted);
   return item;
@@ -134,14 +137,15 @@ export async function updateQueue(
 ): Promise<string | null> {
   const index = hosted.queue.findIndex((item) => item.id === id);
   if (index < 0) return '这条消息已经开始发送了。';
+  const item = hosted.queue[index]!;
 
   if (action.kind === 'remove') {
     hosted.queue.splice(index, 1);
+    if (item.requestId !== undefined) hosted.promptRequests.settle(item.requestId);
     broadcastQueue(host, hosted);
     return null;
   }
 
-  const item = hosted.queue[index]!;
   if (action.kind === 'edit') {
     const text = action.text.trim();
     if (text.length === 0) return '这条消息的内容不能为空。';
@@ -154,9 +158,11 @@ export async function updateQueue(
   hosted.queue.splice(index, 1);
   broadcastQueue(host, hosted);
   try {
+    if (item.requestId !== undefined) hosted.promptRequests.activate(item.requestId);
     await hosted.session.steer(item.text, item.images);
   } catch (error) {
     // Put it back where it was: the user's message is not the failure's cost.
+    if (item.requestId !== undefined) hosted.promptRequests.defer(item.requestId);
     hosted.queue.splice(Math.min(index, hosted.queue.length), 0, item);
     broadcastQueue(host, hosted);
     return `插话发送失败：${errorText(error)}`;
@@ -186,16 +192,22 @@ export async function flushQueue(host: HostInternals, hosted: HostedSession): Pr
     await refreshSubagentTool(host, hosted);
     let reason: string | null = null;
     const accepted = await new Promise<boolean>((resolve) => {
+      if (item.requestId !== undefined) hosted.promptRequests.activate(item.requestId);
       void hosted.session
         .prompt(item.text, {
           ...(item.images !== undefined && item.images.length > 0 ? { images: item.images } : {}),
-          preflightResult: resolve,
+          preflightResult: (disposition: unknown) => {
+            if (disposition === 'handled' && item.requestId !== undefined) hosted.promptRequests.settle(item.requestId);
+            resolve(disposition !== false);
+          },
         })
         .catch((error: unknown) => {
           reason = errorText(error);
+          resolve(false);
         });
     });
     if (!accepted) {
+      if (item.requestId !== undefined) hosted.promptRequests.defer(item.requestId);
       broadcastError(
         host,
         hosted,

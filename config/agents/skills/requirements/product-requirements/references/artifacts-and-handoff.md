@@ -2,15 +2,21 @@
 
 下列契约对应本模块现有工具。以当前会话实际工具定义和返回值为准；Skill 不提供额外工具，也不允许绕过导入确认、记录归属或版本校验。
 
+## 资料读取与目标定位
+
+服务端工作台上下文说明当前入口和已有需求摘要，不表示用户本次目标已经确定。指代不明时先澄清，不能靠遍历本机目录、其他会话或数据库选择项目。requirements_context 只读工作台公开需求：可按 requirementId 核对正文与版本，或按 query、limit 查询有限摘要；查询结果不是实施授权。read/write/edit/ls 只访问本工作区内的需求材料，符号链接不能扩大范围。其他材料由用户以附件提供；不通过 shell 或 HTTP 绕过读取范围。
+
 ## 保存规格与候选待办
 
-`requirements_save_draft` 的参数只有 `id?`、`title`、`note?`、`priority?` 和 `taskDrafts`。
+`requirements_save_draft` 的业务字段为 `id?`、`title`、`note?`、`priority?` 和 `taskDrafts`，另有请求级幂等键 `entryKey?`。`entryKey` 不会写入需求记录。
 
 - title 为 1–200 字，note 最多 5000 字；priority 为 low / normal / high，未指定可沿用工具默认 normal，不冒充用户决定。
 - taskDrafts 为 1–20 项，每项只含 title、priority?、due?、tag?；due 是 YYYY-MM-DD 或 null，表示截止日期，不表示已经安排到某天。
 - 业务规则、权限、依赖、详细验收写在 note，不向工具添加 userStory、acceptanceCriteria、description、dependencies 等未知字段。
 - 没有实际候选工作时先在会话中整理探索成果，不能虚构“补充需求”等占位待办来满足 minItems。
 - 新草稿省略 id；修订同一草稿使用真实返回 id。只能修改本会话未导入草稿，sourceSessionId 由服务端注入。
+- 同一逻辑保存重试时保持 entryKey 和业务参数不变；省略 entryKey 时只用 SDK 的 toolCallId 识别同一调用重放。相同 entryKey 配不同参数会冲突；不同需求必须使用新 entryKey，即使标题或内容相似也不会自动合并。
+- 返回 `alreadySaved:true` 表示复用了原保存回执；其中记录和 requirementVersion 是首次保存的快照，可能早于后续修订或导入。交接前用 `requirements_context` 核对当前记录与版本，不把回执快照当成最新状态。
 - 已导入草稿不可由该工具重写；遇到变更先核对关联需求与当前版本，说明已有任务和验收受影响的部分，不另建相同草稿规避限制。现有工具不能表达的变更请用户在需求记录中审阅处理，不声称已经更新业务记录。
 
 普通页面保存只产生草稿，用户通过界面预览、调整、确认后导入。不要自行用 bash 或 HTTP 绕过该确认点。保存成功以返回记录为准；失败不宣称保存成功；写入结果未知先核对，不盲目重复新建。
@@ -41,7 +47,7 @@ dispatch 参数为必需的 entryKey、title、note、taskDrafts，以及可选 
 
 ## 回报、变更与验收
 
-使用 `chatroom_trace` 核对当前关联需求版本、待办、协作分工、Run、工具结果和交付；普通需求会话只能读自己保存的需求。收到完成回报时对照本版验收与真实证据，不重新 dispatch。需求 Agent 不代替我的助理更新业务待办完成状态。
+使用 `chatroom_trace` 核对当前关联需求版本、待办、协作分工、Run、工具结果和交付；普通需求会话的生命周期追踪仍限于自己保存的需求。requirements_context 的只读公开记录查询不扩大追踪或修改权限。收到完成回报时对照本版验收与真实证据，不重新 dispatch。需求 Agent 不代替我的助理更新业务待办完成状态。
 
 `chatroom_delivery` 只在关联需求的群工作会话中提交当前版本的真实证据，不能接受交付。证据 kind 只取 file / commit / pull_request / test / report，ref 和可选 toolCallId 必须可核验；未跑测试写“未验证”，不能用猜测的文件或成功结果充数。
 

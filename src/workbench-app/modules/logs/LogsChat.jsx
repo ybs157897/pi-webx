@@ -13,7 +13,7 @@ export default function LogsChat({ themeMode, stepsMode, onRefreshData }) {
   const chat = useModuleAgentChat('logs')
   const panelRef = useRef(null)
   const starterPrefix = useRef('')
-  const { transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
+  const { transcript, localRows, busy, status, modelName, draft, setDraft, send, stop, canStop, stopping, sendDisabled, updateQueue, canNewConversation, newConversation, retry, dialog, respondToDialog, capability, capabilityError } = chat
   const configError = capabilityError || (capability && !capability.ok ? capability.error || '日志助手未启用，请在 Agent 配置中检查。' : '')
 
   function chooseStarter(prompt) {
@@ -27,9 +27,10 @@ export default function LogsChat({ themeMode, stepsMode, onRefreshData }) {
     <div className="logs-chat-panel" ref={panelRef}>
       <AIPanel {...logsAgentPanel} embedded supportsImages subtitle="日志助手" transcript={transcript} assistRows={localRows} busy={busy} status={status} modelName={modelName} themeMode={themeMode} stepsMode={stepsMode}
         dialog={dialog} onRespondDialog={respondToDialog} onSend={send} onAction={send} onNew={newConversation} onRetry={retry} onRefreshData={onRefreshData}
+        sendDisabled={sendDisabled} onUpdateQueue={updateQueue} canNewConversation={canNewConversation}
         onStop={canStop ? stop : undefined} stopping={stopping} draft={draft} onDraftChange={setDraft}
         emptyState={<LogsWelcome error={configError} />}
-        composerLeading={<LogsNewConversation busy={busy} onNew={newConversation} />}
+        composerLeading={<LogsNewConversation busy={busy || canNewConversation === false} onNew={newConversation} />}
         composerFooter={<LogsStarterActions busy={busy} status={status} modelName={modelName} onChoose={chooseStarter} />} />
     </div>
   </section>

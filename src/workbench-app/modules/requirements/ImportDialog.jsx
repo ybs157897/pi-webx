@@ -52,7 +52,22 @@ export function selectedTaskDrafts(drafts) {
 }
 
 /** 显式预览、编辑、勾选并确认一次性导入需求待办。 */
-export default function ImportDialog({ row, busy = false, saved = false, error: serverError = '', onClose, onConfirm }) {
+export default function ImportDialog({
+  row,
+  busy = false,
+  saved = false,
+  conflict = false,
+  conflictError = '',
+  deleted = false,
+  linkedTasks = [],
+  error: serverError = '',
+  reloadError = '',
+  viewTasksError = '',
+  onClose,
+  onConfirm,
+  onReloadLatest,
+  onViewExistingTasks,
+}) {
   const dialogRef = useRef(null)
   const firstInputRef = useRef(null)
   const nextKey = useRef(1)
@@ -61,6 +76,10 @@ export default function ImportDialog({ row, busy = false, saved = false, error: 
   const [error, setError] = useState('')
   const open = row !== null && row !== undefined
   const alreadyImported = open && (Boolean(row.importedAt) || (Array.isArray(row.importedTaskIds) && row.importedTaskIds.length > 0))
+  const hasExistingTasks = alreadyImported || (Array.isArray(linkedTasks) && linkedTasks.length > 0)
+  const existingTaskCount = Array.isArray(linkedTasks) && linkedTasks.length > 0
+    ? linkedTasks.length
+    : Array.isArray(row?.importedTaskIds) ? row.importedTaskIds.length : 0
   const selectedCount = drafts.filter(draft => draft.selected).length
 
   useEffect(() => {
@@ -105,7 +124,7 @@ export default function ImportDialog({ row, busy = false, saved = false, error: 
 
   function submit(event) {
     event.preventDefault()
-    if (busy || alreadyImported) return
+    if (busy || conflict || deleted || hasExistingTasks) return
     const result = selectedTaskDrafts(drafts)
     if (result.error) {
       setError(result.error)
@@ -162,11 +181,20 @@ export default function ImportDialog({ row, busy = false, saved = false, error: 
           <button type="button" className="icon-btn" data-testid="req-import-close" aria-label="关闭导入预览" disabled={busy} onClick={close}>×</button>
         </header>
 
-        {alreadyImported
-          ? <p className="req-import-notice" data-testid="req-import-already">这条需求已经导入待办。关联任务可在需求记录里查看。</p>
+        {hasExistingTasks && !deleted
+          ? <div className="req-import-notice" data-testid="req-import-existing-tasks">
+              <p data-testid="req-import-already">这条需求已有{existingTaskCount > 0 ? ` ${existingTaskCount} 条` : ''}关联待办，不能重复导入。</p>
+              <p>查看待办会先刷新列表，再按这条需求筛选。</p>
+            </div>
           : (
             <form id="req-import-form" onSubmit={submit}>
+              {deleted && <p className="req-import-notice req-import-error" role="alert" data-testid="req-import-deleted-message">这条需求已被删除，无法继续导入。当前预览和编辑仍保留；关闭后可返回需求列表。</p>}
               <p className="req-import-help">检查拆分结果，取消不需要的条目，也可以修改或新增。确认后会一起加入待办列表。</p>
+              {conflict && <div className="req-import-conflict" role="alert" data-testid="req-import-conflict-message">
+                <p>当前预览与服务端记录有冲突。你的编辑仍保留。重新载入会用最新需求草稿替换当前预览；载入后仍需再次确认导入。</p>
+                {conflictError !== '' && <p data-testid="req-import-conflict-server-error">服务端说明：{conflictError}</p>}
+              </div>}
+              {reloadError !== '' && <p className="req-import-error" role="alert" data-testid="req-import-reload-error">最新需求载入失败，当前编辑仍保留。{reloadError}</p>}
               {String(row.note ?? '').trim() !== '' && (
                 <details className="req-import-context" data-testid="req-import-context">
                   <summary>查看完整需求与验收条件</summary>
@@ -175,7 +203,7 @@ export default function ImportDialog({ row, busy = false, saved = false, error: 
               )}
               <div className="req-import-list" data-testid="req-import-list">
                 {drafts.map((draft, index) => (
-                  <fieldset className="req-import-item" key={draft.key} disabled={busy || saved} data-testid="req-import-item">
+                  <fieldset className="req-import-item" key={draft.key} disabled={busy || saved || deleted} data-testid="req-import-item">
                     <legend>待办 {index + 1}</legend>
                     <div className="req-import-item-top">
                       <label className="req-import-check">
@@ -215,15 +243,22 @@ export default function ImportDialog({ row, busy = false, saved = false, error: 
                   </fieldset>
                 ))}
               </div>
-              <button type="button" className="btn btn-sm req-import-add" data-testid="req-import-add" disabled={busy || saved || drafts.length >= MAX_TASKS} onClick={addDraft}>+ 添加待办</button>
-              {(error !== '' || serverError !== '') && <p className="req-import-error" role="alert">{error || serverError}</p>}
+              <button type="button" className="btn btn-sm req-import-add" data-testid="req-import-add" disabled={busy || saved || deleted || drafts.length >= MAX_TASKS} onClick={addDraft}>+ 添加待办</button>
+              {(error !== '' || serverError !== '') && <p className="req-import-error" role="alert" data-testid="req-import-error">{error || serverError}</p>}
             </form>
           )}
+        {viewTasksError !== '' && <p className="req-import-error" role="alert" data-testid="req-import-view-existing-tasks-error">刷新关联待办失败，仍停留在当前窗口。{viewTasksError}</p>}
 
         <footer className="req-import-foot">
-          <button type="button" className="btn" data-testid="req-import-cancel" disabled={busy} onClick={close}>{alreadyImported ? '关闭' : '取消'}</button>
-          {!alreadyImported && (
-            <button type="submit" form="req-import-form" className="btn btn-primary" disabled={busy || selectedCount === 0} data-testid="req-import-confirm">
+          <button type="button" className="btn" data-testid="req-import-cancel" disabled={busy} onClick={close}>{hasExistingTasks || deleted ? '关闭' : '取消'}</button>
+          {conflict && !deleted && !alreadyImported && (
+            <button type="button" className="btn" data-testid="req-import-reload-latest" disabled={busy} onClick={() => onReloadLatest?.()}>重新载入并预览</button>
+          )}
+          {hasExistingTasks && !deleted && (
+            <button type="button" className="btn" data-testid="req-import-view-existing-tasks" disabled={busy} onClick={() => onViewExistingTasks?.()}>查看已有关联待办</button>
+          )}
+          {!hasExistingTasks && !deleted && (
+            <button type="submit" form="req-import-form" className="btn btn-primary" disabled={busy || conflict || selectedCount === 0} data-testid="req-import-confirm">
               {busy ? (saved ? '加载中…' : '导入中…') : saved ? '重新加载待办' : `确认导入 ${selectedCount} 条`}
             </button>
           )}

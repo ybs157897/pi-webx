@@ -107,6 +107,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
       {rowCount > 1 && (
         <button
           type="button"
+          data-testid="queue-collapse"
           className={css.header}
           aria-expanded={expanded}
           disabled={interactionActive}
@@ -144,6 +145,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
               {editing?.id === row.id ? (
                 <input
                   autoFocus
+                  data-testid="queue-edit-input"
                   className={css.editor}
                   aria-label={COPY.edit}
                   value={editing.text}
@@ -171,6 +173,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
                     <Tooltip label={COPY.save} side="bottom">
                       <button
                         type="button"
+                        data-testid="queue-save"
                         className={css.action}
                         aria-label={COPY.save}
                         disabled={busy !== null || editing.text.trim().length === 0}
@@ -182,6 +185,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
                     <Tooltip label={COPY.cancelEdit} side="bottom">
                       <button
                         type="button"
+                        data-testid="queue-edit-cancel"
                         className={css.action}
                         aria-label={COPY.cancelEdit}
                         disabled={busy !== null}
@@ -196,6 +200,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
                     <Tooltip label={COPY.edit} side="bottom">
                       <button
                         type="button"
+                        data-testid="queue-edit"
                         className={css.action}
                         aria-label={COPY.edit}
                         disabled={busy !== null}
@@ -207,6 +212,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
                     <Tooltip label={COPY.remove} side="bottom">
                       <button
                         type="button"
+                        data-testid="queue-remove"
                         className={css.action}
                         aria-label={COPY.remove}
                         disabled={busy !== null}
@@ -221,6 +227,7 @@ export function QueueDock({ items, running, onSteer, onEdit, onRemove }: QueueDo
                     >
                       <button
                         type="button"
+                        data-testid="queue-steer"
                         className={css.action}
                         aria-label={COPY.steer}
                         disabled={busy !== null || !running}

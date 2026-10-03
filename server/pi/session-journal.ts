@@ -67,11 +67,11 @@ export class SessionJournal {
 /**
  * Per-session prompt-request ledger for idempotent submits and echo retire.
  *
- * `pending` marks a prompt command the host has accepted; the next durable user
- * message claims it (its frame is annotated `source.requestId`) and moves the
- * id to `settled`. A repeat of a known id is answered as accepted without
- * re-submitting to pi — dsh's commands.ts requestId check, whose job is
- * distinct from the HTTP transport's correlation.
+ * `seen` is the idempotency set, while `pending` contains only ids eligible to
+ * annotate the next SDK user message. A queued prompt stays seen but deferred
+ * until it is actually sent to pi. A claimed id moves to `settled`; retries of
+ * known ids are acknowledged without re-submitting, independent of HTTP request
+ * correlation.
  */
 export class PromptRequests {
   /** insertion-ordered: front = oldest pending */
@@ -88,6 +88,28 @@ export class PromptRequests {
     this.pending.push(requestId);
     this.trim();
     return true;
+  }
+
+  /** Hold an accepted request out of the correlation FIFO until SDK delivery. */
+  defer(requestId: string): void {
+    const index = this.pending.indexOf(requestId);
+    if (index >= 0) this.pending.splice(index, 1);
+  }
+
+  /** Make a deferred request eligible to annotate its SDK user-message event. */
+  activate(requestId: string): boolean {
+    if (!this.seen.has(requestId) || this.settled.has(requestId)) return false;
+    if (!this.pending.includes(requestId)) this.pending.push(requestId);
+    return true;
+  }
+
+  /** Retire a discarded queued request without allowing it to claim later traffic. */
+  settle(requestId: string): void {
+    this.defer(requestId);
+    if (!this.seen.has(requestId)) return;
+    this.settled.delete(requestId);
+    this.settled.add(requestId);
+    this.trim();
   }
 
   /** Forget a failed submit entirely, so retrying with the same id re-attempts. */

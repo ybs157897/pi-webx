@@ -24,6 +24,9 @@
 .req-import-context-body { max-height: 260px; overflow: auto; margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .req-import-context-body pre { max-width: 100%; overflow-x: auto; }
 .req-import-notice { padding: var(--sp-4); color: var(--text-2); }
+.req-import-existing-tasks p + p { margin-top: var(--sp-2); }
+.req-import-conflict { margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--accent); border-radius: var(--radius-md); color: var(--text-1); font-size: var(--fs-sm); }
+.req-import-conflict p + p { margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-xs); overflow-wrap: anywhere; }
 .req-import-dialog form { min-height: 0; overflow-y: auto; padding: var(--sp-4); }
 .req-import-list { display: grid; gap: var(--sp-3); margin-top: var(--sp-3); }
 .req-import-item { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-2); border-radius: var(--radius-md); }

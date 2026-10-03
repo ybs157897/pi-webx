@@ -45,6 +45,8 @@ export interface HostSubscriber {
  */
 export interface QueuedPrompt {
   id: string;
+  /** Original prompt command id, deferred until the row is delivered to pi. */
+  requestId?: string;
   text: string;
   images?: ImageContent[];
   createdAt: number;

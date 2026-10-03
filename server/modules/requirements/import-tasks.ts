@@ -5,6 +5,7 @@ import { normalizeTaskDrafts } from './schema.mjs';
 type RecordRow = Record<string, unknown> & { id: string };
 export type RequirementTaskDraft = { title: string; priority: 'low' | 'normal' | 'high'; due: string | null; tag: string };
 export type ImportTasksResult = { requirement: RecordRow; tasks: RecordRow[]; alreadyImported: boolean };
+export type NormalizedRequirementDraftInput = { params: Record<string, unknown>; fingerprint: Record<string, unknown> };
 
 function object(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -16,6 +17,35 @@ function drafts(value: unknown): RequirementTaskDraft[] {
   } catch (error) {
     throw new WorkbenchInputError(error instanceof Error ? error.message : '待办草稿不合法');
   }
+}
+
+/** Canonical save fields for an idempotency receipt; entry keys stay outside the record schema. */
+export function normalizeRequirementDraftForIdempotency(
+  sourceSessionId: string,
+  raw: unknown,
+): NormalizedRequirementDraftInput {
+  if (!sourceSessionId) throw new WorkbenchInputError('需求会话身份缺失');
+  if (!object(raw)) throw new WorkbenchInputError('需求草稿需要是对象');
+  const { id, title, note, priority, taskDrafts } = raw;
+  if (id !== undefined && (typeof id !== 'string' || id === '')) throw new WorkbenchInputError('需求 ID 不合法');
+  if (id === undefined && drafts(taskDrafts).length === 0) throw new WorkbenchInputError('请至少拆出一条待办草稿');
+
+  let normalized: Record<string, unknown>;
+  try {
+    normalized = validateFields('requirements', { title, note, priority, taskDrafts, sourceSessionId },
+      id === undefined ? undefined : { partial: true });
+  } catch (error) {
+    throw new WorkbenchInputError(error instanceof Error ? error.message : String(error));
+  }
+  const params: Record<string, unknown> = {};
+  if (id !== undefined) params.id = id;
+  for (const key of ['title', 'note', 'priority', 'taskDrafts']) {
+    if (Object.hasOwn(normalized, key)) params[key] = normalized[key];
+  }
+  return {
+    params,
+    fingerprint: { operation: id === undefined ? 'create' : 'update', params },
+  };
 }
 
 function requirement(store: WorkbenchStore, id: string): RecordRow {
