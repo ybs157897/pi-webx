@@ -8,8 +8,8 @@ import { isRestrictedAgentTool } from '../agent-definitions';
 // denied. `team-types.ts` imports nothing, so this stays a leaf dependency.
 import { TEAM_WORKER_FORBIDDEN_TOOL_NAMES } from '../agent-team/team-types';
 import { SubagentCapacity, SubagentCapacityError, type WorkerSlot } from './subagent-capacity';
-import { SubagentRunError } from './subagent-error';
-import { executeWorkerSession, type WorkerSessionLike } from './subagent-execution';
+import { SubagentRunError, type SubagentUsageTotals } from './subagent-error';
+import { executeWorkerSession, type WorkerSessionLike, type WorkerUsageState } from './subagent-execution';
 import { SubagentLifecycle } from './subagent-lifecycle';
 import { createWorkerSession, disposeWorkerSession, resolveWorkerModel, type SubagentParentContext, type WorkerSessionOptions } from './subagent-session';
 import type { ExtensionUiScope } from './extension-ui';
@@ -44,12 +44,19 @@ interface LiveRun {
   readonly responded: Promise<void>;
 }
 
-function runError(error: unknown, runId: string): SubagentRunError {
-  if (error instanceof SubagentRunError) return error.withRunId(runId);
+function runError(error: unknown, runId: string, usage?: SubagentUsageTotals): SubagentRunError {
+  if (error instanceof SubagentRunError) {
+    // The loop already attaches usage on the paths it controls; fill it in only
+    // when the winning error came from somewhere else (a raw prompt rejection,
+    // or the lifecycle's own timeout reason, which bypasses the loop's throws).
+    let next = error.withRunId(runId);
+    if (usage !== undefined && next.usage === undefined) next = next.withUsage(usage);
+    return next;
+  }
   if (error instanceof SubagentCapacityError) {
     return new SubagentRunError('capacity-full', error.message, undefined, runId);
   }
-  return new SubagentRunError('model-error', `子智能体启动或执行失败：${error instanceof Error ? error.message : String(error)}`, undefined, runId);
+  return new SubagentRunError('model-error', `子智能体启动或执行失败：${error instanceof Error ? error.message : String(error)}`, undefined, runId, usage);
 }
 
 export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): SubagentWorkerRunner {
@@ -71,6 +78,11 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
       const runId = randomUUID();
       const startedAt = now();
       const lifecycle = new SubagentLifecycle(request.signal, deps.timeoutMs ?? DEFAULT_WORKER_TIMEOUT_MS);
+      // Held here, not inside the loop, so every failure exit below sees the
+      // same snapshot: a lifecycle timeout wins with its own reason, and a raw
+      // prompt rejection bypasses the loop's throws entirely — both would
+      // otherwise leave the run's usage behind.
+      const usageState: WorkerUsageState = {};
       let respond!: () => void;
       const responded = new Promise<void>((resolve) => { respond = resolve; });
       runs.set(runId, { parentId: parent.sessionId, lifecycle, responded });
@@ -115,6 +127,12 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
               // `customTools`, so they were registered and immediately excluded.
               ...(request.memberTools === undefined ? {} : { memberTools: request.memberTools }),
               ...(request.isolateCodingTools === true ? { isolateCodingTools: true } : {}),
+              // The pilot payload is passed, never re-derived: eligibility was
+              // settled at the ordinary dispatch entrance, and this shared runner
+              // also serves Team members, who must never mount it.
+              ...(request.exploreCodemode === undefined
+                ? {}
+                : { extensionFactories: request.exploreCodemode.extensionFactories }),
               denied: [...new Set([
                 SUBAGENT_TOOL_NAME,
                 ...TEAM_WORKER_FORBIDDEN_TOOL_NAMES,
@@ -131,7 +149,7 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
               throw new SubagentRunError('unavailable-tools', `子智能体「${request.definition.name}」缺少定义要求的工具：${unavailable.join('、')}。`);
             }
             lifecycle.enter('running');
-            const outcome = await executeWorkerSession(session, { ...request, signal });
+            const outcome = await executeWorkerSession(session, { ...request, signal }, usageState);
             signal.throwIfAborted();
             return {
               ...outcome, runId, model: { provider: model.provider, id: model.id }, effectiveTools,
@@ -147,7 +165,7 @@ export function createSubagentWorkerDispatch(deps: SubagentWorkerDeps): Subagent
           }
         });
       } catch (error) {
-        throw runError(error, runId);
+        throw runError(error, runId, usageState.current);
       } finally {
         respond();
       }

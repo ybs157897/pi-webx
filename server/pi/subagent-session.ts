@@ -1,7 +1,7 @@
 /** SDK session composition. No scheduling or host session registry access. */
 import {
   createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager,
-  type AgentSession, type ModelRuntime, type ExtensionUIContext, type ToolDefinition,
+  type AgentSession, type ModelRuntime, type ExtensionFactory, type ExtensionUIContext, type ToolDefinition,
 } from '@earendil-works/pi-coding-agent';
 import type { Model } from '@earendil-works/pi-ai';
 import type { FrozenDefinition } from './subagent-tool';
@@ -110,6 +110,16 @@ export interface WorkerSessionOptions {
   readonly memberTools?: readonly ToolDefinition[];
   /** Replace built-in coding tools with sandboxed subprocess calls for Team members. */
   readonly isolateCodingTools?: boolean;
+  /**
+   * Extension factories the worker loader mounts as inline extensions.
+   *
+   * One caller only: the ordinary `subagent` path, carrying the explore codemode
+   * pilot's factories (nested-call guard + the tool itself). The Team runtime
+   * never sets it — and note `noExtensions: true` does **not** silence explicit
+   * factories (the SDK still runs `loadExtensionFactories`), so not passing them
+   * is the only thing that keeps a Team member without them.
+   */
+  readonly extensionFactories?: readonly ExtensionFactory[];
 }
 
 /**
@@ -139,6 +149,7 @@ export async function createWorkerSession(options: WorkerSessionOptions): Promis
     noExtensions: options.isolateCodingTools === true,
     noPromptTemplates: true,
     noThemes: true,
+    ...(options.extensionFactories === undefined ? {} : { extensionFactories: [...options.extensionFactories] }),
     // `noContextFiles` is the SDK's switch for the project's `AGENTS.md` files
     // (`resource-loader.js`: `noContextFiles ? [] : loadProjectContextFiles(...)`;
     // there is no finer AGENTS.md-only flag). Off by default: a definition runs

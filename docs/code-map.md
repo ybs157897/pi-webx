@@ -116,6 +116,7 @@
 | HTTP 路由 | `server/agent-definitions-routes.ts` |
 | 内置智能体 | `server/builtin-agents.ts` |
 | pi 侧执行（worker/生命周期/容量/边界） | `server/pi/subagent-*.ts`（tool/worker/session/lifecycle/execution/capacity/error） |
+| explore codemode 试点（pi 1.0 codemode 工具的宿主显式授权 + 嵌套调用上限；`PI_EXPLORE_CODEMODE=1` 只对内置 explore 生效） | `server/pi/subagent-codemode-pilot.ts`，门禁 `scripts/check-explore-codemode.ts` |
 
 ### 多智能体团队（agent-team）
 

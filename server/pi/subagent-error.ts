@@ -12,16 +12,37 @@ export type SubagentRunCode =
   | 'no-output'
   | 'unavailable-tools';
 
+/**
+ * Token totals observed on a worker run. Defined here (a leaf module) so both a
+ * successful outcome and a {@link SubagentRunError} can carry the same shape —
+ * a failed run must stay comparable with a successful one, or the cheaper arm of
+ * any A/B loses its failure samples.
+ */
+export interface SubagentUsageTotals {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number;
+  readonly cacheWrite: number;
+}
+
 /** A failed worker run, carrying whatever text the worker did produce. */
 export class SubagentRunError extends Error {
   readonly code: SubagentRunCode;
   readonly partialText: string | undefined;
   /** Identity of the run, once one was allocated, so a failure is traceable. */
   readonly runId: string | undefined;
+  /** Usage accumulated before the failure; kept through re-wrapping. */
+  readonly usage: SubagentUsageTotals | undefined;
   /** The failure without its partial-output appendix, for re-wrapping. */
   private readonly brief: string;
 
-  constructor(code: SubagentRunCode, message: string, partialText?: string, runId?: string) {
+  constructor(
+    code: SubagentRunCode,
+    message: string,
+    partialText?: string,
+    runId?: string,
+    usage?: SubagentUsageTotals,
+  ) {
     super(partialText === undefined || partialText.length === 0
       ? message
       : `${message}\n\n部分输出（可能不完整）：\n${partialText}`);
@@ -29,12 +50,18 @@ export class SubagentRunError extends Error {
     this.code = code;
     this.partialText = partialText;
     this.runId = runId;
+    this.usage = usage;
     this.brief = message;
   }
 
   /** The same failure, now that the run it belongs to has an identity. */
   withRunId(runId: string): SubagentRunError {
-    return new SubagentRunError(this.code, this.brief, this.partialText, runId);
+    return new SubagentRunError(this.code, this.brief, this.partialText, runId, this.usage);
+  }
+
+  /** The same failure with the usage the run had accumulated before it died. */
+  withUsage(usage: SubagentUsageTotals): SubagentRunError {
+    return new SubagentRunError(this.code, this.brief, this.partialText, this.runId, usage);
   }
 }
 

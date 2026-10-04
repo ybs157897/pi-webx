@@ -37,6 +37,16 @@ import {
   type AgentToolPolicy,
 } from '../../src/shared/agent-definitions';
 import { isRestrictedAgentTool } from '../agent-definitions';
+import type { SubagentUsageTotals } from './subagent-error';
+import {
+  codemodeStatsSummary,
+  exploreCodemodeEnabled,
+  exploreCodemodeGrant,
+  HOST_EXCLUSIVE_CHILD_TOOLS,
+  type CodemodePilotStats,
+  type ExploreCodemodeGrant,
+} from './subagent-codemode-pilot';
+import type { ExtensionFactory } from '@earendil-works/pi-coding-agent';
 
 /** Longest `agentId` the tool accepts; matches the store's UUID-shaped ids. */
 export const MAX_AGENT_ID_LENGTH = 128;
@@ -134,6 +144,13 @@ export interface SubagentDispatchOutcome {
   readonly durationMs: number;
   readonly truncated: boolean;
   /**
+   * Token totals summed over the worker's assistant turns. Optional because a
+   * dispatcher that never built a real session (a test double) has nothing to
+   * report; a real run reports it on success **and** failure so both arms of a
+   * comparison keep their samples.
+   */
+  readonly usage?: SubagentUsageTotals;
+  /**
    * Requested tools the child turned out not to have.
    *
    * Optional because it is computed from the child's real registry: a dispatcher
@@ -165,6 +182,17 @@ export interface SubagentDispatchRequest {
   readonly memberTools?: readonly ToolDefinition[];
   /** Team coding tools must run in an OS sandbox; ordinary subagents keep their existing path. */
   readonly isolateCodingTools?: boolean;
+  /**
+   * Explore codemode pilot payload. Computed once at the ordinary dispatch
+   * entrance and passed down; the Team runtime never sets it, so re-judging
+   * eligibility anywhere below would be the only way to get this wrong.
+   */
+  readonly exploreCodemode?: {
+    /** Worker loader mounts these; the call counter first, the tool second. */
+    readonly extensionFactories: readonly ExtensionFactory[];
+    /** Mutated during the run; read when the result (or failure) is framed. */
+    readonly stats: CodemodePilotStats;
+  };
 }
 
 /** What the tool needs from the host. Everything here is injected, nothing imported. */
@@ -337,30 +365,51 @@ export function renderSubagentToolDescription(definitions: readonly FrozenDefini
  * `all` yields the parent's active set — never its registered catalogue — so it
  * is a ceiling and cannot widen the parent's reach.
  *
- * `selected` yields the names the definition asked for, with one exception:
+ * `selected` yields the names the definition asked for, with two exceptions:
  * {@link READ_ONLY_CHILD_TOOLS} do not have to be active in the parent, because
- * a read-only specialist is the case worth having in a minimal session. Every
- * other name still has to be active here, so a definition can never hand a child
+ * a read-only specialist is the case worth having in a minimal session; and a
+ * name the **host explicitly granted** for this dispatch (the explore codemode
+ * pilot) is permitted without parent activation. Host-exclusive names
+ * ({@link HOST_EXCLUSIVE_CHILD_TOOLS}) answer to the grant alone — parent
+ * activation never admits them, in either policy mode. A grant is scoped to the
+ * one dispatch it was computed for, never widens another definition, and — like
+ * the exemption — cannot bypass the restricted-tool exclusion below. Every other
+ * name still has to be active here, so a definition can never hand a child
  * a command or a write the parent itself was not allowed. Names that stay
  * unavailable are reported rather than granted — a definition is configuration,
  * not an authorisation — and every dispatch name is removed either way.
  *
- * Whether an exempt name actually exists is settled one layer down: the child's
- * own registry decides, and a `selected` definition whose tools are missing
- * there fails the dispatch instead of running with less than it asked for.
+ * Whether an exempt or granted name actually exists is settled one layer down:
+ * the child's own registry decides, and a `selected` definition whose tools are
+ * missing there fails the dispatch instead of running with less than it asked
+ * for.
  *
  * @param policy - the definition's tool allowance.
  * @param parentActiveTools - what the parent session may use right now.
+ * @param hostGrantedTools - host-granted names for this dispatch only; the
+ *   default keeps every existing caller (Team, user-defined) byte-identical.
  * @returns the child's allowlist, plus what was refused and why.
  */
-export function planToolSurface(policy: AgentToolPolicy, parentActiveTools: readonly string[]): ToolSurface {
+export function planToolSurface(
+  policy: AgentToolPolicy,
+  parentActiveTools: readonly string[],
+  hostGrantedTools: readonly string[] = [],
+): ToolSurface {
   const active = new Set(parentActiveTools);
+  const granted = new Set(hostGrantedTools);
   const requested = [...new Set(policy.mode === 'all' ? [...parentActiveTools] : [...policy.names])];
   const excluded = requested.filter((name) => isRestrictedAgentTool(name));
   const allowed = requested.filter((name) => !isRestrictedAgentTool(name));
+  // Host-exclusive names (the codemode pilot) answer to the grant alone: a
+  // parent that happens to have one active must not leak it into a `selected`
+  // definition that merely names it, nor into an `all` inheritance. They are not
+  // restricted names — a grant still admits them — they just have exactly one
+  // authorization source.
   const permitted = policy.mode === 'all'
-    ? allowed.filter((name) => active.has(name))
-    : allowed.filter((name) => isReadOnlyChildTool(name) || active.has(name));
+    ? allowed.filter((name) => active.has(name) && !HOST_EXCLUSIVE_CHILD_TOOLS.has(name))
+    : allowed.filter((name) => (HOST_EXCLUSIVE_CHILD_TOOLS.has(name)
+      ? granted.has(name)
+      : isReadOnlyChildTool(name) || active.has(name) || granted.has(name)));
   return {
     toolNames: permitted,
     excluded,
@@ -436,11 +485,13 @@ function attributedFailure(error: unknown, identity: {
   readonly agentId?: string;
   readonly definitionRevision?: number;
   readonly name?: string;
-}): SubagentFailureError {
+}, codemodeStats?: CodemodePilotStats): SubagentFailureError {
   const reason = failureReason(error);
   const message = error instanceof Error ? error.message : String(error);
   const runIdField = fieldOf(error, 'runId');
   const runId = typeof runIdField === 'string' ? runIdField : undefined;
+  const usageField = fieldOf(error, 'usage');
+  const usage = usageField === undefined ? undefined : usageSummary(usageField);
   const label = identity.name === undefined
     ? identity.agentId
     : `${safeLine(identity.name, 64)} (${identity.agentId})`;
@@ -449,9 +500,31 @@ function attributedFailure(error: unknown, identity: {
     identity.definitionRevision === undefined ? undefined : `definitionRevision=${identity.definitionRevision}`,
     runId === undefined ? undefined : `runId=${runId}`,
     `reason=${reason}`,
+    usage === undefined ? undefined : `usage=${usage}`,
+    codemodeStats === undefined ? undefined : `codemode=${codemodeStatsSummary(codemodeStats)}`,
   ].filter((field): field is string => field !== undefined);
   const text = `[subagent failed${label === undefined ? '' : `: ${label}`}] ${message} (${fields.join(' ')})`;
   return new SubagentFailureError(reason, text, runId, error);
+}
+
+/** `usage=in/out/cacheRead/cacheWrite`, rounded through `Math.round` for one bounded field. */
+function usageSummary(usage: unknown): string | undefined {
+  if (typeof usage !== 'object' || usage === null) return undefined;
+  const record = usage as Record<string, unknown>;
+  const pick = (key: string): number | undefined => {
+    const value = record[key];
+    return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+  };
+  const input = pick('input');
+  const output = pick('output');
+  if (input === undefined && output === undefined) return undefined;
+  const parts = [
+    `in=${input ?? 0}`,
+    `out=${output ?? 0}`,
+    ...(pick('cacheRead') === undefined ? [] : [`cacheRead=${pick('cacheRead')}`]),
+    ...(pick('cacheWrite') === undefined ? [] : [`cacheWrite=${pick('cacheWrite')}`]),
+  ];
+  return parts.join('/');
 }
 
 /** One short progress line. Never carries definition text, keys or reasoning. */
@@ -533,6 +606,10 @@ export function createSubagentTool(
       let seenAgentId: string | undefined;
       let seenRevision: number | undefined;
       let seenName: string | undefined;
+      // Hoisted so the failure path can fold the pilot's counters into the error
+      // message — a thrown dispatch loses `details`, and a failed run must keep
+      // its samples to stay comparable with a successful one.
+      let codemodeGrant: ExploreCodemodeGrant | undefined;
       try {
         // Best effort, for diagnostics only: an argument error should still say
         // which id was meant when the caller supplied one.
@@ -565,17 +642,49 @@ export function createSubagentTool(
         }
 
         const definition = freezeDefinition(stored);
-        const surface = planToolSurface(definition.tools, deps.parentActiveTools());
-        if (definition.tools.mode === 'selected' && surface.unavailable.length > 0) {
+        /**
+         * 试点资格在普通派发入口计算一次，此后只传结果：开关开 + 内置
+         * explore + `selected` 三者同时成立才授予。存库定义保持四工具不动，
+         * 这里推导出的 effective 定义只活在本次派发里，Team（复用同一份
+         * 定义但不走这个入口）与所有钉住四工具的门禁都不受影响。
+         */
+        codemodeGrant = exploreCodemodeGrant(definition, exploreCodemodeEnabled());
+        // The `selected` re-check is redundant (a grant implies it) but gives the
+        // narrowing that reads `names` off the policy safely.
+        const effective: FrozenDefinition = codemodeGrant !== undefined && definition.tools.mode === 'selected'
+          ? {
+            ...definition,
+            tools: { mode: 'selected', names: [...definition.tools.names, codemodeGrant.toolName] },
+          }
+          : definition;
+        const surface = planToolSurface(
+          effective.tools,
+          deps.parentActiveTools(),
+          codemodeGrant?.hostGrantedTools ?? [],
+        );
+        if (effective.tools.mode === 'selected' && surface.unavailable.length > 0) {
           throw new SubagentFailureError('unavailable-tools',
             `子智能体「${definition.name}」缺少父会话授权的工具：${surface.unavailable.join('、')}。请调整定义或父会话工具选择。`);
         }
         const update = (note: string): void => {
-          onUpdate?.({ content: [{ type: 'text', text: progressNote(definition, note) }], details: {} });
+          onUpdate?.({ content: [{ type: 'text', text: progressNote(effective, note) }], details: {} });
         };
-        update(`开始执行（最多 ${definition.maxTurns} 轮）。`);
+        update(`开始执行（最多 ${effective.maxTurns} 轮）。`);
 
-        const outcome = await deps.dispatch({ definition, task, surface, signal, onUpdate: update, toolCallId });
+        const outcome = await deps.dispatch({
+          definition: effective,
+          task,
+          surface,
+          signal,
+          onUpdate: update,
+          toolCallId,
+          ...(codemodeGrant === undefined ? {} : {
+            exploreCodemode: {
+              extensionFactories: codemodeGrant.extensionFactories,
+              stats: codemodeGrant.stats,
+            },
+          }),
+        });
         // Two different things can be missing, and the parent is owed both:
         // tools this session never had (`surface.unavailable`), and tools it does
         // have but the child did not end up with — either because the dispatcher
@@ -587,7 +696,7 @@ export function createSubagentTool(
           ...surface.toolNames.filter((name) => !outcome.effectiveTools.includes(name)),
         ]);
         return {
-          content: [{ type: 'text', text: frameWorkerOutput(outcome, definition)
+          content: [{ type: 'text', text: frameWorkerOutput(outcome, effective)
             + (unavailable.size === 0 ? '' : `\n[Unavailable tools: ${[...unavailable].join(', ')}. Worker output was produced without these tools.]`) }],
           details: {
             agentId: definition.id,
@@ -598,6 +707,8 @@ export function createSubagentTool(
             turns: outcome.turns,
             durationMs: outcome.durationMs,
             truncated: outcome.truncated,
+            ...(outcome.usage === undefined ? {} : { usage: outcome.usage }),
+            ...(codemodeGrant === undefined ? {} : { codemode: { ...codemodeGrant.stats } }),
             ...(unavailable.size === 0 ? {} : { unavailableTools: [...unavailable] }),
             ...(surface.excluded.length === 0 ? {} : { excludedTools: [...surface.excluded] }),
           },
@@ -607,7 +718,7 @@ export function createSubagentTool(
           ...(seenAgentId === undefined ? {} : { agentId: seenAgentId }),
           ...(seenRevision === undefined ? {} : { definitionRevision: seenRevision }),
           ...(seenName === undefined ? {} : { name: seenName }),
-        });
+        }, codemodeGrant === undefined ? undefined : codemodeGrant.stats);
       }
     },
   };
