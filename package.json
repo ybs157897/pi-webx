@@ -4,6 +4,9 @@
   "version": "0.1.0",
   "type": "module",
   "description": "Web UI for the local pi coding agent, built with LobeHub UI",
+  "engines": {
+    "node": ">=22.19.0"
+  },
   "scripts": {
     "dev": "concurrently -n server,web -c blue,magenta \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "tsx watch server/index.ts",
@@ -33,8 +36,8 @@
     "dev:requirement-trace-fixture": "tsx scripts/requirement-trace-browser-fixture.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^0.87.1",
-    "@earendil-works/pi-coding-agent": "^0.87.1",
+    "@earendil-works/pi-ai": "^1.0.0",
+    "@earendil-works/pi-coding-agent": "^1.0.0",
     "@jboltai/tokui": "^0.2.6",
     "@landstrip/landstrip-api": "0.19.2",
     "@lobehub/fluent-emoji": "^4.1.1",
