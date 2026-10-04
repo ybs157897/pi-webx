@@ -47,6 +47,22 @@ if (process.platform === 'win32') {
     assert.ok(tool, `isolated ${name} is registered`);
     return tool.execute(`check-${name}`, params as never, undefined, undefined, {} as never);
   };
+  /**
+   * pi 1.0 起 bash/powershell 工具对非零退出从 rejection 改为 resolve + isError，
+   * 「被沙箱拒绝」因此有两种合法形态：promise 以 EPERM 文本拒绝，或 resolve 出
+   * isError 结果且错误文本可见。门禁认的是「操作没得逞」，两种形态都必须命中模式。
+   */
+  const assertDenied = async (attempt: Promise<unknown>, pattern: RegExp, what: string): Promise<void> => {
+    try {
+      const result = (await attempt) as { content?: unknown; isError?: boolean } | undefined;
+      const text = JSON.stringify(result?.content ?? result);
+      assert.ok(result?.isError === true, `${what}: 期望 isError 工具结果，实际 ${text.slice(0, 200)}`);
+      assert.match(text, pattern, `${what}: 拒绝原因必须回到调用方`);
+    } catch (cause) {
+      if (cause instanceof assert.AssertionError) throw cause;
+      assert.match(String((cause as Error)?.message ?? cause), pattern, what);
+    }
+  };
   const server = createServer((_req, res) => { requests += 1; res.end('management API reached'); });
   let requests = 0;
   try {
@@ -77,8 +93,8 @@ if (process.platform === 'win32') {
     await assert.rejects(call('read', { path: join(agentDir, 'agent-definitions.json') }), /Operation not permitted|permission denied/i);
     await assert.rejects(call('write', { path: join(agentDir, 'agent-definitions.json'), content: 'changed' }), /Operation not permitted|permission denied/i);
     await assert.rejects(call('read', { path: 'escape/agent-definitions.json' }), /Operation not permitted|permission denied/i);
-    await assert.rejects(call('bash', { command: `cat '${join(agentDir, 'agent-definitions.json')}'` }), /Operation not permitted|permission denied/i);
-    await assert.rejects(call('bash', { command: `printf changed > '${join(agentDir, 'agent-definitions.json')}'` }), /Operation not permitted|permission denied/i);
+    await assertDenied(call('bash', { command: `cat '${join(agentDir, 'agent-definitions.json')}'` }), /Operation not permitted|permission denied/i, '沙箱内 bash 读定义库被拒');
+    await assertDenied(call('bash', { command: `printf changed > '${join(agentDir, 'agent-definitions.json')}'` }), /Operation not permitted|permission denied/i, '沙箱内 bash 写定义库被拒');
     await assert.rejects(call('write', { path: 'outside/guard.txt', content: 'changed' }), /Operation not permitted|permission denied/i);
     assert.equal(readFileSync(join(agentDir, 'agent-definitions.json'), 'utf8'), 'protected definition');
     assert.equal(readFileSync(join(outside, 'guard.txt'), 'utf8'), 'outside original');
@@ -91,9 +107,10 @@ if (process.platform === 'win32') {
     assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200, 'positive control: host API is reachable');
     assert.equal(requests, 1);
     for (const target of ['127.0.0.1', '0.0.0.0', 'localhost']) {
-      await assert.rejects(
+      await assertDenied(
         call('bash', { command: `/usr/bin/curl --noproxy '*' --silent --show-error --max-time 3 http://${target}:${port}/manage` }),
         /Failed to connect|Operation not permitted|denied/i,
+        `沙箱内 bash 无法经 ${target} 触达管理端点`,
       );
       assert.equal(requests, 1, `the sandboxed shell never reached the management endpoint via ${target}`);
     }
@@ -102,9 +119,10 @@ if (process.platform === 'win32') {
     const hostProcess = spawn('/bin/sleep', ['30']);
     try {
       assert.ok(hostProcess.pid);
-      await assert.rejects(
+      await assertDenied(
         call('bash', { command: `kill -TERM ${hostProcess.pid}` }),
         /Operation not permitted|permission denied/i,
+        '沙箱内 bash 无法向宿主进程发信号',
       );
       assert.equal(hostProcess.exitCode, null, 'the sandboxed shell cannot signal a host process');
       console.log('ok   host processes cannot be signalled from the sandbox');

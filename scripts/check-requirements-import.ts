@@ -128,7 +128,7 @@ try {
     expectedUpdatedAt: linked.updatedAt, tasks: [{ title: '防重任务' }],
   })).status, 409);
 
-  const tool = createRequirementsTools({ store, limits: { maxToolOutputChars: 24000 } })[0]!;
+  const tool = createRequirementsTools({ store, limits: { maxToolOutputChars: 24000 }, workspaceDir: dir })[0]!;
   const beforeTool = store.read().tasks.length;
   const toolResult = await tool.execute('call-1', { title: '工具草稿', taskDrafts: [{ title: '待确认' }] }, undefined, undefined,
     { sessionManager: { getSessionId: () => 'session-12345678' } } as any);

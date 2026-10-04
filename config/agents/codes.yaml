@@ -4,6 +4,7 @@ enabled: true
 promptFile: ./prompts/codes.md
 skills: []
 tools:
+  - requirements.context
   - read
   - grep
   - find

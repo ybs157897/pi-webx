@@ -174,6 +174,7 @@ export interface CreateHostedSessionOptions {
     customTools: ToolDefinition[];
     allowedToolNames: string[];
     systemPromptAppend: string[];
+    projectContextFiles?: Array<{ path: string; content: string }>;
     /** 装配期建立的外部资源回收钩子（MCP 连接等）。 */
     dispose?: () => Promise<void>;
   };

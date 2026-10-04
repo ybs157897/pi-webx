@@ -23,12 +23,15 @@ import { createKnowledgeAccess, ensureBinding } from './knowledge';
 import { connectMcp, type ConnectedMcp } from './mcp';
 import { moduleAgentDefinition, resolveToolNames } from './registry';
 import { boundSessionWorkspace } from './workspace';
+import { loadWorkspaceProjectContext, workspaceProjectPrompt } from './project-context';
 import { getChatroomService } from '../modules/chatroom/service';
 import { createChatroomTools } from '../modules/chatroom/tools';
 import { createAssistantCoordinationTool } from '../modules/assistant/coordination';
 import { createRequirementsDispatchTool } from '../modules/requirements/dispatch';
 import { createRequirementLifecycleTools } from '../modules/requirements/lifecycle-tools';
 import { createRequirementsFileTools } from '../modules/requirements/files';
+import { createRequirementsContextTool } from '../modules/requirements/tools';
+import { createRequirementProjection } from '../modules/requirements/projection';
 import { REQUIREMENTS_UNSCOPED_TOOLS, requirementsConversationPrompt, scopeRequirementsChatroomRead } from '../modules/requirements/conversation';
 
 export interface AssembleModuleAgentInput {
@@ -47,6 +50,7 @@ export interface AssembledModuleAgent {
   customTools: ToolDefinition[];
   allowedToolNames: string[];
   systemPromptAppend: string[];
+  projectContextFiles: Array<{ path: string; content: string }>;
   mcp: {
     connected: ConnectedMcp[];
     degraded: { id: string; error: string }[];
@@ -59,6 +63,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
   let workspaceDir: string;
   try { workspaceDir = await boundSessionWorkspace(profile, input.workspaceDir); }
   catch (error) { throw new HostError(503, error instanceof Error ? error.message : '模块工作区不可用'); }
+  const project = await loadWorkspaceProjectContext(workspaceDir);
   const definition = moduleAgentDefinition(agentId);
   if (definition === undefined) {
     throw new HostError(503, `模块 Agent「${agentId}」尚未注册实现`);
@@ -93,14 +98,20 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
       const cfg = profile.config.dataSources[kind];
       if (cfg && profile.config.tools.some(name => name.startsWith(`${kind}.`))) sources[kind] = registry.create(kind, cfg);
     }
-    produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits });
+    // 需求文档投影挂接在绑定工作区上；装配即对账一次，保存/派工成功后再增量刷新。
+    // await 而非 fire-and-forget：装配返回时写盘已完成，避免与调用方的目录清理竞争。
+    const projection = agentId === 'requirements' ? createRequirementProjection(store, workspaceDir) : undefined;
+    if (projection) await projection.sync().catch((error) => console.warn('[requirements] 需求投影对账失败', error));
+    produced = definition.createTools({ knowledge, store, sources, limits: profile.config.limits, projection, workspaceDir });
     const chatroom = getChatroomService(store, workspaceKey);
     produced.push(...createChatroomTools({ service: chatroom, agentId, limits: profile.config.limits })
       .filter(tool => agentId !== 'requirements' || tool.name !== 'chatroom_read'));
     produced.push(...createRequirementLifecycleTools({ store, chatroom, agentId, limits: profile.config.limits }));
     if (agentId === 'assistant') produced.push(createAssistantCoordinationTool(store, chatroom));
+    // 代码 Agent 的只读需求查询口：与需求 Agent 共用同一工具定义，不含保存/派工能力。
+    if (agentId === 'codes') produced.push(createRequirementsContextTool({ store, limits: profile.config.limits, workspaceDir }));
     if (agentId === 'requirements') {
-      produced.push(createRequirementsDispatchTool(store, chatroom), scopeRequirementsChatroomRead(chatroom, profile.config.limits.maxToolOutputChars));
+      produced.push(createRequirementsDispatchTool(store, chatroom, projection), scopeRequirementsChatroomRead(chatroom, profile.config.limits.maxToolOutputChars));
       produced.push(...createRequirementsFileTools(workspaceDir));
     }
     if (profile.skills.length) produced.push(skillTool(profile.skills));
@@ -126,7 +137,8 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
   // MCP 连接按声明顺序装配：required 失败整包失败并回收已连；其余记 degraded。
   const connected: ConnectedMcp[] = [];
   const degraded: { id: string; error: string }[] = [];
-  const systemPromptAppend: string[] = agentId === 'requirements' ? [requirementsConversationPrompt(store)] : [];
+  const systemPromptAppend: string[] = [workspaceProjectPrompt(project)];
+  if (agentId === 'requirements') systemPromptAppend.push(requirementsConversationPrompt(store, workspaceDir));
   const disposeAll = async () => {
     await disposeSources();
     for (const conn of connected.splice(0)) {
@@ -172,6 +184,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     // SDK 的 tools 是注册白名单：领域与 MCP 工具名由装配线补入，这里只给内置子集。
     allowedToolNames: resolved.filter((name) => BUILTIN_TOOL_NAMES.has(name) && !customTools.some(tool => tool.name === name)),
     systemPromptAppend,
+    projectContextFiles: project.instructions,
     mcp: { connected, degraded },
     dispose: disposeAll,
   };

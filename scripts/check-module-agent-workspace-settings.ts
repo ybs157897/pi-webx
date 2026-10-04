@@ -78,18 +78,24 @@ try {
   const missing = join(temp, 'missing');
   const file = join(temp, 'ordinary-file');
   await writeFile(file, 'not a directory');
-  for (const invalid of [missing, file, 'relative/workspace', join(temp, 'defaults')]) {
+  for (const invalid of [missing, file, 'relative/workspace']) {
     const response = await request('requirements', 'PUT', body(requirements.body, invalid));
     assert.equal(response.status, 400, JSON.stringify(response.body));
     assert.equal((await request('requirements')).body.revision, requirements.body.revision);
   }
-  for (const invalid of [custom, join(custom, 'nested')]) {
-    const response = await request('codes', 'PUT', body(codes.body, invalid));
-    assert.equal(response.status, 400, JSON.stringify(response.body));
+  let codesView = codes.body;
+  for (const shared of [custom, join(custom, 'nested')]) {
+    const response = await request('codes', 'PUT', body(codesView, shared));
+    assert.equal(response.status, 200, JSON.stringify(response.body));
+    assert.equal(response.body.workspace, shared, `codes may bind the logs workspace at ${shared}`);
+    codesView = response.body;
   }
   const alias = join(temp, 'custom-logs-alias');
   await symlink(custom, alias);
-  assert.equal((await request('codes', 'PUT', body(codes.body, alias))).status, 400);
+  const aliased = await request('codes', 'PUT', body(codesView, alias));
+  assert.equal(aliased.status, 200, JSON.stringify(aliased.body));
+  assert.equal(aliased.body.workspace, custom, 'symlinked binding canonicalizes into the shared directory');
+  codesView = aliased.body;
   assert.equal((await request('logs', 'PUT', body(logs.body, null))).status, 409, 'stale revision cannot reset binding');
 
   await rm(custom, { recursive: true });
@@ -106,15 +112,15 @@ try {
   await mkdir(common);
   const [left, right] = await Promise.all([
     request('logs', 'PUT', body(reset.body, common)),
-    request('codes', 'PUT', body(codes.body, common)),
+    request('codes', 'PUT', body(codesView, common)),
   ]);
-  assert.deepEqual([left.status, right.status].sort(), [200, 400], 'simultaneous module bindings cannot overlap');
-  const winner = left.status === 200 ? 'logs' : 'codes';
-  const loser = winner === 'logs' ? 'codes' : 'logs';
-  assert.equal((await request(winner)).body.workspacePath, common);
-  assert.equal((await request(loser)).body.workspace, null);
-  const winnerView = (await request(winner)).body;
-  assert.equal((await request(winner, 'PUT', body(winnerView, null))).status, 200);
+  assert.equal(left.status, 200, JSON.stringify(left.body));
+  assert.equal(right.status, 200, JSON.stringify(right.body));
+  assert.equal((await request('logs')).body.workspacePath, common);
+  assert.equal((await request('codes')).body.workspacePath, common, 'both agents share one workspace');
+  const winnerView = (await request('logs')).body;
+  assert.equal((await request('logs', 'PUT', body(winnerView, null))).status, 200);
+  assert.equal((await request('codes', 'PUT', body((await request('codes')).body, null))).status, 200);
 
   const rollbackPath = join(temp, 'rollback-custom');
   await mkdir(rollbackPath);
@@ -132,7 +138,7 @@ try {
   assert.deepEqual(await readFile(join(root, 'prompts/requirements.md')), promptBefore);
   assert.equal(rollbackProfiles.get('requirements'), previousProfile);
   assert.equal((await rollback.get('requirements')).workspace, null);
-  console.log('PASS 模块工作区设置：独立默认目录、HTTP 绑定与重置、缺失目录修复、重叠/符号链接拒绝、并发与回滚');
+  console.log('PASS 模块工作区设置：独立默认目录、HTTP 绑定与重置、缺失目录修复、跨 Agent 共享绑定与符号链接、并发与回滚');
 } finally {
   if (server) {
     server.closeAllConnections();

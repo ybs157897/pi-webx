@@ -55,6 +55,20 @@ if (process.platform !== 'win32') {
       assert.ok(tool, `${name} is registered`);
       return tool.execute(`win-${name}`, params as never, signal, undefined, {} as never);
     };
+    /**
+     * pi 1.0 起 powershell 工具对非零退出从 rejection 改为 resolve + isError，
+     * 被 AppContainer 拒绝的命令两种形态都算「没得逞」，错误文本必须命中模式。
+     */
+    const assertDenied = async (attempt: Promise<unknown>, what: string): Promise<void> => {
+      try {
+        const result = (await attempt) as { content?: unknown; isError?: boolean } | undefined;
+        const text = JSON.stringify(result?.content ?? result);
+        assert.ok(result?.isError === true, `${what}: 期望 isError 工具结果，实际 ${text.slice(0, 200)}`);
+      } catch (cause) {
+        if (cause instanceof assert.AssertionError) throw cause;
+        assert.ok(true, `${what}: rejected with ${String((cause as Error)?.message ?? cause).slice(0, 200)}`);
+      }
+    };
 
     await call('write', { path: 'ok.txt', content: 'hello Windows Team' });
     await call('edit', { path: 'ok.txt', edits: [{ oldText: 'hello', newText: 'edited' }] });
@@ -70,7 +84,7 @@ if (process.platform !== 'win32') {
     await assert.rejects(call('write', { path: protectedFile, content: 'changed' }));
     await assert.rejects(call('read', { path: 'escape\\agent-definitions.json' }));
     await assert.rejects(call('write', { path: 'outside\\guard.txt', content: 'changed' }));
-    await assert.rejects(call('powershell', { command: `Set-Content -LiteralPath '${protectedFile}' -Value changed -ErrorAction Stop` }));
+    await assertDenied(call('powershell', { command: `Set-Content -LiteralPath '${protectedFile}' -Value changed -ErrorAction Stop` }), 'AppContainer 内 powershell 写定义库被拒');
     assert.equal(readFileSync(protectedFile, 'utf8'), 'protected definition');
     assert.equal(readFileSync(join(outside, 'guard.txt'), 'utf8'), 'outside original');
     console.log('ok   Windows AppContainer refuses direct and junction access to the Agent store');
@@ -81,16 +95,16 @@ if (process.platform !== 'win32') {
     const port = address.port;
     assert.equal((await fetch(`http://127.0.0.1:${port}/health`)).status, 200);
     assert.equal(requests, 1);
-    await assert.rejects(call('powershell', {
+    await assertDenied(call('powershell', {
       command: `Invoke-WebRequest -UseBasicParsing -Uri 'http://127.0.0.1:${port}/manage' -TimeoutSec 3 -ErrorAction Stop`,
-    }));
+    }), 'AppContainer 内 powershell 无法触达管理端点');
     assert.equal(requests, 1, 'the AppContainer cannot reach the host management listener');
     console.log('ok   Windows AppContainer has no host loopback access');
 
     const hostProcess = spawn('powershell.exe', ['-NoProfile', '-Command', 'Start-Sleep -Seconds 30']);
     try {
       assert.ok(hostProcess.pid);
-      await assert.rejects(call('powershell', { command: `Stop-Process -Id ${hostProcess.pid} -Force -ErrorAction Stop` }));
+      await assertDenied(call('powershell', { command: `Stop-Process -Id ${hostProcess.pid} -Force -ErrorAction Stop` }), 'AppContainer 内 powershell 无法停止宿主进程');
       assert.equal(hostProcess.exitCode, null, 'the AppContainer cannot stop a host process');
     } finally {
       hostProcess.kill('SIGTERM');

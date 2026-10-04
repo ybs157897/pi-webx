@@ -14,10 +14,10 @@
 ## 实现边界
 
 - 会话、配置、提示词沿用模块 Agent 装配机制，配置仍在 `config/agents/requirements.yaml`。
-- 装配时附加服务端工作台上下文：当前宿主与入口、已有需求的有限摘要；宿主应用不自动成为用户本次要改的目标。用户的“这个/这里/它”无法从本轮或同话题信息唯一确定时，读取需求 Skill 后立即澄清，不先搜盘猜项目。
-- `requirements_context` 只读公开需求，按真实 ID 核对正文与版本，或按主题有限查询；不会返回会话路径、私有对话、其他模块的待办或知识正文。查询结果不代表选中需求或获得实施授权。
+- 每个模块 Agent 将绑定的整个工作区视为当前项目；“当前项目/这个项目/这里”默认指此目录，不因根内包含多个模块而再次询问项目名。公共装配注入真实路径与目录标识，仅加载绑定根的 AGENTS.md、CLAUDE.md 及 local 指令；需求上下文的 target 固定为 bound-project，并提供需求库有限摘要。需要了解用途、技术栈或功能时，可在绑定项目内读取 README、配置和相关材料；仅在无法自行核实且会改变业务行为或验收时澄清。
+- `requirements_context` 提供绑定项目身份并只读公开需求，按真实 ID 核对正文与版本，或按主题有限查询；不会返回会话路径、私有对话、其他模块的待办或知识正文。查询结果不代表选中需求或获得实施授权。
 - 需求会话的 `read/write/edit/ls` 使用绑定工作区的路径校验，包括绝对路径、父目录和符号链接。需求会话不装配 shell、grep、find；恢复旧配置快照时同样移除这些未限定范围的工具。工作区外材料由用户附件提供。
-- 需求 Agent 的 `chatroom_read` 仅在当前群投递内读取该话题公开消息；普通页面查询工作台需求使用 `requirements_context`。其他模块原有工具能力不受这项需求会话策略影响。
+- 需求 Agent 的 `chatroom_read` 仅在当前群投递内读取该话题公开消息；普通页面查询已有需求记录使用 `requirements_context`。其他模块原有工具能力不受这项需求会话策略影响。
 - `requirements_save_draft` 由 SDK 上下文注入 `sourceSessionId`，不能修改其它会话的草稿；普通记录 POST/PATCH 不接受客户端指定来源会话。
 - 保存工具支持可选 `entryKey`：同一逻辑保存重试保持键和参数不变，不同保存使用新键；省略时仅按当前会话的 SDK `toolCallId` 识别同一次调用重放。需求、版本、成功回执和调用别名在同一 SQLite immediate transaction 中提交，失败整体回滚。重启后同次重试返回原记录/版本和 `alreadySaved:true`；同键参数变化返回 409。回执是历史成功快照，不覆盖后续修改，不重建已删除记录，也不扩大归属或已导入保护。
 - `taskDrafts` 是最多 20 项的结构化数组，不从 Markdown 猜测或解析待办。
@@ -26,6 +26,16 @@
 - `updatedAt` 保持单调，以识别同一毫秒发生的修订。部分任务写入失败时整批回滚。
 - 保存成功但刷新列表失败时，弹窗明确提示已经保存并锁定条目；「重新加载待办」只重试读取。
 - 需求对话是页面中的 region，导航保持可用；导入预览是模态对话框，提供初始焦点、Tab 圈定、Esc 和焦点恢复。
+
+## 需求文档投影与跨 Agent 读取（2026-10-03）
+
+- 设计定位：需求记录的真相源始终是 SQLite 需求库；绑定工作区下的 `requirements/` 是它的单向只读投影（`server/modules/requirements/projection.ts`），供人阅读、git 追踪和普通文件工具读取，不承载可编辑状态，也不反向写库。投影可确定性重建：按 `requirement_projection_meta.mutation_cursor` 对账 `workbench_mutations` 中 `module='requirements'` 的增量，一次事务查齐对账数据后写盘，整批成功才推进游标；中途失败游标不动，重跑覆盖同一批文件并得到等价结果，因此可重复调用、幂等。数据集替换（`module='*'`）按批次边界推进游标，不为已不存在的记录补目录。
+- 目录结构：根 `README.md` 声明只读规则与生成规则；`REQ-XXXXXX/requirement.md` 渲染需求当前快照（真实需求 ID、展示编号、状态、优先级、当前版本、更新时间、备注正文、待办草稿），需求删除后目录保留并在状态中标记 `deleted`（审计保留）；`REQ-XXXXXX/changes.md` 渲染版本与事件时间线（版本号、时间节点、事件类型与摘要）。展示编号与生命周期一致：`REQ-` + roots.seq 左补零 6 位。
+- 写保护：需求会话的文件工具对 `<工作区>/requirements/` 前缀的 write/edit/mkdir 一律拒绝，错误文案为「需求投影目录由需求库自动维护，只读；请通过需求工具更新需求记录。」；read/ls 放行。判定使用路径归一化后的 canonical 路径，相对路径或符号链接别名不能绕过。
+- 刷新时机与滞后：需求会话装配时对账一次，`requirements_save_draft` 与 `requirements_dispatch` 成功后等待本次刷新完成再返回（刷新失败只记日志，不回滚已保存的需求）。界面直接修改需求记录的路径不触发投影，因此投影可能滞后到下一次装配或需求工具调用；界面与 `requirements_context` 都读需求库当前记录，两者不一致时以需求库为准。
+- 跨 Agent 只读读取：`config/agents/codes.yaml` 的 tools 新增 `requirements.context`；装配后代码开发会话获得 `requirements_context`（与需求 Agent 共用 `server/modules/requirements/tools.ts` 的 `createRequirementsContextTool`）。能力为按真实 requirementId 读取单条公开需求（备注摘要、待办草稿、当前版本）或按标题/备注搜索，不含任何写能力，也不返回会话路径、私有对话或其他模块数据；查询结果不代表实施授权。
+- 变更转交：代码开发 Agent 发现实现与需求不符、缺信息或需要变更范围时不自行修改需求记录（它也没有写需求工具），用 `chatroom_send` 发 `@需求管理` 转交差异与影响；需求 Agent 核对当前版本后修订，版本与时间节点由生命周期日志自动记录，投影随后刷新。
+- 复核方式：投影是工作区内的纯文件产物，可在保存或派工完成后对比 `requirements/` 内容与 `requirements_context` 返回的当前版本；渲染、幂等、修订与删除保留、写保护、saveDraft 触发刷新和 codes 只读装配由 `scripts/check-requirements-projection.ts` 自动断言，已挂入 `check:workbench` 与全量链。
 
 ## 验证记录（2026-09-28）
 
@@ -40,7 +50,7 @@
 
 ## 目标定位与读取范围验证（2026-10-02）
 
-- `check:requirements-agent` 使用真实 PiHost/SDK、临时数据库和固定模型流，验证工作台上下文、公开需求查询及有效 JSON 截断、旧快照工具收口、当前群话题读取、文件路径与符号链接边界，以及恢复/重置路径。固定回复只证明装配和工具链，不代表模型判断。
+- `check:requirements-agent` 使用真实 PiHost/SDK、临时数据库和固定模型流，验证会话只感知绑定工作空间（系统提示词不得出现宿主应用身份）、公开需求查询及有效 JSON 截断、旧快照工具收口、当前群话题读取、文件路径与符号链接边界，以及恢复/重置路径。固定回复只证明装配和工具链，不代表模型判断。
 - 真实配置 `cmdc / deepseek/deepseek-v4.1-flash`、max 思考档位，在隔离空数据库重放“我想给这个加一个工作台”：约 15 秒正常结束，仅调用一次 `skills_read`，随后询问目标与使用场景；没有文件、群聊或跨目录搜索，也没有新增需求或待办。这是一条真实模型样本，不承诺所有请求的固定耗时。
 - 前一次 medium 档位探测在输出前出现 `Request timed out.`；后续 max 档位样本成功不表示模型传输超时已被修复。
 - `check:workbench`、`check:workbench-ui`、`typecheck`、`check:module-agents` 均通过。新对话使用新配置；恢复旧会话仍沿用原配置快照，服务端追加当前定位规则和读取边界。

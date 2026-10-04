@@ -74,7 +74,7 @@ async function main(): Promise<void> {
   let store = new WorkbenchStore(dbPath);
   let host: PiHost | undefined;
   try {
-    const tool = createRequirementsTools({ store, limits: { maxToolOutputChars: 24000 } })
+    const tool = createRequirementsTools({ store, limits: { maxToolOutputChars: 24000 }, workspaceDir: root })
       .find(item => item.name === 'requirements_save_draft');
     assert.ok(tool, 'the requirements tool factory must provide requirements_save_draft');
 

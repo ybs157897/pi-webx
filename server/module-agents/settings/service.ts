@@ -86,7 +86,7 @@ export class ModuleAgentSettingsService {
     const requestedWorkspace = update.workspace === undefined ? before.view.workspace : update.workspace;
     let workspace: string | null;
     try {
-      workspace = await validateWorkspaceSelection(id, requestedWorkspace, await loadAgentProfiles(root));
+      workspace = await validateWorkspaceSelection(id, requestedWorkspace);
     } catch (error) {
       throw new SettingsError(400, error instanceof Error ? error.message : '工作区路径无效');
     }

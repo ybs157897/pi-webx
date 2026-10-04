@@ -96,3 +96,12 @@ pi 的 `ResourceLoader`（`@earendil-works/pi-coding-agent/dist/core/resource-lo
 - 服务端加固定路径的读写端点（GET/PUT `/api/prompts/global` 与 `/api/prompts/project`，**不接受前端传路径**，防任意文件写）；项目级写入前校验 trusted。
 - 保存后提示「新会话生效」。
 - 若不做 UI，本设计的核心（两个文件）已经完整可用——这是 D1 的直接推论。
+
+
+## 模块 Agent 的绑定项目（2026-10-03）
+
+上文描述普通 Pi 会话的默认发现机制。模块 Agent 使用独立 profile，绑定的整个工作区就是其当前项目；项目路径来自已校验的会话绑定，不能用宿主应用身份、编辑器选择或其他 Agent 的路径替代。目录名只用作项目标识，项目用途和技术事实须来自材料。
+
+参考 DSH standard 的 cwd 与 agent-instructions 分层：公共装配注入项目身份和目录政策，角色 Prompt 保留各自职责与工具契约；绑定根的 `AGENTS.md`、`CLAUDE.md`、`AGENTS.local.md`、`CLAUDE.local.md` 通过 SDK 的 project_context 注入。相同路径或内容去重，单文件有界读取，注入正文总预算 64 KiB，超限正文带截断说明。只读根内真实文件，指向根外的符号链接不加载；不向父目录寻找 Git root，也不加载用户全局指令、SYSTEM 覆盖、扩展或未声明 Skill。README 和具体代码按任务由已配置工具读取。
+
+这保留模块身份与权限隔离，同时给模型确定的项目对象。项目指令不能增加工具、授权或跳过业务确认；“当前项目”无需反复询问，未知的业务规则仍需核实。恢复会话保持原 profile 与工作目录，项目材料在装配时重新读取；修改角色 Prompt/Skill 后的新对话使用最新配置，旧对话仍保留其原始配置快照。

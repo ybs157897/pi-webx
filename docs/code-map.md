@@ -151,14 +151,15 @@
 | 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
 | 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要） | `server/module-agents/profiles.ts` |
 | 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆；新对话使用新配置 |
-| 模块独立工作区（默认目录、自定义绑定、真实路径与重叠校验） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录 |
+| 模块工作区（默认目录、自定义绑定、真实路径校验，绑定目录整体作为项目） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录；不再限制与其他 Agent 的目录重叠 |
+| 绑定项目上下文（各 Agent 的项目身份与根指令） | `server/module-agents/project-context.ts`：整个绑定目录为当前项目；只自动加载绑定根的 AGENTS/CLAUDE 及 local 文件，受限大小、符号链接校验、内容去重；`assemble.ts` 注入身份并将指令交给 SDK `agentsFilesOverride`，不向上发现或加载全局资源 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
 | 知识绑定表 + 受限 KnowledgeAccess | `server/module-agents/knowledge.ts` |
-| 模块注册表（createTools 工厂，assistant + requirements + logs + codes） | `server/module-agents/registry.ts` |
+| 模块注册表（createTools 工厂，assistant + requirements + logs + codes） | `server/module-agents/registry.ts`；codes 的 toolNameMap 含 `requirements.context` → `requirements_context`（只读复用需求查询工具） |
 | HTTP 入口 `GET /api/module-agents`、`POST /api/module-agents/:id/sessions` | `server/module-agents/router.ts`（`server/index.ts` 挂载，先于 `/api` 通配）；`session-service.ts` 共享用户/聊天室会话创建、快照恢复、工作区占用校验 |
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
-| 装配纯函数（工具白名单过滤 + 校验 + MCP 连接装配） | `server/module-agents/assemble.ts`（router 与会话/MCP 门禁共用） |
+| 装配纯函数（工具白名单过滤 + 校验 + MCP 连接装配） | `server/module-agents/assemble.ts`（router 与会话/MCP 门禁共用）；需求装配挂接投影与文件工具，codes 装配注入只读 `createRequirementsContextTool` |
 | 数据源统一契约与适配器 | `server/data-sources/contracts.ts`、`registry.ts`、`workbench.ts`、`http-json.ts`、`mapping.ts`；接入说明 `docs/architecture/data-source-adapters.md` |
 | 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts`；文本可经 `skills_read` 读取，二进制配套资源以 base64 留存固定版本 |
 | MCP 适配（envRefs/headerRefs 注入、工具桥接、dispose） | `server/module-agents/mcp.ts`；stdio fixture `scripts/mcp-fixture-server.ts` |
@@ -168,7 +169,7 @@
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
 | Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |
 | 门禁 | `scripts/check-data-source-adapters.ts`（异构接口与插件）、`check-module-agent-http.ts`（幂等/并发/快照恢复）、`scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用）、`check-module-agent-mcp.ts`（A03/A04 服务端，stdio fixture 子进程） |
-| 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
+| 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-project-context.ts`（四个 Agent 的项目身份、真实 SDK 输入、根指令加载与路径/大小边界）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
 
 ### 工作台（/，9 个导航入口）
 
@@ -208,9 +209,10 @@
 | 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览、编辑/勾选、焦点与错误反馈；`index.jsx` 管理 409 后保留编辑、显式读取最新需求及关联任务、再次确认；已关联任务转为只读查看 |
-| 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复 |
+| 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复；`tools.ts` 的 `createRequirementsContextTool` 可独立装配，供 codes 会话只读复用 |
+| 需求文档投影（只读） | `server/modules/requirements/projection.ts`：绑定工作区内 `requirements/` 的文档投影，按 `requirement_projection_meta.mutation_cursor` 对账 `workbench_mutations` 增量，渲染 `README.md` + `REQ-XXXXXX/{requirement,changes}.md`，整批写盘成功才推进游标，可重复调用、确定性重建 |
 | 草稿保存幂等回执 | `server/modules/requirements/draft-idempotency.ts` 按会话与 toolCallId / 可选 entryKey 关联成功回执，保存、版本与回执在同一事务中完成；`import-tasks.ts` 提供固定字段顺序的归一化，不按相同内容合并新需求 |
-| 需求关联上下文与读取边界 | `server/modules/requirements/context.ts` 提供宿主工作台与公开需求的有限只读投影；`conversation.ts` 注入目标定位/澄清顺序并限制群读取为当前话题；`files.ts` 将 read/write/edit/ls 限于绑定工作区，`module-agents/assemble.ts` 对旧快照同样移除需求会话 shell/跨目录搜索 |
+| 需求关联上下文与读取边界 | `server/modules/requirements/context.ts` 提供实际绑定项目路径、目录标识与公开需求的有限只读投影；`conversation.ts` 默认以整个绑定工作区为需求项目，允许在根内核实项目材料，只澄清功能与业务缺口并限制群读取为当前话题；`files.ts` 将 read/write/edit/ls 限于绑定工作区，对 `requirements/` 投影目录 write/edit/mkdir 拒绝、read/ls 放行（错误文案：需求投影目录由需求库自动维护，只读），`module-agents/assemble.ts` 对旧快照同样移除需求会话 shell/跨目录搜索 |
 | 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
 | 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`shell/navigation.mjs`（tasks → assistant 的「待办」页签）、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
 | 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/导入幂等；`check-requirements-draft-idempotency.ts` 覆盖保存回执、重启/回滚及真实 SDK 重试；`requirements-boundary-browser-fixture.ts` 提供隔离冲突恢复夹具；`check-requirements-agent-context.ts` 覆盖 SDK 上下文、旧快照及路径/话题边界；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖 SSR DOM |
@@ -275,7 +277,7 @@
 | 本地 IDE 服务 | `server/modules/codes/ide-runtime.ts` 懒启动 Go gateway；`ide-router.ts` 同源静态页与配置；`ide-proxy.ts` HTTP/WS 代理；`server/index.ts` 负责装配和退出清理 |
 | 安装构建与门禁 | `scripts/setup-web-idea.mjs`、`scripts/check-codes-ide.ts`；UI 纳入 `check-workbench-ui.ts`，项目绑定/真实SDK文件读写纳入 `check-module-agent-http.ts` |
 
-接入说明与边界：`docs/architecture/codes-ide.md`。代码 Agent 在 `registry.ts` 注册，`config/agents/codes.yaml` 启用 read/grep/find/ls/edit/write；cwd 作为已保存工作区或历史会话目录的一致性断言。
+接入说明与边界：`docs/architecture/codes-ide.md`。代码 Agent 在 `registry.ts` 注册，`config/agents/codes.yaml` 启用 `requirements.context`（只读需求查询，无写能力）与 read/grep/find/ls/edit/write；cwd 作为已保存工作区或历史会话目录的一致性断言。
 
 ### UI 基础件与图标
 
@@ -314,6 +316,7 @@
 - `docs/workbench-ai-chat-compact-mode.md` — AI 对话全屏浮层形态与简洁模式输出规范
 - `docs/system-prompt-design.md` — 提示词分层设计
 - `docs/workbench-redesign.md` — 工作台重塑的需求与决策记录
+- `docs/tests/module-agent-project-context.md` — 四个模块 Agent 的绑定项目门禁与需求真实模型验收
 - `docs/tests/chatroom-persistent-work.md` — 群聊持续协作的门禁、真实模型与浏览器验收
 - `docs/tests/requirement-lifecycle-tracing.md` — 唯一需求根、修订、执行、证据与正式接受的验收及模型实测限制
 - `docs/tests/subagents.md` — 子智能体手测记录（历史口径）

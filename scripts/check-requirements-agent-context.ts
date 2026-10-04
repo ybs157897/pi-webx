@@ -9,9 +9,9 @@
 import assert from 'node:assert/strict';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 
-import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
+import { createAssistantMessageEventStream, getSystemMessageText, type AssistantMessage } from '@earendil-works/pi-ai';
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
 
 import { assembleModuleAgent } from '../server/module-agents/assemble';
@@ -29,8 +29,11 @@ const sessionDir = join(root, 'sessions');
 const workspaceDir = join(root, 'requirements-work');
 const outsideDir = join(root, 'outside');
 
-const ORIGINAL_REQUEST = '我想给这个加一个工作台';
+const ORIGINAL_REQUEST = '请结合当前绑定项目说明梳理需求。';
 const GLOBAL_PROMPT_SENTINEL = 'GLOBAL-PROMPT-MUST-NOT-LEAK';
+const PROJECT_AGENTS_SENTINEL = 'BOUND_PROJECT_AGENTS_FACT-71c9';
+const PROJECT_CLAUDE_SENTINEL = 'BOUND_PROJECT_CLAUDE_FACT-4b86';
+const PROJECT_README_SENTINEL = 'BOUND_PROJECT_README_FACT-15af';
 const PRIVATE_SOURCE_SENTINEL = 'PRIVATE-REQUIREMENT-SOURCE-SESSION-9d1c';
 const PRIVATE_NOTE_SENTINEL = 'HUGE_NOTE_PRIVATE_MARKER-4a2e';
 const NEEDLE = 'UNIQUE_CONTEXT_NEEDLE-81ac';
@@ -86,14 +89,25 @@ function messageFor(model: any, step: ScriptStep): AssistantMessage {
 }
 
 /** Drive several tool calls and a final answer through the real SDK loop. */
-async function driveScriptedPrompt(session: { agent: any }, prompt: string, steps: ScriptStep[]): Promise<ScriptRun> {
+async function driveScriptedPrompt(
+  session: { agent: any; prompt: (prompt: string) => Promise<unknown> },
+  prompt: string,
+  steps: ScriptStep[],
+): Promise<ScriptRun> {
   const agent = session.agent;
   const model = agent.state.model;
   assert.ok(model, 'the offline scripted SDK loop requires a model object');
 
   const savedStream = agent.streamFunction;
-  const savedApiKey = agent.getApiKey;
   const savedFinishTurn = agent.finishTurn;
+  const sessionRuntime = (session as any).modelRuntime as {
+    hasConfiguredAuth: (...args: any[]) => boolean;
+    checkAuth: (...args: any[]) => Promise<unknown>;
+    getAuth: (...args: any[]) => Promise<unknown>;
+  };
+  const savedHasConfiguredAuth = sessionRuntime.hasConfiguredAuth;
+  const savedCheckAuth = sessionRuntime.checkAuth;
+  const savedGetAuth = sessionRuntime.getAuth;
   const run: ScriptRun = { toolEnds: [], assistantTexts: [], modelInputs: [] };
   let cursor = 0;
 
@@ -127,7 +141,9 @@ async function driveScriptedPrompt(session: { agent: any }, prompt: string, step
     stream.end(message);
     return stream;
   }) as typeof agent.streamFunction;
-  agent.getApiKey = () => 'scripted-stream-no-provider';
+  sessionRuntime.hasConfiguredAuth = () => true;
+  sessionRuntime.checkAuth = async () => ({ type: 'api_key' });
+  sessionRuntime.getAuth = async () => ({ auth: { apiKey: 'scripted-stream-no-provider' } });
   agent.finishTurn = (turn: { message: { stopReason: string } }) => {
     if (turn.message.stopReason === 'error' || turn.message.stopReason === 'aborted') return undefined;
     if (cursor >= steps.length && turn.message.stopReason !== 'toolUse') return { action: 'end' };
@@ -135,11 +151,13 @@ async function driveScriptedPrompt(session: { agent: any }, prompt: string, step
   };
 
   try {
-    await agent.prompt(prompt);
+    await session.prompt(prompt);
   } finally {
     agent.streamFunction = savedStream;
-    agent.getApiKey = savedApiKey;
     agent.finishTurn = savedFinishTurn;
+    sessionRuntime.hasConfiguredAuth = savedHasConfiguredAuth;
+    sessionRuntime.checkAuth = savedCheckAuth;
+    sessionRuntime.getAuth = savedGetAuth;
     unsubscribe();
   }
   assert.equal(cursor, steps.length, 'the SDK must consume each scripted step');
@@ -173,6 +191,11 @@ async function main(): Promise<void> {
 
   const workspace = await realpath(workspaceDir);
   const outside = await realpath(outsideDir);
+  await Promise.all([
+    writeFile(join(workspace, 'AGENTS.md'), `# Project identity\n${PROJECT_AGENTS_SENTINEL}\n`, 'utf8'),
+    writeFile(join(workspace, 'CLAUDE.md'), `# Project notes\n${PROJECT_CLAUDE_SENTINEL}\n`, 'utf8'),
+    writeFile(join(workspace, 'README.md'), `# ${basename(workspace)}\n${PROJECT_README_SENTINEL}\n`, 'utf8'),
+  ]);
   await writeFile(join(workspace, 'relative.txt'), 'WORKSPACE_RELATIVE_BEFORE', 'utf8');
   await writeFile(join(workspace, 'hostile-shadow.txt'), 'WORKSPACE_BOUND_CWD', 'utf8');
   await writeFile(join(outside, 'relative.txt'), 'HOSTILE_CWD_SHADOW', 'utf8');
@@ -209,7 +232,7 @@ async function main(): Promise<void> {
     store.addRecord('requirements', { title: `公开摘要 ${index + 1}`, status: index % 2 ? 'done' : 'todo', note: '', taskDrafts: [] });
   }
 
-  const safeContextSize = JSON.stringify(buildRequirementsWorkbenchContext(store)).length;
+  const safeContextSize = JSON.stringify(buildRequirementsWorkbenchContext(store, workspace)).length;
   const profile: ResolvedAgentProfile = structuredClone(loaded.profile);
   profile.config.workspace = workspace;
   profile.effectiveWorkspace = workspace;
@@ -220,7 +243,7 @@ async function main(): Promise<void> {
     maxToolOutputChars: safeContextSize + 1600,
   };
   // Simulate an older saved profile snapshot and prompt. Runtime policy must still
-  // remove unscoped shell/search tools and append the current clarification rules.
+  // remove unscoped shell/search tools and append the current bound-project context.
   profile.config.tools = [...new Set([...profile.config.tools, ...UNSCOPED_TOOLS])];
   profile.promptText = 'LEGACY_REQUIREMENTS_PROMPT: 先扫描上级目录并搜索可能相关的项目。';
   profile.profileRevision = profileRevision(profile);
@@ -267,48 +290,73 @@ async function main(): Promise<void> {
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), toolNames, 'all assembled tools are active');
 
     const systemPrompt = hosted.session.systemPrompt;
-    assert.ok(systemPrompt.includes('<requirements_workbench_context>'), 'the curated application context must be injected into the module prompt');
-    assert.ok(systemPrompt.includes('AI 指挥台'));
-    assert.ok(systemPrompt.includes('宿主应用本身不能作为用户目标的默认值'));
-    assert.ok(systemPrompt.includes('指代不明确') && systemPrompt.includes('不先列目录'));
+    assert.ok(systemPrompt.includes('<requirements_session_context>'), 'the curated session context must be injected into the module prompt');
+    assert.ok(systemPrompt.includes('bound-project') && systemPrompt.includes(basename(workspace)));
+    assert.ok(systemPrompt.includes(`<cwd>\n${workspace}\n</cwd>`), 'the SDK cwd section must use the bound project root');
+    assert.ok(!systemPrompt.includes(outside), 'an external requested cwd must not enter the SDK system prompt');
+    assert.ok(systemPrompt.includes('<workspace_project>'));
+    assert.ok(!systemPrompt.includes('服务端没有预选目标'), 'the bound project is the default target');
+    assert.ok(systemPrompt.includes('不要再问用户当前项目是什么'));
     assert.ok(systemPrompt.includes('LEGACY_REQUIREMENTS_PROMPT'), 'the regression includes an old profile prompt');
     assert.ok(!systemPrompt.includes(GLOBAL_PROMPT_SENTINEL), 'module session must not load the global agent prompt');
-    const contextStart = systemPrompt.indexOf('<requirements_workbench_context>') + '<requirements_workbench_context>'.length;
-    const contextEnd = systemPrompt.indexOf('</requirements_workbench_context>', contextStart);
-    assert.ok(contextEnd > contextStart, 'the injected app context must have a bounded section');
+    assert.ok(systemPrompt.includes(PROJECT_AGENTS_SENTINEL), 'bound project instructions must enter the actual SDK prompt');
+    assert.ok(systemPrompt.includes(PROJECT_CLAUDE_SENTINEL), 'bound project instructions may come from CLAUDE.md');
+    const contextStart = systemPrompt.indexOf('<requirements_session_context>') + '<requirements_session_context>'.length;
+    const contextEnd = systemPrompt.indexOf('</requirements_session_context>', contextStart);
+    assert.ok(contextEnd > contextStart, 'the injected session context must have a bounded section');
     const injectedContext = systemPrompt.slice(contextStart, contextEnd);
-    assert.ok(!injectedContext.includes(PRIVATE_SOURCE_SENTINEL), 'injected app context must omit private session provenance');
-    assert.ok(!injectedContext.includes(PRIVATE_NOTE_SENTINEL), 'injected app context must omit requirement note contents');
-    assert.ok(!injectedContext.includes(workspace), 'injected app context must not reveal the bound cwd');
-    assert.ok(!injectedContext.includes(hosted.id), 'injected app context must not include the private session id');
+    assert.ok(!injectedContext.includes(PRIVATE_SOURCE_SENTINEL), 'injected context must omit private session provenance');
+    assert.ok(!injectedContext.includes(PRIVATE_NOTE_SENTINEL), 'injected context must omit requirement note contents');
+    assert.ok(injectedContext.includes(workspace), 'the bound project path must be explicit in the injected context');
+    assert.ok(!injectedContext.includes(hosted.id), 'injected context must not include the private session id');
 
     const skillName = profile.skills[0]?.name;
     assert.ok(skillName, 'the current profile must include the product requirements Skill');
     const opening = await driveScriptedPrompt(hosted.session as never, ORIGINAL_REQUEST, [
       tool('opening-skill', 'skills_read', { name: skillName }),
       tool('opening-context', 'requirements_context', {}),
-      say('opening-clarification', '你说的“这个”具体指哪个项目或功能？我知道你在需求助手里，但这不能确定需求目标。'),
+      tool('opening-ls', 'ls', { path: '.' }),
+      tool('opening-read-agents', 'read', { path: 'AGENTS.md' }),
+      tool('opening-read-claude', 'read', { path: 'CLAUDE.md' }),
+      tool('opening-read-readme', 'read', { path: 'README.md' }),
+      say('opening-done', '固定脚本工具调用完成；此响应不代表真实模型行为。'),
     ]);
-    assert.deepEqual(opening.toolEnds.map(item => item.toolName), ['skills_read', 'requirements_context'],
-      'the scripted flow reads the method Skill and scoped workbench context before asking');
+    assert.deepEqual(opening.toolEnds.map(item => item.toolName), [
+      'skills_read', 'requirements_context', 'ls', 'read', 'read', 'read',
+    ], 'the scripted SDK loop can call context and bound-project file tools');
     assert.ok(opening.toolEnds.every(item => !item.isError));
-    assert.ok(opening.modelInputs[0]?.includes(ORIGINAL_REQUEST), 'the original ambiguous request reaches the SDK model input');
-    assert.ok(opening.modelInputs[1]?.includes('这个/这里/它'), 'the Skill result reaches the next SDK model input');
-    assert.ok(opening.modelInputs[2]?.includes('AI 指挥台'), 'the workbench context result reaches the clarification turn');
-    assert.ok(opening.assistantTexts.some(text => text.includes('“这个”') && text.includes('哪个项目或功能')),
-      'the scripted transcript ends with a concise target clarification');
-    assert.deepEqual(opening.toolEnds.map(item => item.toolName).filter(name => ['read', 'ls', ...UNSCOPED_TOOLS, 'chatroom_read'].includes(name)), [],
-      'the ambiguous request must not trigger file, shell, search or whole-chatroom scans');
+    const firstSdkInput = opening.modelInputs[0] ?? '';
+    assert.ok(firstSdkInput.includes(ORIGINAL_REQUEST), 'the user request reaches the SDK input');
+    const firstRequest = JSON.parse(firstSdkInput) as Array<{ role?: string; content?: unknown; sections?: Record<string, string | null> }>;
+    const firstSystemMessage = firstRequest.find(message => message.role === 'system');
+    assert.ok(firstSystemMessage, 'the actual stream input must contain a system message');
+    const firstSystemPrompt = getSystemMessageText(firstSystemMessage as never);
+    assert.ok(firstSystemPrompt.includes(`<cwd>\n${workspace}\n</cwd>`), 'the SDK provider input carries the bound cwd');
+    assert.ok(firstSystemPrompt.includes('bound-project') && firstSystemPrompt.includes(basename(workspace)));
+    assert.ok(firstSystemPrompt.includes('<workspace_project>'));
+    assert.ok(firstSystemPrompt.includes(PROJECT_AGENTS_SENTINEL), 'bound project instructions reach the SDK provider input');
+    assert.ok(firstSystemPrompt.includes(PROJECT_CLAUDE_SENTINEL));
+    assert.ok(!firstSdkInput.includes(outside), 'a caller-supplied external cwd does not override project context');
+    assert.ok(opening.modelInputs[2]?.includes(workspace), 'the context-tool result reaches the next SDK input');
+    assert.ok(endById(opening, 'opening-ls').text.includes('README.md'));
+    assert.ok(endById(opening, 'opening-read-agents').text.includes(PROJECT_AGENTS_SENTINEL));
+    assert.ok(endById(opening, 'opening-read-claude').text.includes(PROJECT_CLAUDE_SENTINEL));
+    assert.ok(endById(opening, 'opening-read-readme').text.includes(PROJECT_README_SENTINEL));
+    assert.deepEqual(opening.toolEnds.map(item => item.toolName).filter(name => [...UNSCOPED_TOOLS, 'chatroom_read'].includes(name)), [],
+      'the module session keeps shell/search and unscoped chat tools out of the tool surface');
 
     const openingContext = contextData(endById(opening, 'opening-context'));
-    assert.equal(openingContext.hostApplication?.id, 'pi-webx');
-    assert.equal(openingContext.target?.kind, 'unspecified');
+    assert.equal(openingContext.hostApplication, undefined, 'the context must not describe any host application');
+    assert.equal(openingContext.workspace?.kind, 'bound-directory');
+    assert.equal(openingContext.target?.kind, 'bound-project');
+    assert.equal(openingContext.target?.name, basename(workspace));
+    assert.equal(openingContext.target?.path, workspace);
     assert.equal(openingContext.target?.source, 'server-binding');
     assert.equal(openingContext.requirements?.total, 7);
     assert.equal(openingContext.requirements?.items?.length, 5, 'the initial context is capped at five requirement summaries');
     assert.ok(!JSON.stringify(openingContext).includes(PRIVATE_SOURCE_SENTINEL));
     assert.ok(!JSON.stringify(openingContext).includes(PRIVATE_NOTE_SENTINEL));
-    assert.ok(!JSON.stringify(openingContext).includes(workspace));
+    assert.ok(JSON.stringify(openingContext).includes(workspace));
 
     const contextQueries = await driveScriptedPrompt(hosted.session as never, '读取指定的上下文回归样例。', [
       tool('query-match', 'requirements_context', { query: NEEDLE, limit: 2 }),
@@ -383,6 +431,8 @@ async function main(): Promise<void> {
     );
     assert.ok(resultText(hostileResult).includes('WORKSPACE_BOUND_CWD'));
     assert.ok(!resultText(hostileResult).includes('HOSTILE_CWD_SHADOW'));
+    const projectionReadmePath = join(workspace, 'requirements', 'README.md');
+    const projectionReadmeBefore = await readFile(projectionReadmePath, 'utf8');
 
     const fileRun = await driveScriptedPrompt(hosted.session as never, '在绑定工作区内执行文件访问回归。', [
       tool('file-read-relative', 'read', { path: 'relative.txt' }),
@@ -390,6 +440,13 @@ async function main(): Promise<void> {
       tool('file-write-inside', 'write', { path: 'written.txt', content: 'WORKSPACE_WRITE_OK' }),
       tool('file-edit-inside', 'edit', { path: 'relative.txt', edits: [{ oldText: 'BEFORE', newText: 'AFTER' }] }),
       tool('file-ls-capped', 'ls', { path: 'crowded', limit: 200 }),
+      tool('file-read-projection', 'read', { path: 'requirements/README.md' }),
+      tool('file-ls-projection', 'ls', { path: 'requirements' }),
+      tool('file-write-projection', 'write', { path: 'requirements/README.md', content: 'MUST_NOT_REPLACE_PROJECTION' }),
+      tool('file-edit-projection', 'edit', {
+        path: 'requirements/README.md',
+        edits: [{ oldText: projectionReadmeBefore, newText: `${projectionReadmeBefore}\nMUST_NOT_EDIT_PROJECTION` }],
+      }),
       tool('file-read-parent-escape', 'read', { path: '../outside/outside-secret.txt' }),
       tool('file-read-absolute-escape', 'read', { path: join(outside, 'outside-secret.txt') }),
       tool('file-read-leaf-symlink', 'read', { path: 'outside-link.txt' }),
@@ -400,6 +457,7 @@ async function main(): Promise<void> {
     ]);
     for (const id of [
       'file-read-relative', 'file-read-absolute', 'file-write-inside', 'file-edit-inside', 'file-ls-capped',
+      'file-read-projection', 'file-ls-projection',
     ]) assert.equal(endById(fileRun, id).isError, false, `${id} should stay inside the bound workspace`);
     assert.ok(endById(fileRun, 'file-read-relative').text.includes('WORKSPACE_RELATIVE_BEFORE'));
     assert.ok(endById(fileRun, 'file-read-absolute').text.includes('WORKSPACE_RELATIVE_BEFORE'));
@@ -409,6 +467,13 @@ async function main(): Promise<void> {
     const listedEntries = lsText.split('\n').filter(line => /^entry-\d+\.txt$/.test(line));
     assert.equal(listedEntries.length, 200, 'ls must stop at the 200-entry cap independent of filesystem iteration order');
     assert.equal(new Set(listedEntries).size, 200);
+    for (const id of ['file-write-projection', 'file-edit-projection']) {
+      const denied = endById(fileRun, id);
+      assert.equal(denied.isError, true, `${id} must not mutate the read-only requirements projection`);
+      assert.ok(denied.text.includes('只读'));
+    }
+    assert.equal(await readFile(projectionReadmePath, 'utf8'), projectionReadmeBefore,
+      'failed projection writes must leave the generated project file unchanged');
 
     for (const id of [
       'file-read-parent-escape', 'file-read-absolute-escape', 'file-read-leaf-symlink',
@@ -446,10 +511,13 @@ async function main(): Promise<void> {
     const restoredNames = restored.session.getAllTools().map(item => item.name).sort();
     for (const name of UNSCOPED_TOOLS) assert.ok(!restoredNames.includes(name), `restore must not re-enable ${name}`);
     assert.ok(restoredNames.includes('requirements_context') && restoredNames.includes('read'));
-    assert.ok(restored.session.systemPrompt.includes('<requirements_workbench_context>'));
+    assert.ok(restored.session.systemPrompt.includes('<requirements_session_context>'));
+    assert.ok(restored.session.systemPrompt.includes('bound-project'));
+    assert.ok(restored.session.systemPrompt.includes(workspace));
+    assert.ok(!restored.session.systemPrompt.includes('服务端没有预选目标'));
     await host.kill(restored.id);
 
-    console.log('PASS requirements Agent: safe host context, early clarification sequence, bounded requirements_context, legacy tool removal, scoped chat history, guarded workspace tools, restore/reset boundaries');
+    console.log('PASS requirements Agent: scripted SDK context input, bound-project files and cwd, bounded requirements_context, scoped chat history, guarded writes, read-only projection, restore/reset boundaries (no model-behavior claim)');
   } finally {
     await host.disposeAll();
     store.close();

@@ -8,11 +8,10 @@ import { defaultAgentsConfigRoot, loadAgentProfiles } from '../server/module-age
 import { profileRevision, ProfileSnapshots } from '../server/module-agents/snapshots';
 import { createModuleAgentsRouter } from '../server/module-agents/router';
 import { WorkbenchStore } from '../server/workbench/store';
-import { HostError } from '../server/pi/host';
 import { SessionManager } from '@earendil-works/pi-coding-agent';
-import type { AgentId, ProfileLoadResult } from '../server/module-agents/contracts';
+import type { AgentId } from '../server/module-agents/contracts';
 import {
-  assertWorkspaceAvailable, boundSessionWorkspace, captureEffectiveWorkspace, defaultAgentWorkspace,
+  boundSessionWorkspace, captureEffectiveWorkspace, defaultAgentWorkspace,
   validateWorkspaceSelection,
 } from '../server/module-agents/workspace';
 
@@ -29,7 +28,7 @@ try {
   assert.ok(logs?.ok && requirements?.ok);
   assert.notEqual(logs.profile.effectiveWorkspace, requirements.profile.effectiveWorkspace);
   assert.equal(logs.profile.effectiveWorkspace, defaultAgentWorkspace('logs'));
-  assert.equal(await validateWorkspaceSelection('logs', null, profiles), null);
+  assert.equal(await validateWorkspaceSelection('logs', null), null);
   const defaultDir = await boundSessionWorkspace(logs.profile);
   assert.equal(defaultDir, defaultAgentWorkspace('logs'));
   assert.equal(await realpath(defaultDir), defaultDir);
@@ -42,7 +41,7 @@ try {
   const nested = path.join(custom, 'nested');
   await mkdir(nested, { recursive: true });
   const canonical = await realpath(custom);
-  assert.equal(await validateWorkspaceSelection('logs', custom, profiles), canonical);
+  assert.equal(await validateWorkspaceSelection('logs', custom), canonical);
   const rebound = structuredClone(logs.profile);
   rebound.config.workspace = canonical;
   rebound.effectiveWorkspace = canonical;
@@ -57,18 +56,17 @@ try {
   const other = structuredClone(requirements.profile);
   other.config.workspace = canonical;
   other.effectiveWorkspace = canonical;
-  const occupied = new Map<AgentId, ProfileLoadResult>(profiles);
-  occupied.set('requirements', { ok: true, profile: other });
-  await assert.rejects(validateWorkspaceSelection('logs', custom, occupied), /重叠/);
-  await assert.rejects(validateWorkspaceSelection('logs', nested, occupied), /重叠/);
-  await assert.rejects(validateWorkspaceSelection('logs', root, occupied), /重叠/);
-  await assert.rejects(validateWorkspaceSelection('logs', '/', occupied), /重叠/);
+  other.profileRevision = profileRevision(other);
+  await snapshots.save(other);
+  assert.equal(await boundSessionWorkspace(other), canonical, 'requirements may share the logs workspace');
+  assert.equal(await boundSessionWorkspace(rebound), canonical, 'both agents keep the same shared binding');
+  assert.equal(await validateWorkspaceSelection('logs', nested), await realpath(nested), 'nested shared directory is accepted');
+  assert.equal(await validateWorkspaceSelection('logs', root), await realpath(root), 'parent directory may contain other agent workspaces');
   const alias = path.join(root, 'alias');
   await symlink(custom, alias);
-  await assert.rejects(validateWorkspaceSelection('logs', alias, occupied), /重叠/);
-  await assert.rejects(assertWorkspaceAvailable('logs', custom, profiles, [{ agentId: 'codes', cwd: canonical }]), /运行中/);
-  await assert.rejects(validateWorkspaceSelection('logs', path.join(root, 'missing'), profiles), /不存在/);
-  await assert.rejects(validateWorkspaceSelection('logs', 'relative', profiles), /绝对路径/);
+  assert.equal(await validateWorkspaceSelection('logs', alias), canonical, 'symlinked binding canonicalizes into the shared directory');
+  await assert.rejects(validateWorkspaceSelection('logs', path.join(root, 'missing')), /不存在/);
+  await assert.rejects(validateWorkspaceSelection('logs', 'relative'), /绝对路径/);
 
   const missing = path.join(root, 'missing-custom');
   const yaml = path.join(config, 'logs.yaml');
@@ -122,18 +120,14 @@ try {
     stored.push({ id: session.getSessionId(), path: file, cwd: historical });
   }
   const store = new WorkbenchStore(path.join(root, 'workbench.sqlite'));
-  let enter!: () => void;
-  const enteredRestore = new Promise<void>(resolve => { enter = resolve; });
-  let release!: () => void;
-  const blocked = new Promise<void>(resolve => { release = resolve; });
-  let failFirst = true;
   const host = {
     sessions: new Map(),
     get: () => undefined,
     async create(options: { sessionPath: string }) {
-      if (failFirst) { enter(); await blocked; failFirst = false; throw new HostError(503, 'fixture failure'); }
       const manager = SessionManager.open(options.sessionPath);
-      return { id: manager.getSessionId(), cwd: manager.getHeader()!.cwd, session: { sessionManager: manager } };
+      const hosted = { id: manager.getSessionId(), cwd: manager.getHeader()!.cwd, session: { sessionManager: manager } };
+      this.sessions.set(hosted.id, hosted);
+      return hosted;
     },
     summary: (hosted: { id: string }) => ({ id: hosted.id }),
   };
@@ -150,12 +144,13 @@ try {
     return response.status;
   };
   try {
-    const first = restore('logs', stored[0]!.id, 'held-logs');
-    await Promise.race([enteredRestore, first.then(status => { throw new Error(`first restore ended before claim: ${status}`); })]);
-    assert.equal(await restore('codes', stored[1]!.id, 'blocked-codes'), 409, 'in-flight historical overlap is rejected');
-    release();
-    assert.equal(await first, 503);
-    assert.equal(await restore('codes', stored[1]!.id, 'retry-codes'), 200, 'failed claim is released');
+    const [logsStatus, codesStatus] = await Promise.all([
+      restore('logs', stored[0]!.id, 'restore-logs'),
+      restore('codes', stored[1]!.id, 'restore-codes'),
+    ]);
+    assert.equal(logsStatus, 200, 'logs restores into the shared historical workspace');
+    assert.equal(codesStatus, 200, 'codes restores into the same shared workspace concurrently');
+    assert.equal(host.sessions.size, 2, 'both shared-workspace sessions stay hosted');
   } finally {
     server.closeAllConnections();
     await new Promise<void>(resolve => server.close(() => resolve()));

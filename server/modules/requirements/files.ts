@@ -23,12 +23,18 @@ import {
 
 const MAX_LS_ENTRIES = 200;
 const SDK_NORMALIZED_SPACES = /[\u00a0\u2000-\u200a\u202f\u205f\u3000]/g;
+const PROJECTION_DIRNAME = 'requirements';
 
 const ACCESS_GUIDANCE =
-  '需求助手的文件工具只访问其绑定工作区。产品事实请使用 requirements_context；其他文档请通过本会话附件或绑定工作区材料提供。';
+  '需求助手的文件工具只访问其绑定项目工作区。项目事实可读取工作区材料核实，已有需求记录使用 requirements_context；工作区外材料请通过本会话附件提供。'
+  + '工作区内 requirements/ 目录是需求库自动维护的只读投影，请通过需求工具更新需求记录。';
 
 function deniedPath(): Error {
   return new Error(`路径被拒绝：${ACCESS_GUIDANCE}`);
+}
+
+function projectionDeniedPath(): Error {
+  return new Error('需求投影目录由需求库自动维护，只读；请通过需求工具更新需求记录。');
 }
 
 function isWithin(root: string, candidate: string): boolean {
@@ -153,6 +159,12 @@ export function createRequirementsFileTools(workspaceDir: string): ToolDefinitio
   const root = canonicalWorkspaceRoot(workspaceDir);
   const guard = createWorkspacePathGuard(root, [workspaceDir]);
 
+  // 投影目录 = workspace root 下的 requirements/ 子目录：读与列目录放行，
+  // 写类操作拒绝。比较的是 guard 归一化后的 canonical 路径，避免相对路径或
+  // 符号链接别名绕过前缀判断。
+  const projectionRoot = path.join(root, PROJECTION_DIRNAME);
+  const isProjectionPath = (canonical: string): boolean => isWithin(projectionRoot, canonical);
+
   const readOperations: ReadOperations = {
     async access(candidate) {
       await withGuardedFile(guard, candidate, constants.O_RDONLY, async () => undefined);
@@ -168,6 +180,7 @@ export function createRequirementsFileTools(workspaceDir: string): ToolDefinitio
   const writeOperations: WriteOperations = {
     async mkdir(candidate) {
       const authorized = await guard(candidate);
+      if (isProjectionPath(authorized)) throw projectionDeniedPath();
       await mkdir(authorized, { recursive: true });
       // Re-resolve after creation so newly introduced symlink changes fail closed.
       const created = await guard(authorized);
@@ -175,6 +188,7 @@ export function createRequirementsFileTools(workspaceDir: string): ToolDefinitio
     },
     async writeFile(candidate, content) {
       const initial = await guard(candidate);
+      if (isProjectionPath(initial)) throw projectionDeniedPath();
       const parent = await guard(path.dirname(initial));
       if (!isWithin(root, parent)) throw deniedPath();
 
@@ -193,6 +207,7 @@ export function createRequirementsFileTools(workspaceDir: string): ToolDefinitio
       return withGuardedFile(guard, candidate, constants.O_RDONLY, (handle) => handle.readFile());
     },
     async writeFile(candidate, content) {
+      // 编辑写入复用写工具的投影保护：requirements/ 投影目录同样只读。
       await writeOperations.writeFile(candidate, content);
     },
   };

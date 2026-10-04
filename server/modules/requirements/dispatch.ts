@@ -4,6 +4,7 @@ import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
 import { WorkbenchInputError, type WorkbenchStore } from '../../workbench/store';
 import type { ChatroomService } from '../chatroom/service';
 import { importRequirementTasks, saveRequirementDraft } from './import-tasks';
+import type { RequirementProjection } from './projection';
 import { normalizeTaskDrafts } from './schema.mjs';
 
 type RecordRow = Record<string, unknown> & { id: string };
@@ -68,7 +69,7 @@ export function dispatchRequirementTasks(store: WorkbenchStore, chatroom: Chatro
   }
 }
 
-export function createRequirementsDispatchTool(store: WorkbenchStore, chatroom: ChatroomService): ToolDefinition {
+export function createRequirementsDispatchTool(store: WorkbenchStore, chatroom: ChatroomService, projection?: RequirementProjection): ToolDefinition {
   const priority = Type.Union([Type.Literal('low'), Type.Literal('normal'), Type.Literal('high')]);
   return {
     name: 'requirements_dispatch', label: '整理需求并加入待办',
@@ -87,6 +88,9 @@ export function createRequirementsDispatchTool(store: WorkbenchStore, chatroom: 
     async execute(_id, params, signal, _update, ctx) {
       if (signal?.aborted) throw new WorkbenchInputError('需求交接已取消', 409);
       const data = dispatchRequirementTasks(store, chatroom, ctx.sessionManager.getSessionId(), params);
+      // 投影刷新失败只记日志，不阻塞工具结果，也不回滚已导入的待办；
+      // await 保证返回结果时写盘已结束，不与调用方的目录清理竞争。
+      await projection?.sync().catch((error) => console.warn('[requirements] 需求投影刷新失败', error));
       return { content: [{ type: 'text', text: JSON.stringify(data) }], details: { data } };
     },
   };

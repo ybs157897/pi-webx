@@ -12,6 +12,7 @@ import type { AgentId } from './contracts';
 import type { KnowledgeAccess } from './knowledge';
 import { LOGS_TOOL_NAMES, createLogsTools } from '../modules/logs';
 import { REQUIREMENTS_TOOL_NAMES, createRequirementsTools } from '../modules/requirements';
+import type { RequirementProjection } from '../modules/requirements/projection';
 import { ASSISTANT_TOOL_NAMES, createAssistantTools } from '../modules/assistant';
 import { CHATROOM_TOOL_NAMES } from '../modules/chatroom/tools';
 import { REQUIREMENT_LIFECYCLE_TOOL_NAMES } from '../modules/requirements/lifecycle-tools';
@@ -21,6 +22,9 @@ export interface ModuleAgentToolDeps {
   store: WorkbenchStore;
   sources: Partial<Record<'logs' | 'issues', DataSource>>;
   limits: { maxRunningSessions: number; maxToolOutputChars: number };
+  workspaceDir: string;
+  /** 仅需求 Agent 装配：绑定工作区内的需求文档投影，保存/派工成功后对账刷新。 */
+  projection?: RequirementProjection;
 }
 
 export interface ModuleAgentDefinition {
@@ -31,7 +35,7 @@ export interface ModuleAgentDefinition {
 }
 
 const definitions = new Map<AgentId, ModuleAgentDefinition>([
-  ['codes', { id: 'codes', toolNameMap: {}, createTools: () => [] }],
+  ['codes', { id: 'codes', toolNameMap: { 'requirements.context': 'requirements_context' }, createTools: () => [] }],
   ['logs', { id: 'logs', toolNameMap: LOGS_TOOL_NAMES, createTools: createLogsTools }],
   ['requirements', { id: 'requirements', toolNameMap: { ...REQUIREMENTS_TOOL_NAMES, 'requirements.dispatch': 'requirements_dispatch' }, createTools: createRequirementsTools }],
   ['assistant', { id: 'assistant', toolNameMap: { ...ASSISTANT_TOOL_NAMES, 'assistant.coordinate': 'assistant_coordinate' }, createTools: createAssistantTools }],

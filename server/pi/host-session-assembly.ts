@@ -209,8 +209,8 @@ export async function createHostedSession(
     const agentDir = getAgentDir();
     const settings = host.settingsOption(cwd);
     /**
-     * 模块会话用收口加载器：关闭全部默认资源发现，提示词只取 profile 正文
-     * （不追加 MAIN_IDENTITY/WORKBENCH），Skills 只加载清单里的绝对路径。
+     * 模块会话关闭默认资源发现；项目指令仅来自装配时校验过的绑定根目录。
+     * 提示词与 Skills 由 profile 提供，不加载主会话或全局配置。
      */
     const moduleLoader = moduleAgent === undefined ? undefined : new DefaultResourceLoader({
       cwd, agentDir,
@@ -219,6 +219,7 @@ export async function createHostedSession(
       noSkills: true,
       noPromptTemplates: true,
       noContextFiles: true,
+      agentsFilesOverride: () => ({ agentsFiles: moduleAgent.projectContextFiles ?? [] }),
       systemPromptOverride: () => moduleAgent.profile.promptText,
       skillsOverride: () => ({ skills: [], diagnostics: [] }),
       appendSystemPromptOverride: () => [

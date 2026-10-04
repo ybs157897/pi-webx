@@ -86,7 +86,7 @@ export default function WorkspaceEditor({ workspace, workspacePath, workspaceDef
       {picking && <button type="button" className="btn" onClick={invalidate}
         data-testid="agent-settings-workspace-cancel">取消选择</button>}
     </div>
-    <p id="agent-settings-workspace-hint" className="small muted">通过系统文件夹选择器绑定已有目录；保存时会检查它是否与其他 Agent 的目录重叠。</p>
+    <p id="agent-settings-workspace-hint" className="small muted">通过系统文件夹选择器绑定已有目录；不同 Agent 可以绑定同一个目录，例如需求与代码共享一个项目工作区。</p>
     {picking && <p role="status">等待系统文件夹选择…</p>}
     {pickError && <p className="agent-settings-field-error" role="alert" data-testid="agent-settings-workspace-pick-error">{pickError}</p>}
     {error && <p id="agent-settings-workspace-error" className="agent-settings-field-error" role="alert">{error}</p>}

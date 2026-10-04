@@ -94,7 +94,7 @@ export function synchronizeRequirementMutations(db: Database.Database): void {
         const roots = db.prepare('SELECT requirement_id,current_version FROM requirement_lifecycle_roots').all() as
           Array<{ requirement_id: string; current_version: number }>;
         for (const root of roots) event(db, root.requirement_id, mutation, 'dataset.replaced',
-          '工作台数据整批替换；旧执行和交付仍保留，需求版本须重新核对', root.current_version,
+          '需求数据整批替换；旧执行和交付仍保留，需求版本须重新核对', root.current_version,
           { reason: after?.reason ?? 'import' });
       }
       db.prepare(`INSERT INTO requirement_lifecycle_meta(key,value) VALUES ('mutation_cursor',?)

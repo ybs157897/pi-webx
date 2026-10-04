@@ -3,6 +3,7 @@ import type { AgentToolResult, ToolDefinition } from '@earendil-works/pi-coding-
 import { WorkbenchInputError, type WorkbenchStore } from '../../workbench/store';
 import { buildRequirementsWorkbenchContext, getPublicRequirementVersion } from './context';
 import { saveRequirementDraftIdempotently } from './draft-idempotency';
+import type { RequirementProjection } from './projection';
 
 export const REQUIREMENTS_TOOL_NAMES: Readonly<Record<string, string>> = {
   'requirements.context': 'requirements_context',
@@ -17,7 +18,12 @@ function result(data: unknown, maxChars: number): AgentToolResult<unknown> {
   };
 }
 
-export function createRequirementsTools(deps: { store: WorkbenchStore; limits: { maxToolOutputChars: number } }): ToolDefinition[] {
+export function createRequirementsTools(deps: {
+  store: WorkbenchStore;
+  limits: { maxToolOutputChars: number };
+  workspaceDir: string;
+  projection?: RequirementProjection;
+}): ToolDefinition[] {
   const maxChars = deps.limits.maxToolOutputChars;
   return [
     {
@@ -39,27 +45,40 @@ export function createRequirementsTools(deps: { store: WorkbenchStore; limits: {
         }, { additionalProperties: false }), { minItems: 1, maxItems: 20 }),
       }, { additionalProperties: false }),
       async execute(toolCallId, params, _signal, _onUpdate, ctx) {
-        return result(saveRequirementDraftIdempotently(
+        const data = saveRequirementDraftIdempotently(
           deps.store, ctx.sessionManager.getSessionId(), toolCallId, params,
-        ), maxChars);
+        );
+        // 投影刷新失败只记日志，不阻塞工具结果，也不回滚已保存的需求；
+        // await 保证返回结果时写盘已结束，不与调用方的目录清理竞争。
+        await deps.projection?.sync().catch((error) => console.warn('[requirements] 需求投影刷新失败', error));
+        return result(data, maxChars);
       },
     },
-    {
-      name: REQUIREMENTS_TOOL_NAMES['requirements.context']!,
-      label: '读取工作台与需求上下文',
-      description: '读取 AI 指挥台的有限产品事实或当前工作台公开需求记录。宿主应用不等于用户想处理的目标；指代不清时先澄清。可按真实需求 id 读取单条，或按标题/备注搜索；使用 limit/offset 分页。',
-      promptSnippet: 'requirements_context: 读取当前工作台的有限事实；已有需求记录只说明工作台内的内容，不能推断用户的目标。沿用本轮或同话题中已经明确的对象；“这个”等指代仍不清时先询问，不通过通用文件、会话或 SQL 搜索扩大范围。',
-      parameters: Type.Object({
-        requirementId: Type.Optional(Type.String({ description: '按真实需求记录 id 读取一条公开需求及待办草稿' })),
-        query: Type.Optional(Type.String({ description: '在工作台需求标题和备注中搜索，最多 200 字' })),
-        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: '每页最多 10 条；不传时默认 5 条' })),
-        offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: '搜索/摘要页或指定需求待办草稿的起始位置' })),
-      }, { additionalProperties: false }),
-      async execute(_toolCallId, params) {
-        return requirementsContextResult(deps.store, params, maxChars);
-      },
-    },
+    createRequirementsContextTool({ store: deps.store, limits: deps.limits, workspaceDir: deps.workspaceDir }),
   ];
+}
+
+export function createRequirementsContextTool(deps: {
+  store: WorkbenchStore;
+  limits: { maxToolOutputChars: number };
+  workspaceDir: string;
+}): ToolDefinition {
+  const maxChars = deps.limits.maxToolOutputChars;
+  return {
+    name: REQUIREMENTS_TOOL_NAMES['requirements.context']!,
+    label: '读取项目与需求上下文',
+    description: '返回当前绑定项目的名称和路径，并查询需求库公开记录。绑定项目就是默认项目，不要重复询问项目身份；只有具体功能或业务规则等关键缺口才澄清。可按真实需求 id 读取单条，或按标题/备注搜索；使用 limit/offset 分页。',
+    promptSnippet: 'requirements_context: 返回服务端绑定的当前项目标识（目录名、路径）及公开需求记录。当前绑定项目就是默认目标，不要再问项目是什么；项目业务事实以绑定目录资料为准，具体功能或规则缺口才澄清。需求记录用于查询已有需求，不替代项目资料。',
+    parameters: Type.Object({
+      requirementId: Type.Optional(Type.String({ description: '按真实需求记录 id 读取一条公开需求及待办草稿' })),
+      query: Type.Optional(Type.String({ description: '在需求标题和备注中搜索，最多 200 字' })),
+      limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 10, description: '每页最多 10 条；不传时默认 5 条' })),
+      offset: Type.Optional(Type.Integer({ minimum: 0, maximum: 10000, description: '搜索/摘要页或指定需求待办草稿的起始位置' })),
+    }, { additionalProperties: false }),
+    async execute(_toolCallId, params) {
+      return requirementsContextResult(deps.store, params, maxChars, deps.workspaceDir);
+    },
+  };
 }
 
 type ContextParams = { requirementId?: string; query?: string; limit?: number; offset?: number };
@@ -126,8 +145,14 @@ function publicTaskDraft(value: unknown): Record<string, unknown> {
   };
 }
 
-function contextData(store: WorkbenchStore, params: ContextParams, pageLimit: number, excerptLimit: number): Record<string, unknown> {
-  const base = buildRequirementsWorkbenchContext(store);
+function contextData(
+  store: WorkbenchStore,
+  params: ContextParams,
+  pageLimit: number,
+  excerptLimit: number,
+  workspaceDir: string,
+): Record<string, unknown> {
+  const base = buildRequirementsWorkbenchContext(store, workspaceDir);
   const rows = orderedRequirements(store);
   const offset = params.offset ?? 0;
 
@@ -139,7 +164,7 @@ function contextData(store: WorkbenchStore, params: ContextParams, pageLimit: nu
     const drafts = rawDrafts.slice(offset, offset + pageLimit).map(publicTaskDraft);
     const overview = base.requirements as { total: number; statusCounts: Record<string, number> };
     return {
-      hostApplication: base.hostApplication,
+      workspace: base.workspace,
       target: base.target,
       dataScope: base.dataScope,
       requirements: { total: overview.total, statusCounts: overview.statusCounts, items: [] },
@@ -173,7 +198,7 @@ function contextData(store: WorkbenchStore, params: ContextParams, pageLimit: nu
   }));
   const overview = base.requirements as { total: number; statusCounts: Record<string, number> };
   return {
-    hostApplication: base.hostApplication,
+    workspace: base.workspace,
     target: base.target,
     dataScope: base.dataScope,
     ...(query === '' ? {} : { query }),
@@ -201,12 +226,17 @@ function compactResult(data: Record<string, unknown>, maxChars: number): AgentTo
   return { content: [{ type: 'text', text: minimal }], details: { data: JSON.parse(minimal) } };
 }
 
-function requirementsContextResult(store: WorkbenchStore, raw: unknown, maxChars: number): AgentToolResult<unknown> {
+function requirementsContextResult(
+  store: WorkbenchStore,
+  raw: unknown,
+  maxChars: number,
+  workspaceDir: string,
+): AgentToolResult<unknown> {
   const params = parseContextParams(raw);
   let pageLimit = params.limit ?? 5;
   let excerptLimit = params.requirementId === undefined ? 240 : 5000;
   while (true) {
-    const data = contextData(store, params, pageLimit, excerptLimit);
+    const data = contextData(store, params, pageLimit, excerptLimit, workspaceDir);
     if (JSON.stringify(data).length <= maxChars) return compactResult(data, maxChars);
     if (excerptLimit > 0) {
       excerptLimit = Math.floor(excerptLimit / 2);

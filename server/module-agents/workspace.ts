@@ -2,7 +2,7 @@ import { access, mkdir, realpath, stat } from 'node:fs/promises';
 import { constants, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
-import type { AgentId, ProfileLoadResult, ResolvedAgentProfile } from './contracts';
+import type { AgentId, ResolvedAgentProfile } from './contracts';
 
 const ROOT_ENV = 'PI_WEBX_AGENT_WORKSPACE_ROOT';
 
@@ -47,40 +47,11 @@ export async function captureEffectiveWorkspace(id: AgentId, custom: string | un
   catch { return path.resolve(wanted); }
 }
 
-export function workspacePathsOverlap(a: string, b: string): boolean {
-  const childOf = (parent: string, child: string): boolean => {
-    const relative = path.relative(parent, child);
-    return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-  };
-  return childOf(a, b) || childOf(b, a);
-}
-
-export async function assertWorkspaceAvailable(
-  id: AgentId,
-  directory: string,
-  profiles: Map<AgentId, ProfileLoadResult>,
-  live: Iterable<{ agentId: string; cwd: string }> = [],
-): Promise<void> {
-  const canonical = await canonicalWorkspacePath(directory);
-  for (const [otherId, result] of profiles) {
-    if (otherId === id || !result.ok) continue;
-    let other: string;
-    try { other = await canonicalWorkspacePath(effectiveWorkspace(result.profile)); }
-    catch { other = effectiveWorkspace(result.profile); }
-    if (workspacePathsOverlap(canonical, other)) throw new WorkspaceError(`工作区与模块 Agent「${otherId}」的目录重叠`);
-  }
-  for (const session of live) {
-    if (session.agentId === id) continue;
-    if (workspacePathsOverlap(canonical, await canonicalWorkspacePath(session.cwd))) {
-      throw new WorkspaceError(`工作区与运行中的模块 Agent「${session.agentId}」的目录重叠`);
-    }
-  }
-}
-
+// 不同模块 Agent 允许共享同一个工作区（需求与代码常落在同一项目目录）；
+// 这里只做绑定本身的校验（绝对路径、真实目录、可访问），不再比较其他 Agent 的目录。
 export async function validateWorkspaceSelection(
   id: AgentId,
   value: string | null,
-  profiles: Map<AgentId, ProfileLoadResult>,
 ): Promise<string | null> {
   if (value !== null && (typeof value !== 'string' || !path.isAbsolute(value) || value.includes('\0'))) {
     throw new WorkspaceError('工作区必须是绝对路径');
@@ -95,7 +66,6 @@ export async function validateWorkspaceSelection(
   let canonical: string;
   try { canonical = await canonicalWorkspacePath(wanted); }
   catch { throw new WorkspaceError('工作区路径不可访问'); }
-  await assertWorkspaceAvailable(id, canonical, profiles);
   return value === null ? null : canonical;
 }
 
