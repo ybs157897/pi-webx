@@ -174,6 +174,47 @@ check('the dsh tool name is recognised too', () => {
   assert.equal(card.summary, '1/1 已回答');
 });
 
+// 模块 Agent 的 ask_user（server/module-agents/ask-user.ts）：批量入参与
+// ask_question 同形，details 回 `{answers:[{id,value,label}]}`；取消未答整卡按已取消。
+check('the module ask_user tool renders from its batch details', () => {
+  const card = askCardFromRun(
+    run({
+      toolName: 'ask_user',
+      args: {
+        questions: [
+          { id: 'Q1', question: '默认打开正文检索吗？' },
+          { id: 'Q2', question: '索引用内存还是持久？' },
+        ],
+      },
+      details: {
+        answers: [
+          { id: 'Q1', value: '打开', label: '打开' },
+          { id: 'Q2', value: '持久路径', label: '持久路径' },
+        ],
+      },
+    }),
+  );
+  assert.ok(card);
+  assert.equal(card.summary, '2/2 已回答');
+  assert.deepEqual(card.questions, [
+    { id: 'Q1', question: '默认打开正文检索吗？', answers: ['打开'] },
+    { id: 'Q2', question: '索引用内存还是持久？', answers: ['持久路径'] },
+  ]);
+});
+
+check('a module ask_user cancelled before any answer shows cancelled', () => {
+  const card = askCardFromRun(
+    run({
+      toolName: 'ask_user',
+      args: { questions: [{ id: 'Q1', question: '范围怎么定？' }] },
+      details: { cancelled: true },
+    }),
+  );
+  assert.ok(card);
+  assert.equal(card.state, 'cancelled');
+  assert.equal(card.summary, '已取消');
+});
+
 if (failures > 0) {
   console.error(`\n${String(failures)} CHECK(S) FAILED`);
   process.exit(1);

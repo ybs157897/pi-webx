@@ -15,6 +15,7 @@ import { createAssistantMessageEventStream, getSystemMessageText, type Assistant
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
 
 import { assembleModuleAgent } from '../server/module-agents/assemble';
+import { ASK_USER_TOOL_NAME, createAskUserTool } from '../server/module-agents/ask-user';
 import { loadAgentProfiles, defaultAgentsConfigRoot } from '../server/module-agents/profiles';
 import { profileRevision } from '../server/module-agents/snapshots';
 import { PiHost, HostError } from '../server/pi/host';
@@ -182,6 +183,36 @@ function resultText(result: { content?: Array<{ text?: string }> }): string {
   return (result.content ?? []).map(block => block.text ?? '').join('');
 }
 
+/**
+ * 契约钉：没有提问通道时必须同步降级 —— ask_user 要返回 needsFallback 文本，
+ * 不许调用对话框、更不许挂起等待一个永远不会来的答案（离线门禁会因此卡死）。
+ * 这是不依赖 SDK 会话的直接单元断言，桩 ctx 只提供 execute 所需的最小形状。
+ */
+async function assertAskUserNoUiContract(): Promise<void> {
+  const tool = createAskUserTool();
+  assert.equal(tool.name, ASK_USER_TOOL_NAME);
+  assert.equal(ASK_USER_TOOL_NAME, 'ask_user', 'the YAML whitelist entry and the produced tool name must agree');
+  const uiTouches: string[] = [];
+  const noUiCtx = {
+    hasUI: false,
+    ui: {
+      select: () => { uiTouches.push('select'); throw new Error('没有通道时不得发起选择'); },
+      input: () => { uiTouches.push('input'); throw new Error('没有通道时不得发起输入'); },
+    },
+  };
+  const raced = await Promise.race([
+    tool.execute('ask-user-no-ui', {
+      questions: [{ id: 'Q1', question: '范围是否包含旧数据迁移？', choices: [{ label: '包含', description: '影响工作量' }, { label: '不包含' }] }],
+    }, undefined, undefined, noUiCtx as never),
+    new Promise<'timeout'>(resolve => { setTimeout(() => { resolve('timeout'); }, 2_000).unref(); }),
+  ]);
+  assert.notEqual(raced, 'timeout', 'ask_user must degrade instead of hanging without a question channel');
+  const text = resultText(raced as { content?: Array<{ text?: string }> });
+  assert.ok(text.includes('needsFallback'), `the degraded result must carry needsFallback, got ${text}`);
+  assert.equal((raced as { details?: { needsFallback?: boolean } }).details?.needsFallback, true);
+  assert.deepEqual(uiTouches, [], 'the no-channel path must not touch the dialog UI');
+}
+
 async function main(): Promise<void> {
   await Promise.all([
     mkdir(agentDir, { recursive: true }),
@@ -286,12 +317,15 @@ async function main(): Promise<void> {
 
     const toolNames = hosted.session.getAllTools().map(item => item.name).sort();
     for (const expected of [
-      'requirements_context', 'requirements_save_draft', 'requirements_dispatch', 'skills_read',
+      'requirements_context', 'requirements_save_draft', 'requirements_dispatch', 'ask_user', 'skills_read',
       'read', 'write', 'edit', 'ls', 'chatroom_send', 'chatroom_read', 'chatroom_work',
     ]) assert.ok(toolNames.includes(expected), `requirements Agent must expose ${expected}`);
     for (const name of SEARCH_TOOLS) assert.ok(toolNames.includes(name), `requirements Agent must expose read-only search tool ${name}`);
     for (const name of SHELL_TOOLS) assert.ok(!toolNames.includes(name), `legacy snapshot must not restore ${name}`);
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), toolNames, 'all assembled tools are active');
+
+    // 提问卡的通道契约：无 UI 时降级不悬挂，不依赖这里已装配的会话。
+    await assertAskUserNoUiContract();
 
     // 工具文案红线：所有模型可见的工具描述不得出现宿主术语（含 grep/find 的
     // 工作区守卫注入文案与 chatroom_read 的话题限定文案）。
@@ -533,7 +567,7 @@ async function main(): Promise<void> {
     assert.ok(!restored.session.systemPrompt.includes('服务端没有预选目标'));
     await host.kill(restored.id);
 
-    console.log('PASS requirements Agent: scripted SDK context input, bound-project files and cwd, bounded requirements_context, scoped chat history, read-only grep/find kept with shell tools removed, guarded writes, read-only projection, restore/reset boundaries (no model-behavior claim)');
+    console.log('PASS requirements Agent: scripted SDK context input, bound-project files and cwd, bounded requirements_context, ask_user no-channel degrade contract, scoped chat history, read-only grep/find kept with shell tools removed, guarded writes, read-only projection, restore/reset boundaries (no model-behavior claim)');
   } finally {
     await host.disposeAll();
     store.close();

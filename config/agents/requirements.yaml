@@ -8,6 +8,7 @@ tools:
   - requirements.context
   - requirements.saveDraft
   - requirements.dispatch
+  - ask_user
   - skills.read
   - read
   - write

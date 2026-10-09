@@ -19,7 +19,7 @@
 import type { ToolRun } from '../shared/transcript';
 
 /** The tool names whose runs are rendered as a question card. */
-const ASK_TOOL_NAMES = new Set(['ask_question', 'ask_user_question']);
+const ASK_TOOL_NAMES = new Set(['ask_question', 'ask_user_question', 'ask_user']);
 
 export interface AskCardQuestion {
   id: string;

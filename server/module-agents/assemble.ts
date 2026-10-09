@@ -32,6 +32,7 @@ import { createRequirementLifecycleTools } from '../modules/requirements/lifecyc
 import { createRequirementsFileTools } from '../modules/requirements/files';
 import { createRequirementsContextTool } from '../modules/requirements/tools';
 import { createRequirementProjection } from '../modules/requirements/projection';
+import { createAskUserTool } from './ask-user';
 import { REQUIREMENTS_UNSCOPED_TOOLS, requirementsConversationPrompt, scopeRequirementsChatroomRead } from '../modules/requirements/conversation';
 
 export interface AssembleModuleAgentInput {
@@ -114,6 +115,9 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
       produced.push(createRequirementsDispatchTool(store, chatroom, projection), scopeRequirementsChatroomRead(chatroom, profile.config.limits.maxToolOutputChars));
       produced.push(...createRequirementsFileTools(workspaceDir));
     }
+    // ask_user 是提问卡能力上限：所有模块 Agent 都产出，只有 YAML tools 点名的会话
+    // 才会经下面的 resolvedSet 过滤真正激活。
+    produced.push(createAskUserTool());
     if (profile.skills.length) produced.push(skillTool(profile.skills));
     if (profile.skills.length && !profile.config.tools.includes('skills.read')) throw new HostError(503, '配置了 Skills 时必须允许 skills.read');
     const producedNames = new Set(produced.map((tool) => tool.name));
