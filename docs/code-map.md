@@ -60,6 +60,7 @@
 | ├ 事件分发（reduceEvent） | `events.ts` |
 | └ 用户回声（echo） | `echo.ts` |
 | 数据模型类型 | `src/shared/transcript.ts`（reducer 契约与 UI 渲染形状） |
+| 压缩摘要恢复（重启/刷新后可见） | `get_messages` 快照经 `session-snapshot.ts` 的 `restoreSessionMessages` 重建：响应新增 `compactions` 字段（`server/pi/host-commands.ts` 从 `SessionManager.getEntries()` 取最近 5 条 `compaction` 条目，按时间正序投影 `{ summary, tokensBefore, timestamp }`），摘要条目插在重建转写最前部（代表被压缩的早期历史），渲染走 `TranscriptView` 既有 compaction 分支 |
 
 ### 排队消息 / 问答面 / 任务面板（dsh 三件套）
 
@@ -160,6 +161,7 @@
 | 日志领域工具（`logs_*`） | `server/modules/logs/index.ts` + `tools.ts`；`server/module-agents/logs/tools.ts` 仅兼容 re-export |
 | 知识工具（`knowledge_*`） | `server/modules/knowledge/tools.ts`，经 `server/module-agents/knowledge.ts` 的 KnowledgeAccess 做服务端作用域校验与输出截断 |
 | 装配纯函数（工具白名单过滤 + 校验 + MCP 连接装配） | `server/module-agents/assemble.ts`（router 与会话/MCP 门禁共用）；需求装配挂接投影与文件工具，codes 装配注入只读 `createRequirementsContextTool` |
+| 提问卡工具（`ask_user`） | `server/module-agents/ask-user.ts`：会话经 `ctx.ui` 逐题发问并回收答案（选择型点击作答、开放型自由输入，取消即停止后续题目），无 UI 通道时同步返回 `needsFallback` 而不悬挂；模块会话以 noExtensions 隔离、用户级扩展进不来，提问卡只能由装配线提供的自定义工具发出；`assemble.ts` 对全部模块 Agent 产出它作为能力上限，YAML tools 白名单点名的会话才真正激活 |
 | 数据源统一契约与适配器 | `server/data-sources/contracts.ts`、`registry.ts`、`workbench.ts`、`http-json.ts`、`mapping.ts`；接入说明 `docs/architecture/data-source-adapters.md` |
 | 配置资源快照与受限 Skill 读取 | `server/module-agents/resources.ts`、`snapshots.ts`；文本可经 `skills_read` 读取，二进制配套资源以 base64 留存固定版本 |
 | MCP 适配（envRefs/headerRefs 注入、工具桥接、dispose） | `server/module-agents/mcp.ts`；stdio fixture `scripts/mcp-fixture-server.ts` |
@@ -167,6 +169,7 @@
 | 前端面板（复用 AIPanel 外壳 + 能力卡） | `src/workbench-app/agents/ModuleAgentPanel.jsx`、`definitions.js`、`AgentCapabilities.jsx`；日志专属文案在 `modules/logs/agent-ui.js`（App.jsx 以 `agentPanel` 态与通用浮层互斥；日志页已对话化，`logs-agent-open` 侧挂入口退役） |
 | 宿主收口点 | `HostedSession.moduleAgent`（`pi/host-contract.ts`）；装配/恢复/fork/reset 在 `host-session-assembly.ts`；`setToolSelection`（host.ts）、`set_tools`（host-commands.ts）、`refreshSubagentTool`（host-teams.ts）对模块会话短路 |
 | 会话身份条目 | 日志自定义条目 `pi-webx:module-agent`（version 1，装配时写入会话日志） |
+| 模块会话 compaction 注入 | `server/pi/settings-override.ts`：模块 Agent 会话统一注入 compaction 阈值（enabled / reserveTokens 65536 / keepRecentTokens 32768），`host-session-assembly.ts` 装配时包住宿主给的 settingsManager；代理把 `reload()`（装配期 moduleLoader、运行期 AgentSession）转发内层后重放覆盖，阈值不会被重读文件冲掉；主会话与团队会话不经过 |
 | Store 扩展入口 | `WorkbenchStore.searchKnowledge`（json_extract 按库过滤）/ `readKnowledge` / `listRecords` / `sqlite`（@internal） |
 | 门禁 | `scripts/check-data-source-adapters.ts`（异构接口与插件）、`check-module-agent-http.ts`（幂等/并发/快照恢复）、`scripts/check-module-agent-profiles.ts`（A15）、`check-module-agent-knowledge.ts`（A05 服务端）、`check-module-agent-sessions.ts`（A01/A02/A09 服务端，真实 SDK 无模型调用）、`check-module-agent-mcp.ts`（A03/A04 服务端，stdio fixture 子进程） |
 | 设置门禁 | `scripts/check-module-agent-settings.ts`（临时配置根、HTTP 编辑/目录导入、资源完整性、新旧 SDK 会话版本、路径/并发/写失败）；`check-module-agent-skill-settings.ts`（导入、编辑、二进制资源和越界/回滚）；`check-module-agent-prompt-polish.ts`（模型调用契约、错误、超时、取消）；`check-module-agent-project-context.ts`（四个 Agent 的项目身份、真实 SDK 输入、根指令加载与路径/大小边界）；`check-module-agent-workspaces.ts`（SDK 工作目录与新旧会话绑定）；`check-module-agent-workspace-settings.ts`（目录保存、冲突、重置、并发隔离） |
@@ -205,10 +208,11 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css`；`Landing.jsx` 维护居中首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
-| 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
+| 菜单直达双列工作区、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`：codes 同款双列——左列画布主区（`req-canvas-tab` / `req-records-tab` 互斥切换，记录进过即驻留 hidden 保持搜索/选中），右列 `req-chat-column` 需求对话常驻（不再有「需求对话」页签）；工具栏副标题经 `lib/api` 的 `moduleAgents()` 回显绑定工作区路径（`req-workspace-root`，拉取失败显 fallback 文案）；窄屏 899px 以下收单列，`data-mobile-view` + `req-show-canvas`/`req-show-chat` 两个按钮换列；布局 `Conversation.css`；`Landing.jsx` 维护对话列首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
+| 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，回合结束/恢复后刷新 SQLite 投影，并把转写与会话 id 经 `onTranscript` 上报宿主（底部草稿条已退役）；草稿卡由 `DraftCard.jsx` 渲染（分类徽标、已导入转「查看待办」、被 `chatroom_send` 转交后锁定「已转交群处理」不重复导入，转交集合由 `model.jsx` 的 `dispatchedRequirementIds` 从转写推导） |
+| 需求画布（推进脉络投影） | `modules/requirements/canvas-model.js` 的纯函数 `buildRequirementCanvas` 把转写投影成决策树：根取第一条非空 user 正文（超 120 字截断，全文留 `fullText`），`ask_user` 每题一个分支节点（`assistant.tools` 与 `toolResult.run` 按 `toolCallId` 去重，答案按题 id 配对，`details.cancelled` 与「已结束却无答案」按未作答处理），`records` 每条一个产物节点，汇总 `{ asked, answered, drafts, imported }`；`Canvas.jsx` + `Canvas.css` 用嵌套 ul/li + CSS 连接线（`::before/::after`）渲染横向树——根 / 题干 / 选项边（选中加 `is-picked`）/ 答案 / 产物节点（内嵌 `DraftCard.jsx`）+ 收敛行与空态，SSR 纯渲染、不测坐标；`index.jsx` 把画布作为左列主区默认视图（`req-canvas-tab` 带未导入草稿徽标）承载按 `sourceSessionId` 过滤的本会话产物，确认导入入口从对话底栏移到画布 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
-| 需求分类与输入引导 | `modules/requirements/CategoryBadge.jsx`（new/change/fix/enhancement 中文徽标，映射在 `model.jsx` 的 `categoryOf`，缺失按 new）；`Landing.jsx` 首页需求描述引导与可点示例（`starterDraft` 纯函数填入输入框）；`RequirementsChat.jsx` 输入区对齐提示（`alignHintVisible`：有回复、回合结束、输入为空才出现，提示逐条回复 Q1/Q2…）；`ImportDialog.jsx` 头部显示分类、单条待办默认文案 |
+| 需求分类与输入引导 | `modules/requirements/CategoryBadge.jsx`（new/change/fix/enhancement 中文徽标，映射在 `model.jsx` 的 `categoryOf`，缺失按 new）；`Landing.jsx` 首页需求描述引导与可点示例（`starterDraft` 纯函数填入输入框）；`RequirementsChat.jsx` 输入区提示（`alignHintVisible`：最后一条非空 assistant 正文含 Q1/Q2… 编号清单、回合结束、输入为空才出现；回合进行中同槽位改用 `req-waiting-hint` 说明影响分析可能需要几分钟）；`ImportDialog.jsx` 头部显示分类、单条待办默认文案 |
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览、编辑/勾选、焦点与错误反馈；`index.jsx` 管理 409 后保留编辑、显式读取最新需求及关联任务、再次确认；已关联任务转为只读查看 |
 | 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复；`tools.ts` 的 `createRequirementsContextTool` 可独立装配，供 codes 会话只读复用 |
 | 需求文档投影（只读） | `server/modules/requirements/projection.ts`：绑定工作区内 `requirements/` 的文档投影，按 `requirement_projection_meta.mutation_cursor` 对账 `workbench_mutations` 增量，渲染 `README.md` + `REQ-XXXXXX/{requirement,changes}.md`，整批写盘成功才推进游标，可重复调用、确定性重建 |
