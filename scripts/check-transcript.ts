@@ -22,6 +22,7 @@ import {
   retireEcho,
 } from '../src/lib/transcript';
 import { completedProcessSpec, isLiveFoldMember, liveProcessSpec } from '../src/lib/transcript/presentation';
+import { restoreSessionMessages } from '../src/lib/session-snapshot';
 import type {
   AssistantEntry,
   BashEntry,
@@ -477,6 +478,64 @@ check('compaction start/end flags and payloads', () => {
   assert.equal(all[1]!.tokensBefore, 150000);
   assert.equal(all[1]!.tokensAfter, 32000);
   assert.equal(all[1]!.aborted, false);
+});
+
+check('snapshot compaction: summaries from get_messages land at the front of the rebuilt transcript', () => {
+  const messages: PiAgentMessage[] = [
+    { role: 'user', content: 'go', timestamp: 2_000 },
+    { role: 'assistant', content: [{ type: 'toolCall', id: 'c1', name: 'bash' }], stopReason: 'toolUse', timestamp: 2_500 },
+    { role: 'toolResult', toolCallId: 'c1', toolName: 'bash', content: [{ type: 'text', text: 'out' }], isError: false, timestamp: 2_600 },
+    { role: 'assistant', content: [{ type: 'text', text: 'Final answer.' }], stopReason: 'stop', timestamp: 3_000 },
+  ];
+  const state = restoreSessionMessages(createTranscript(), {
+    messages,
+    compactions: [
+      { summary: '第一段被压缩的历史', tokensBefore: 120_000, timestamp: new Date(1_000).toISOString() },
+      { summary: '第二段被压缩的历史', tokensBefore: 150_000, timestamp: new Date(1_500).toISOString() },
+    ],
+  });
+
+  const compactions = entriesOfKind(state, 'compaction') as CompactionEntry[];
+  assert.equal(compactions.length, 2, 'each summary becomes one entry');
+  assert.deepEqual(compactions.map((entry) => entry.id), ['snap-compaction-0', 'snap-compaction-1']);
+  assert.deepEqual(compactions.map((entry) => entry.phase), ['end', 'end'], 'restored summaries are finished compactions');
+  assert.equal(compactions[0]!.summary, '第一段被压缩的历史');
+  assert.equal(compactions[0]!.tokensBefore, 120_000);
+  assert.equal(compactions[0]!.at, 1_000, 'at comes from the session entry timestamp');
+  assert.equal(compactions[1]!.at, 1_500, 'oldest first');
+
+  // 位于最前，且不吞掉重建的历史：压缩摘要 -> 压缩后被保留的消息。
+  assert.deepEqual(
+    state.entries.map((entry) => entry.kind),
+    ['compaction', 'compaction', 'user', 'assistant', 'assistant'],
+  );
+  assert.equal(only(state, 'user').text, 'go');
+
+  // 折叠仍按重建的历史推导，摘要条目不参与任何折叠窗口。
+  const process = state.turnProcesses[1];
+  assert.ok(process, 'prepending summaries does not disturb the derived turn folds');
+  assert.equal(process!.toolCalls, 1);
+  assert.ok(!process!.hiddenIds.includes('snap-compaction-0'));
+  assert.ok(!process!.hiddenIds.includes('snap-compaction-1'));
+  assert.equal(state.entries.find((entry) => entry.id === process!.anchorId)?.kind, 'assistant');
+});
+
+check('snapshot compaction: absent list adds nothing; rows without a summary are dropped', () => {
+  const messages: PiAgentMessage[] = [{ role: 'user', content: 'hi', timestamp: 1 }];
+  const plain = restoreSessionMessages(createTranscript(), { messages });
+  assert.equal(entriesOfKind(plain, 'compaction').length, 0, 'no compactions: no entry');
+  assert.equal(plain.entries.length, 1);
+
+  const cleaned = restoreSessionMessages(createTranscript(), {
+    messages,
+    compactions: [{ summary: '' }, { summary: '   ' }, { summary: '有效的摘要' }],
+  });
+  const compactions = entriesOfKind(cleaned, 'compaction') as CompactionEntry[];
+  assert.equal(compactions.length, 1, 'blank summaries never render a separator of their own');
+  assert.equal(compactions[0]!.id, 'snap-compaction-0');
+  assert.equal(compactions[0]!.summary, '有效的摘要');
+  assert.equal(compactions[0]!.at, 0, 'no timestamp: placed before the whole history');
+  assert.equal(compactions[0]!.tokensBefore, undefined, 'missing tokensBefore stays absent');
 });
 
 check('retries surface notices; final failure clears retrying', () => {

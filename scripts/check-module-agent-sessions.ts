@@ -11,10 +11,11 @@ import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promi
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
+import { ModelRuntime, SettingsManager, DEFAULT_COMPACTION_SETTINGS } from '@earendil-works/pi-coding-agent';
 import { createAssistantMessageEventStream, type AssistantMessage } from '@earendil-works/pi-ai';
 
 import { PiHost, HostError } from '../server/pi/host';
+import { MODULE_COMPACTION_SETTINGS, withCompactionDefaults } from '../server/pi/settings-override';
 import { MAIN_IDENTITY_PROMPT } from '../server/prompts/loader';
 import { WorkbenchStore } from '../server/workbench/store';
 import { assembleModuleAgent } from '../server/module-agents/assemble';
@@ -222,6 +223,37 @@ async function main(): Promise<void> {
     assert.match(refused.error ?? '', /配置决定/);
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), MODULE_TOOL_NAMES, '被拒后工具面不变');
 
+    /* (i) compaction 注入：模块会话取注入值；reload 冲不掉（装配期 moduleLoader.reload
+       已跑过一次，这里再显式 reload 一次钉住回归）；内层其它设置原样转发 */
+    assert.deepEqual(
+      hosted.session.settingsManager.getSettings().compaction,
+      { ...MODULE_COMPACTION_SETTINGS },
+      '模块会话的 compaction 必须是装配层注入值',
+    );
+    assert.equal(hosted.session.settingsManager.getCompactionEnabled(), true);
+    assert.equal(hosted.session.settingsManager.getCompactionReserveTokens(probeModel), MODULE_COMPACTION_SETTINGS.reserveTokens);
+    assert.equal(hosted.session.settingsManager.getCompactionKeepRecentTokens(probeModel), MODULE_COMPACTION_SETTINGS.keepRecentTokens);
+    await hosted.session.settingsManager.reload();
+    assert.deepEqual(
+      hosted.session.settingsManager.getSettings().compaction,
+      { ...MODULE_COMPACTION_SETTINGS },
+      'reload（重读文件重建 settings）之后覆盖必须仍在',
+    );
+    assert.equal(hosted.session.settingsManager.getCompactionEnabled(), true);
+
+    const probed = withCompactionDefaults(SettingsManager.inMemory(
+      { defaultModel: 'kept-model', compaction: { enabled: false, reserveTokens: 1 } },
+      { projectTrusted: false },
+    ));
+    assert.equal(probed.getDefaultModel(), 'kept-model', '非 compaction 设置必须原样转发');
+    assert.deepEqual(
+      probed.getSettings().compaction,
+      { ...MODULE_COMPACTION_SETTINGS },
+      '注入必须压过内层已有的 compaction 值',
+    );
+    await probed.reload();
+    assert.deepEqual(probed.getSettings().compaction, { ...MODULE_COMPACTION_SETTINGS }, '代理 reload 后覆盖仍在');
+
     /* (f) 恢复路径身份核对 */
     const sessionFile = hosted.sessionFile!;
     await host.kill(hosted.id);
@@ -251,15 +283,21 @@ async function main(): Promise<void> {
       '模块会话 fork 必须 400',
     );
 
-    /* (h) 普通会话回归：默认工具集仍在，且无模块工具 */
+    /* (h) 普通会话回归：默认工具集仍在，且无模块工具、无 compaction 注入 */
     const normal = await host.create({ cwd, provider: probeModel.provider, model: probeModel.id });
     const normalNames = normal.session.getAllTools().map((tool) => tool.name);
     assert.ok(normalNames.includes('read') && normalNames.includes('bash'), '普通会话应有内置工具');
     assert.ok(!normalNames.some((name) => name === 'logs_search'), '普通会话不得有模块工具');
     assert.equal(normal.moduleAgent, undefined);
+    assert.equal(normal.session.settingsManager.getSettings().compaction, undefined, '主会话不得被注入 compaction');
+    assert.equal(
+      normal.session.settingsManager.getCompactionReserveTokens(probeModel),
+      DEFAULT_COMPACTION_SETTINGS.reserveTokens,
+      '主会话仍走 pi 内置默认阈值',
+    );
     await host.kill(normal.id);
 
-    console.log('PASS 模块 Agent 装配：工具面恰为领域工具、Skill/提示词收口、身份条目落日志、set_tools/fork/越界恢复全拒、普通会话回归');
+    console.log('PASS 模块 Agent 装配：工具面恰为领域工具、Skill/提示词收口、身份条目落日志、set_tools/fork/越界恢复全拒、compaction 注入 reload 韧性、主会话回归');
   } finally {
     store.close();
     await host.disposeAll();

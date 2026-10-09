@@ -219,6 +219,7 @@ async function dispatchCommand(
         const messages = session.messages;
         const streamingMessage = session.agent.state.streamingMessage;
         const running = session.isStreaming;
+        const compactions = compactionsOf(host, hosted);
         // Captured after the list was read: pi appends to its log and emits
         // the event in the same synchronous turn, so everything the snapshot
         // reflects is already journaled and covered by `throughSeq`.
@@ -232,6 +233,12 @@ async function dispatchCommand(
             throughSeq,
             running,
             streamingMessage,
+            // Compaction summaries the message list cannot express. `messages`
+            // is the model-facing view: history a compaction folded away is
+            // gone from it, so a client reconnecting to a compacted session
+            // would see the kept tail with no sign that anything was
+            // summarized. See `compactionsOf` for the shape and the cap.
+            compactions,
             // Handed back so a reconnecting client restores the prompts an
             // extension is still waiting on, with the time each has left rather
             // than a fresh full timeout.
@@ -354,6 +361,56 @@ async function dispatchCommand(
         return fail(command.type, `unknown command: ${(command as { type: string }).type}`);
     }
   }
+
+/**
+ * Compaction summaries for a snapshot rebuild, oldest first.
+ *
+ * The summaries survive only as `compaction` entries in the session file —
+ * `session.messages` is the resolved, model-facing view and has the summarized
+ * history spliced out — so they are read back from pi's public enumeration,
+ * `SessionManager.getEntries()`. The leaf/branch-aware builders
+ * (`buildContextEntries` and friends) answer a different question: they resolve
+ * what the model still sees, which drops every summary older than the newest
+ * one.
+ *
+ * Capped at the newest few: the entries exist to mark where the surviving
+ * history was cut, a long session gains one per compaction, and each summary is
+ * a multi-KB paragraph that would otherwise ride along on every reconnect.
+ */
+const SNAPSHOT_COMPACTION_LIMIT = 5;
+
+function compactionsOf(
+  host: HostInternals,
+  hosted: HostedSession,
+): Array<{
+  summary: string;
+  tokensBefore: number;
+  timestamp: string;
+}> {
+  try {
+    const summaries: Array<{ summary: string; tokensBefore: number; timestamp: string }> = [];
+    for (const entry of hosted.session.sessionManager.getEntries()) {
+      if (entry.type !== 'compaction') continue;
+      summaries.push({
+        summary: entry.summary,
+        tokensBefore: entry.tokensBefore,
+        timestamp: entry.timestamp,
+      });
+    }
+    // File order is append order, not time order: `branch()` points the leaf
+    // back at an older entry, so later appends can carry older timestamps.
+    summaries.sort((left, right) => compactionAt(left.timestamp) - compactionAt(right.timestamp));
+    return summaries.slice(-SNAPSHOT_COMPACTION_LIMIT);
+  } catch (error) {
+    broadcastError(host, hosted, `无法读取压缩摘要：${errorText(error)}`);
+    return [];
+  }
+}
+
+function compactionAt(timestamp: string): number {
+  const at = Date.parse(timestamp);
+  return Number.isFinite(at) ? at : 0;
+}
 
 /**
  * The session's slash commands, as the browser's command menu needs them.

@@ -34,6 +34,7 @@ import {
 } from './host-teams';
 import { skillsPrompt } from '../module-agents/resources';
 import { boundSessionWorkspace } from '../module-agents/workspace';
+import { withCompactionDefaults } from './settings-override';
 import {
   MAX_SESSIONS,
   errorText,
@@ -209,12 +210,28 @@ export async function createHostedSession(
     const agentDir = getAgentDir();
     const settings = host.settingsOption(cwd);
     /**
+     * 模块会话的 settingsManager 一律是带 compaction 覆盖的实例（阈值见
+     * `settings-override.ts`）：用一个 reload 韧性代理包住宿主给的实例，
+     * 装配期 `moduleLoader.reload()` 与运行期 `AgentSession.reload()` 都不会
+     * 把覆盖冲掉。
+     *
+     * 宿主没配 settingsManagerFactory（生产路径）时这里自建一个：SDK 自己的
+     * 回退写法就是 `SettingsManager.create(cwd, agentDir)`（`createAgentSession`
+     * 与 DefaultResourceLoader 同款），所以这不是新的设置来源，只是把同一份
+     * 文件设置在交给 SDK 前包上覆盖层——否则注入只落在测试路径上。
+     *
+     * 主会话（moduleAgent === undefined）与团队会话仍原样使用宿主设置，不经过这里。
+     */
+    const moduleSettings = moduleAgent === undefined
+      ? undefined
+      : withCompactionDefaults(settings.settingsManager ?? SettingsManager.create(cwd, agentDir));
+    /**
      * 模块会话关闭默认资源发现；项目指令仅来自装配时校验过的绑定根目录。
      * 提示词与 Skills 由 profile 提供，不加载主会话或全局配置。
      */
     const moduleLoader = moduleAgent === undefined ? undefined : new DefaultResourceLoader({
       cwd, agentDir,
-      ...(settings.settingsManager !== undefined ? { settingsManager: settings.settingsManager } : {}),
+      ...(moduleSettings !== undefined ? { settingsManager: moduleSettings } : {}),
       noExtensions: true,
       noSkills: true,
       noPromptTemplates: true,
@@ -256,8 +273,8 @@ export async function createHostedSession(
       ...(moduleAgent !== undefined
         ? { tools: [...new Set([...moduleAgent.customTools.map((tool) => tool.name), ...moduleAgent.allowedToolNames])] }
         : {}),
-      ...(moduleLoader !== undefined
-        ? { ...settings, resourceLoader: moduleLoader }
+      ...(moduleLoader !== undefined && moduleSettings !== undefined
+        ? { ...settings, settingsManager: moduleSettings, resourceLoader: moduleLoader }
         : teamLoader === undefined
           ? { ...settings, ...(mainLoader !== undefined ? { resourceLoader: mainLoader } : {}) }
           : { settingsManager: teamSettings, resourceLoader: teamLoader }),

@@ -573,6 +573,21 @@ export interface SessionSummary {
 }
 
 /**
+ * One compaction summary carried by a snapshot.
+ *
+ * pi's session file keeps them as `compaction` entries, while `messages` is the
+ * resolved model view that no longer contains the summarized history — so a
+ * client rebuilding from a snapshot needs them alongside, or a session's
+ * compression is invisible after a reload.
+ */
+export interface PiCompactionSummary {
+  summary: string;
+  tokensBefore?: number;
+  /** ISO timestamp of the compaction entry. */
+  timestamp?: string;
+}
+
+/**
  * `get_messages` result payload: the message list plus `throughSeq`, the
  * journal seq the list already reflects. Frames with `seq <= throughSeq` are
  * covered by the snapshot; the client applies only newer ones.
@@ -580,6 +595,8 @@ export interface SessionSummary {
 export interface MessagesPayload {
   messages: PiAgentMessage[];
   throughSeq: number;
+  /** Oldest first, as the transcript reads it; absent when nothing was compacted. */
+  compactions?: PiCompactionSummary[];
 }
 
 export interface CreateSessionRequest {
