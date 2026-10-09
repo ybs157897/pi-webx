@@ -48,7 +48,9 @@ function ThinkingBlock({
   const [hovered, setHovered] = useState(false);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column' }}>
+    // minWidth keeps this column from inheriting the flex row's min-content
+    // width when a reasoning line has no break opportunity (see the body).
+    <div style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
       <Flexbox
         horizontal
         align="center"
@@ -82,10 +84,22 @@ function ThinkingBlock({
             // `.thinkBody` geometry.
             padding: '4px 0 4px 22px',
             maxHeight: 360,
-            overflow: 'auto',
+            minWidth: 0,
+            // Long reasoning lines have to wrap inside the transcript column:
+            // the outer scroll container clips overflow-x, and this box sits in
+            // a flex column whose cross-size defaults to min-content — one
+            // unbreakable token (a URL, a code string) used to push that width
+            // past the column and get its tail cut off. `minWidth: 0` lets the
+            // box shrink to the column, and `overflow-wrap: anywhere` (unlike
+            // the legacy `break-word` value, which only breaks when overflow
+            // already happened) also lowers min-content so long tokens wrap;
+            // the explicit overflowX keeps a scrollbar as the last resort.
+            overflowY: 'auto',
+            overflowX: 'auto',
             fontSize: 13,
             lineHeight: 1.6,
             whiteSpace: 'pre-wrap',
+            overflowWrap: 'anywhere',
             wordBreak: 'break-word',
             color: token.colorTextTertiary,
           }}
