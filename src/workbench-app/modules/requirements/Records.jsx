@@ -10,6 +10,7 @@ import { IconPlus, IconRequirements, IconSearch } from '../../icons.jsx'
 
 import './Requirements.css'
 
+import CategoryBadge from './CategoryBadge.jsx'
 import Reader from './Reader.jsx'
 import {
   TEXT,
@@ -283,6 +284,7 @@ export default function Records({ data, mutate, notify, refresh, navigate, onImp
                                 <span className="req-item-title">{String(row.title ?? '')}</span>
                               </span>
                               <span className="req-item-foot">
+                                <CategoryBadge value={row.category} testid="req-item-category" />
                                 <span className="req-item-tags">
                                   {tagsOf(row).map(tag => <Chip key={tag}>#{tag}</Chip>)}
                                 </span>

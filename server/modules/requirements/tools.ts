@@ -37,6 +37,9 @@ export function createRequirementsTools(deps: {
         title: Type.String({ description: '需求标题，最多 200 字' }),
         note: Type.Optional(Type.String({ description: '背景、范围、约束和验收标准，最多 5000 字' })),
         priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('normal'), Type.Literal('high')])),
+        category: Type.Optional(Type.Union([
+          Type.Literal('new'), Type.Literal('change'), Type.Literal('fix'), Type.Literal('enhancement'),
+        ], { description: '需求分类标记：new 新功能 / change 需求变更 / fix 问题修复 / enhancement 体验优化；省略时按新功能保存' })),
         taskDrafts: Type.Array(Type.Object({
           title: Type.String({ description: '可执行的待办标题' }),
           priority: Type.Optional(Type.Union([Type.Literal('low'), Type.Literal('normal'), Type.Literal('high')])),
@@ -114,6 +117,7 @@ function publicSummary(store: WorkbenchStore, row: RequirementRow): Record<strin
     id: row.id,
     ...(typeof row.title === 'string' ? { title: row.title } : {}),
     ...(typeof row.status === 'string' ? { status: row.status } : {}),
+    ...(typeof row.category === 'string' ? { category: row.category } : {}),
     updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : null,
     currentVersion: getPublicRequirementVersion(store, row.id),
   };
@@ -173,6 +177,7 @@ function contextData(
         ...(typeof row.title === 'string' ? { title: row.title } : {}),
         ...(typeof row.status === 'string' ? { status: row.status } : {}),
         ...(typeof row.priority === 'string' ? { priority: row.priority } : {}),
+        ...(typeof row.category === 'string' ? { category: row.category } : {}),
         updatedAt: typeof row.updatedAt === 'string' ? row.updatedAt : null,
         note: noteExcerpt(note, '', excerptLimit),
         noteLength: note.length,

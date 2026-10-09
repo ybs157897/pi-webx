@@ -31,6 +31,7 @@ export const schema = {
     title: { ...FIELDS.title, required: true },
     priority: { ...FIELDS.priority, default: 'normal' },
     status: { ...FIELDS.status, default: 'todo' },
+    category: { ...FIELDS.category, default: 'new' },
     note: { ...FIELDS.note, default: '' },
     sourceSessionId: { ...FIELDS.recordId, default: '' },
     taskDrafts: {

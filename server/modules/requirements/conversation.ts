@@ -5,7 +5,8 @@ import { WorkbenchInputError } from '../../workbench/store';
 import type { ChatroomService } from '../chatroom/service';
 import { buildRequirementsWorkbenchContext } from './context';
 
-export const REQUIREMENTS_UNSCOPED_TOOLS = new Set(['bash', 'powershell', 'grep', 'find']);
+/** Shell tools stay out of requirements sessions; read-only search (grep/find) is allowed for code impact analysis. */
+export const REQUIREMENTS_UNSCOPED_TOOLS = new Set(['bash', 'powershell']);
 
 export function requirementsConversationPrompt(store: WorkbenchStore, workspaceDir: string): string {
   return `需求会话的资料范围与执行顺序：
@@ -21,7 +22,7 @@ export function scopeRequirementsChatroomRead(service: ChatroomService, maxChars
   return {
     name: 'chatroom_read',
     label: '读取当前群话题',
-    description: '仅在当前群投递中读取该话题的公开消息。普通需求页面使用 requirements_context 查询工作台需求，不读取其他群话题。',
+    description: '仅在当前群投递中读取该话题的公开消息。普通需求页面使用 requirements_context 查询需求记录，不读取其他群话题。',
     parameters: Type.Object({
       after: Type.Optional(Type.Integer({ minimum: 0 })),
       limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 40 })),

@@ -42,6 +42,9 @@ export const FIELDS = {
   status: {
     check: v => ['todo', 'doing', 'done'].includes(v), cast: v => (['todo', 'doing', 'done'].includes(v) ? v : 'todo'), message: '状态只能是 todo/doing/done',
   },
+  category: {
+    check: v => ['new', 'change', 'fix', 'enhancement'].includes(v), cast: v => (['new', 'change', 'fix', 'enhancement'].includes(v) ? v : 'new'), message: '需求分类只能是 new/change/fix/enhancement',
+  },
   level: {
     check: v => ['info', 'warn', 'error'].includes(v), cast: v => (['info', 'warn', 'error'].includes(v) ? v : 'info'), message: '级别只能是 info/warn/error',
   },

@@ -9,7 +9,7 @@ import { normalizeTaskDrafts } from './schema.mjs';
 
 type RecordRow = Record<string, unknown> & { id: string };
 type DispatchResult = { requirement: RecordRow; tasks: RecordRow[]; alreadyDispatched: boolean };
-const KEYS = new Set(['entryKey', 'id', 'title', 'note', 'priority', 'taskDrafts']);
+const KEYS = new Set(['entryKey', 'id', 'title', 'note', 'priority', 'category', 'taskDrafts']);
 
 /** A mentioned requirements Agent owns draft preparation and its atomic todo import. */
 export function dispatchRequirementTasks(store: WorkbenchStore, chatroom: ChatroomService, sessionId: string, raw: unknown): DispatchResult {
@@ -18,13 +18,18 @@ export function dispatchRequirementTasks(store: WorkbenchStore, chatroom: Chatro
   if (!raw || typeof raw !== 'object' || Array.isArray(raw) || Object.keys(raw).some(key => !KEYS.has(key))) {
     throw new WorkbenchInputError('需求交接参数不合法');
   }
-  const { entryKey, id, title, note, priority, taskDrafts } = raw as Record<string, unknown>;
+  const { entryKey, id, title, note, priority, category, taskDrafts } = raw as Record<string, unknown>;
   if (typeof entryKey !== 'string' || !/^[\w.:-]{1,80}$/.test(entryKey)) throw new WorkbenchInputError('需求交接需要稳定的 entryKey');
   let normalizedDrafts;
   try { normalizedDrafts = normalizeTaskDrafts(taskDrafts); }
   catch (error) { throw new WorkbenchInputError(error instanceof Error ? error.message : '待办草稿不合法'); }
-  const fields = { id, title, note: note ?? '', priority: priority ?? 'normal', taskDrafts: normalizedDrafts };
-  const fingerprint = createHash('sha256').update(JSON.stringify(fields)).digest('hex');
+  const fields = { id, title, note: note ?? '', priority: priority ?? 'normal', category, taskDrafts: normalizedDrafts };
+  // 派工指纹与保存回执同一套语义等价归一化：create 的默认分类（省略或显式
+  // new）不进指纹，与引入 category 前持久化的旧派工回执可比，省略与显式
+  // new 互为重试；显式非默认分类（及 update 显式传分类）才改变指纹。
+  const fingerprintFields = { ...fields } as typeof fields & { category?: unknown };
+  if (id === undefined && (category === undefined || category === 'new')) delete fingerprintFields.category;
+  const fingerprint = createHash('sha256').update(JSON.stringify(fingerprintFields)).digest('hex');
   store.sqlite.exec(`CREATE TABLE IF NOT EXISTS requirement_chatroom_dispatches (
     message_id TEXT NOT NULL, entry_key TEXT NOT NULL, fingerprint TEXT NOT NULL,
     result TEXT NOT NULL CHECK(json_valid(result)), PRIMARY KEY(message_id, entry_key)
@@ -71,6 +76,9 @@ export function dispatchRequirementTasks(store: WorkbenchStore, chatroom: Chatro
 
 export function createRequirementsDispatchTool(store: WorkbenchStore, chatroom: ChatroomService, projection?: RequirementProjection): ToolDefinition {
   const priority = Type.Union([Type.Literal('low'), Type.Literal('normal'), Type.Literal('high')]);
+  const category = Type.Union([
+    Type.Literal('new'), Type.Literal('change'), Type.Literal('fix'), Type.Literal('enhancement'),
+  ], { description: '需求分类标记：new 新功能 / change 需求变更 / fix 问题修复 / enhancement 体验优化；省略时按新功能保存' });
   return {
     name: 'requirements_dispatch', label: '整理需求并加入待办',
     description: '在群聊中被 @需求管理 接到需要实施的需求后，将澄清完的需求和待办一次保存并导入。必须写清目标、范围、约束与验收条件；缺少关键条件先在群里提问。成功返回真实待办 ID，随后用 chatroom_send 发 @代码开发 并交代实施要求，引用自动随交接传递。稳定 entryKey 防止重试重复创建；不写排期。',
@@ -80,6 +88,7 @@ export function createRequirementsDispatchTool(store: WorkbenchStore, chatroom: 
       title: Type.String({ minLength: 1, maxLength: 200 }),
       note: Type.String({ minLength: 1, maxLength: 5000, description: '目标、范围、约束和每项验收条件' }),
       priority: Type.Optional(priority),
+      category: Type.Optional(category),
       taskDrafts: Type.Array(Type.Object({
         title: Type.String({ minLength: 1, maxLength: 200 }), priority: Type.Optional(priority),
         due: Type.Optional(Type.Union([Type.String(), Type.Null()])), tag: Type.Optional(Type.String()),

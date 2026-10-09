@@ -26,25 +26,31 @@ export function normalizeRequirementDraftForIdempotency(
 ): NormalizedRequirementDraftInput {
   if (!sourceSessionId) throw new WorkbenchInputError('需求会话身份缺失');
   if (!object(raw)) throw new WorkbenchInputError('需求草稿需要是对象');
-  const { id, title, note, priority, taskDrafts } = raw;
+  const { id, title, note, priority, category, taskDrafts } = raw;
   if (id !== undefined && (typeof id !== 'string' || id === '')) throw new WorkbenchInputError('需求 ID 不合法');
   if (id === undefined && drafts(taskDrafts).length === 0) throw new WorkbenchInputError('请至少拆出一条待办草稿');
 
   let normalized: Record<string, unknown>;
   try {
-    normalized = validateFields('requirements', { title, note, priority, taskDrafts, sourceSessionId },
+    normalized = validateFields('requirements', { title, note, priority, category, taskDrafts, sourceSessionId },
       id === undefined ? undefined : { partial: true });
   } catch (error) {
     throw new WorkbenchInputError(error instanceof Error ? error.message : String(error));
   }
   const params: Record<string, unknown> = {};
   if (id !== undefined) params.id = id;
-  for (const key of ['title', 'note', 'priority', 'taskDrafts']) {
+  for (const key of ['title', 'note', 'priority', 'category', 'taskDrafts']) {
     if (Object.hasOwn(normalized, key)) params[key] = normalized[key];
   }
+  // 指纹做语义等价归一化：create 的默认分类（省略或显式 new）不进指纹，
+  // 与引入 category 字段前持久化的旧回执保持可比，省略与显式 new 也视为同一
+  // 保存；只有显式非默认分类才改变指纹。update 维持「显式传才进指纹」，
+  // 省略即保留原值。
+  const fingerprintParams = { ...params };
+  if (id === undefined && fingerprintParams.category === 'new') delete fingerprintParams.category;
   return {
     params,
-    fingerprint: { operation: id === undefined ? 'create' : 'update', params },
+    fingerprint: { operation: id === undefined ? 'create' : 'update', params: fingerprintParams },
   };
 }
 
@@ -64,8 +70,8 @@ function linkedTasks(store: WorkbenchStore, id: string): RecordRow[] {
 export function saveRequirementDraft(store: WorkbenchStore, sourceSessionId: string, raw: unknown): RecordRow {
   if (!sourceSessionId) throw new WorkbenchInputError('需求会话身份缺失');
   if (!object(raw)) throw new WorkbenchInputError('需求草稿需要是对象');
-  const { id, title, note, priority, taskDrafts } = raw;
-  const fields = { title, note, priority, taskDrafts, sourceSessionId };
+  const { id, title, note, priority, category, taskDrafts } = raw;
+  const fields = { title, note, priority, category, taskDrafts, sourceSessionId };
   if (id === undefined) {
     if (drafts(taskDrafts).length === 0) throw new WorkbenchInputError('请至少拆出一条待办草稿');
     return store.addRecord('requirements', fields);

@@ -13,6 +13,8 @@ tools:
   - write
   - edit
   - ls
+  - grep
+  - find
   - chatroom.send
   - chatroom.read
   - chatroom.work

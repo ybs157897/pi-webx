@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import AIPanel from '../../shell/AIPanel.jsx'
 import { useModuleAgentChat } from '../../agents/useModuleAgentChat.jsx'
-import { RequirementsNewConversation, RequirementsStarterActions, RequirementsWelcome } from './Landing.jsx'
+import { RequirementsNewConversation, RequirementsStarterActions, RequirementsWelcome, alignHintVisible, starterDraft } from './Landing.jsx'
 
 export const requirementsAgentPanel = {
   id: 'requirements',
@@ -38,10 +38,11 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
   const records = (data?.requirements ?? []).filter(row => sessionId && row.sourceSessionId === sessionId)
     .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   const configError = capabilityError || (capability && !capability.ok ? capability.error || '需求助手未启用，请在 Agent 配置中检查。' : '')
+  // 对齐提示：Agent 问完一轮（正文里的 Q1/Q2 清单）而用户还没落笔时露一次。
+  const showAlignHint = alignHintVisible(transcript?.entries, busy, draft)
 
   function chooseStarter(prompt) {
-    const content = starterPrefix.current && draft.startsWith(starterPrefix.current) ? draft.slice(starterPrefix.current.length) : draft
-    setDraft(prompt + content)
+    setDraft(starterDraft(starterPrefix.current, draft, prompt))
     starterPrefix.current = prompt
     panelRef.current?.querySelector('textarea')?.focus()
   }
@@ -52,8 +53,11 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
         dialog={dialog} onRespondDialog={respondToDialog} onSend={send} onAction={send} onNew={newConversation} onRetry={retry} onRefreshData={refreshDrafts}
         sendDisabled={sendDisabled} onUpdateQueue={updateQueue} canNewConversation={canNewConversation}
         onStop={canStop ? stop : undefined} stopping={stopping} draft={draft} onDraftChange={setDraft}
-        emptyState={<RequirementsWelcome error={configError} />}
-        composerLeading={<RequirementsNewConversation busy={busy || canNewConversation === false} onNew={newConversation} />}
+        emptyState={<RequirementsWelcome error={configError} busy={busy} onChoose={chooseStarter} />}
+        composerLeading={<>
+          <RequirementsNewConversation busy={busy || canNewConversation === false} onNew={newConversation} />
+          {showAlignHint && <span className="req-align-hint" data-testid="req-align-hint" title="Agent 的待确认清单以 Q1、Q2… 编号，逐条回复即可对齐">逐条回复 Q1、Q2… 编号即可对齐</span>}
+        </>}
         composerFooter={<RequirementsStarterActions busy={busy} status={status} modelName={modelName} onChoose={chooseStarter} />} />
     </div>
     {refreshError && <p role="alert" className="req-chat-error" data-testid="req-refresh-error">草稿刷新失败：{refreshError}<button className="btn btn-sm" type="button" onClick={refreshDrafts}>重试</button></p>}

@@ -6,6 +6,7 @@ import { formatStamp } from '../../util.mjs'
 import AssistantMarkdown from '../../pi-webx/AssistantMarkdown.jsx'
 import './Requirements.css'
 
+import CategoryBadge from './CategoryBadge.jsx'
 import { TEXT, STATUS_STEPS, priorityOf, statusOf, tagsOf } from './model.jsx'
 
 export default function Reader({
@@ -77,6 +78,7 @@ export default function Reader({
           label={`「${title}」${TEXT.fieldStatus}`}
         />
         <Chip tone={priority.tone}>{TEXT.priorityLabel} {priority.label}</Chip>
+        <CategoryBadge value={row.category} testid="req-reader-category" />
       </div>
 
       <div className="req-reader-meta" data-testid="req-reader-meta">

@@ -176,6 +176,9 @@
 
 .req-reader-badges { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 
+/* 分类徽标（新功能 / 需求变更 / 问题修复 / 体验优化）：文案自带语义，颜色只是辅助。 */
+.req-category { flex: none; }
+
 .req-reader-meta {
   display: flex;
   flex-wrap: wrap;

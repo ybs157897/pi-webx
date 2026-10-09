@@ -119,7 +119,7 @@ export async function assembleModuleAgent(input: AssembleModuleAgentInput): Prom
     const producedNames = new Set(produced.map((tool) => tool.name));
     // 手写 YAML 可能关闭全部 Skill，却仍保留旧的 skills.read 声明。
     const configuredTools = profile.skills.length ? profile.config.tools : profile.config.tools.filter(name => name !== 'skills.read');
-    // Old profile snapshots must not restore the unscoped shell/search tools.
+    // Old profile snapshots must not restore the unscoped shell tools (read-only grep/find stay allowed).
     resolved = resolveToolNames(agentId, configuredTools)
       .filter(name => agentId !== 'requirements' || !REQUIREMENTS_UNSCOPED_TOOLS.has(name));
     for (const name of resolved) {

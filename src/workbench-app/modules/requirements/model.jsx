@@ -83,6 +83,14 @@ const STATUS_STEPS = [
   { value: 'done', label: TEXT.done, tone: 'ok' },
 ]
 
+/** 分类四档：取值即 schema 的 category，中文标签是需求库语境的展示名。 */
+const CATEGORY_OPTIONS = [
+  { value: 'new', label: '新功能', tone: 'accent' },
+  { value: 'change', label: '需求变更', tone: 'warn' },
+  { value: 'fix', label: '问题修复', tone: 'danger' },
+  { value: 'enhancement', label: '体验优化', tone: 'ok' },
+]
+
 const STATUS_FILTERS = [{ value: 'all', label: TEXT.filterAll }, ...STATUS_STEPS]
 
 /** 新建/编辑表单的空值：`id` 为 null 表示新建（tags 在表单里是逗号分隔文本）。 */
@@ -106,6 +114,16 @@ function tagsOf(row) {
   return Array.isArray(row?.tags) ? row.tags : []
 }
 
+/**
+ * 分类取值 → 展示档位。旧数据可能没有 category 字段，按后端契约缺省 new；
+ * 未知取值原样显示（不静默改写成 new，也不吞掉服务端的新档位）。
+ */
+function categoryOf(value) {
+  const text = String(value ?? '').trim()
+  if (text === '') return CATEGORY_OPTIONS[0]
+  return CATEGORY_OPTIONS.find(option => option.value === text) ?? { value: text, label: text, tone: '' }
+}
+
 /** 关联数组：`{ type, id }[]`，type 用模块 id。 */
 function refsOf(row) {
   return Array.isArray(row?.refs) ? row.refs : []
@@ -127,7 +145,7 @@ function parseTags(text) {
 }
 
 export {
-  TEXT, PRIORITY_OPTIONS, STATUS_STEPS, STATUS_FILTERS, EMPTY_FORM,
-  byUpdatedDesc, priorityOf, statusOf, tagsOf, refsOf,
+  TEXT, PRIORITY_OPTIONS, STATUS_STEPS, STATUS_FILTERS, CATEGORY_OPTIONS, EMPTY_FORM,
+  byUpdatedDesc, priorityOf, statusOf, categoryOf, tagsOf, refsOf,
   linksTo, parseTags,
 }

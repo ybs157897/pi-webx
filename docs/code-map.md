@@ -208,12 +208,13 @@
 | 菜单直达中央对话、历史记录切换、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`；布局 `Conversation.css`；`Landing.jsx` 维护居中首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
 | 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，按 `sourceSessionId` 过滤本次会话草稿，回合结束/恢复后刷新 SQLite 投影 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
+| 需求分类与输入引导 | `modules/requirements/CategoryBadge.jsx`（new/change/fix/enhancement 中文徽标，映射在 `model.jsx` 的 `categoryOf`，缺失按 new）；`Landing.jsx` 首页需求描述引导与可点示例（`starterDraft` 纯函数填入输入框）；`RequirementsChat.jsx` 输入区对齐提示（`alignHintVisible`：有回复、回合结束、输入为空才出现，提示逐条回复 Q1/Q2…）；`ImportDialog.jsx` 头部显示分类、单条待办默认文案 |
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览、编辑/勾选、焦点与错误反馈；`index.jsx` 管理 409 后保留编辑、显式读取最新需求及关联任务、再次确认；已关联任务转为只读查看 |
 | 需求领域工具与原子导入 | `server/modules/requirements/{tools,import-tasks}.ts`；`requirements_save_draft` 只保存草稿，`POST /api/workbench/requirements/:id/import-tasks` 显式确认、版本校验、整批事务、防重复；`tools.ts` 的 `createRequirementsContextTool` 可独立装配，供 codes 会话只读复用 |
 | 需求文档投影（只读） | `server/modules/requirements/projection.ts`：绑定工作区内 `requirements/` 的文档投影，按 `requirement_projection_meta.mutation_cursor` 对账 `workbench_mutations` 增量，渲染 `README.md` + `REQ-XXXXXX/{requirement,changes}.md`，整批写盘成功才推进游标，可重复调用、确定性重建 |
 | 草稿保存幂等回执 | `server/modules/requirements/draft-idempotency.ts` 按会话与 toolCallId / 可选 entryKey 关联成功回执，保存、版本与回执在同一事务中完成；`import-tasks.ts` 提供固定字段顺序的归一化，不按相同内容合并新需求 |
-| 需求关联上下文与读取边界 | `server/modules/requirements/context.ts` 提供实际绑定项目路径、目录标识与公开需求的有限只读投影；`conversation.ts` 默认以整个绑定工作区为需求项目，允许在根内核实项目材料，只澄清功能与业务缺口并限制群读取为当前话题；`files.ts` 将 read/write/edit/ls 限于绑定工作区，对 `requirements/` 投影目录 write/edit/mkdir 拒绝、read/ls 放行（错误文案：需求投影目录由需求库自动维护，只读），`module-agents/assemble.ts` 对旧快照同样移除需求会话 shell/跨目录搜索 |
-| 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts`，导入标记由服务端写入 |
+| 需求关联上下文与读取边界 | `server/modules/requirements/context.ts` 提供实际绑定项目路径、目录标识与公开需求的有限只读投影；`conversation.ts` 默认以整个绑定工作区为需求项目，允许在根内核实项目材料，只澄清功能与业务缺口并限制群读取为当前话题；`files.ts` 将 read/write/edit/ls 限于绑定工作区，对 `requirements/` 投影目录 write/edit/mkdir 拒绝、read/ls 放行（错误文案：需求投影目录由需求库自动维护，只读），`module-agents/assemble.ts` 对旧快照同样移除需求会话 shell 工具（只读 grep/find 保留用于代码影响分析） |
+| 配置和结构化字段 | `config/agents/requirements.yaml`、`prompts/requirements.md`；`server/modules/requirements/schema.mjs` 维护 `sourceSessionId` / `taskDrafts` / `category`（new/change/fix/enhancement，默认 new），导入标记由服务端写入 |
 | 待办来源跳转 | `App.jsx` 的 `navigationTarget`、`shell/navigation.mjs`（tasks → assistant 的「待办」页签）、`modules/tasks/{index,model}.jsx`；导入后进入全部视图，任务 refs 回到对应需求记录 |
 | 门禁 | `scripts/check-requirements-import.ts` 覆盖持久化/HTTP/事务/导入幂等；`check-requirements-draft-idempotency.ts` 覆盖保存回执、重启/回滚及真实 SDK 重试；`requirements-boundary-browser-fixture.ts` 提供隔离冲突恢复夹具；`check-requirements-agent-context.ts` 覆盖 SDK 上下文、旧快照及路径/话题边界；`scripts/check-requirements-ui.tsx` 与 `check-workbench-ui.ts` 覆盖 SSR DOM |
 

@@ -48,6 +48,25 @@ try {
   assert.throws(() => saveRequirementDraft(store, 'session-12345678', { title: '空草稿' }), /待办草稿/);
   assert.throws(() => store.addRecord('requirements', { title: '坏草稿', taskDrafts: [{ title: '' }] }), /草稿/);
 
+  // category：省略默认 new、显式枚举可写、非法枚举被拒（草稿保存与通用记录写入两条路径）。
+  assert.equal(first.category, 'new', '保存草稿省略 category 必须默认为 new');
+  assert.throws(() => saveRequirementDraft(store, 'session-12345678', {
+    title: '坏分类草稿', category: 'bogus', taskDrafts: [{ title: '分类校验' }],
+  }), /分类/);
+  assert.throws(() => store.addRecord('requirements', { title: '坏分类记录', category: 'bogus' }), /分类/);
+  const categorized = saveRequirementDraft(store, 'session-12345678', {
+    title: '显式分类草稿', category: 'fix', taskDrafts: [{ title: '按分类拆分' }],
+  });
+  assert.equal(categorized.category, 'fix');
+  assert.equal(store.updateRecord('requirements', categorized.id, { category: 'enhancement' }).category, 'enhancement');
+  const badCategoryPatch = await fetch(`${base}/requirements/${first.id}`, {
+    method: 'PATCH', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ category: 'bogus' }),
+  });
+  assert.equal(badCategoryPatch.status, 400, 'HTTP 修订非法分类必须被拒');
+  assert.equal(store.listRecords('requirements').find(row => row.id === first.id)?.category, 'new',
+    '被拒的修订不得改动原记录分类');
+
   const updated = store.updateRecord('requirements', first.id, {
     taskDrafts: [{ title: '预览时选中的一条', priority: 'high', due: null, tag: '' }],
   });
@@ -79,6 +98,8 @@ try {
   ]);
   assert.equal(responses[0]!.requirement.importedTaskIds.length, 2);
   assert.equal(responses[0]!.requirement.taskDrafts.length, 2);
+  assert.equal(store.listRecords('requirements').find(row => row.id === first.id)?.category, 'new',
+    '导入待办后需求分类必须保留');
   assert.equal(store.links('requirements', first.id).incoming.length, 2);
   const conflict = await post(`/requirements/${first.id}/import-tasks`, {
     expectedUpdatedAt: current.updatedAt, tasks: [{ title: '换一批' }],

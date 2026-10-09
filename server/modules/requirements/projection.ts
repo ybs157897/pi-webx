@@ -32,10 +32,15 @@ const README = `# 需求库只读投影
 
 ## 目录结构
 
-- \`REQ-XXXXXX/requirement.md\`：需求当前快照，含真实需求 ID、状态、优先级、备注与待办草稿。
+- \`REQ-XXXXXX/requirement.md\`：需求当前快照，含真实需求 ID、状态、优先级、分类、备注与待办草稿。
 - \`REQ-XXXXXX/changes.md\`：需求的版本与事件时间线。
 - 需求记录被删除后目录仍然保留，\`requirement.md\` 的状态标记为 \`deleted\`，用于追踪审计。
 `;
+
+/** 需求分类中文标签：与需求库 category 枚举一一对应，投影渲染统一走这里。 */
+const CATEGORY_LABELS: Record<string, string> = {
+  new: '新功能', change: '需求变更', fix: '问题修复', enhancement: '体验优化',
+};
 
 type MutationRow = { seq: number; module: string; record_id: string };
 type EventRow = { id: string; type: string; summary: string; occurred_at: string | null;
@@ -64,6 +69,17 @@ function noteBody(value: unknown): string {
   return typeof value === 'string' && value.trim() !== '' ? value : '（无备注）';
 }
 
+/**
+ * 分类行只在记录带已知枚举值时渲染：历史数据没有 category 时不加行，
+ * 投影保持确定性重建，不让旧记录快照平白多出一行。
+ */
+function categoryLines(value: unknown): string[] {
+  // Object.hasOwn：`CATEGORY_LABELS[value]` 会命中原型属性（toString 等），
+  // 历史异常数据不能被渲染成函数文本。
+  return typeof value === 'string' && Object.hasOwn(CATEGORY_LABELS, value)
+    ? [`- 分类：${CATEGORY_LABELS[value]}`] : [];
+}
+
 function taskDraftLines(drafts: unknown): string[] {
   if (!Array.isArray(drafts) || drafts.length === 0) return ['（无待办草稿）'];
   return drafts.map((draft, index) => {
@@ -86,6 +102,7 @@ function renderRequirement(root: LifecycleRoot, payload: Record<string, unknown>
     `- 展示编号：${displayId(root.seq)}`,
     `- 状态：${deleted ? 'deleted' : text(payload.status, 'todo')}`,
     `- 优先级：${text(payload.priority, 'normal')}`,
+    ...categoryLines(payload.category),
     `- 当前版本：v${root.current_version}`,
     `- 更新时间：${text(root.current_updated_at, '时间未知')}`,
   ];

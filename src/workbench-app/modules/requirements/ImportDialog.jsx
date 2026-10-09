@@ -1,5 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import AssistantMarkdown from '../../pi-webx/AssistantMarkdown.jsx'
+import CategoryBadge from './CategoryBadge.jsx'
 import './ImportDialog.css'
 
 const MAX_TASKS = 20
@@ -31,6 +32,11 @@ function validDate(value) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
   const date = new Date(`${value}T00:00:00Z`)
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value
+}
+
+/** 默认单条待办：一条时文案说「这条」，多条才报数，不出现「确认导入 1 条」这种半截话。 */
+function confirmLabel(count) {
+  return count === 1 ? '确认导入这条待办' : `确认导入 ${count} 条`
 }
 
 /** 只提交用户明确勾选的草稿；旧需求可以手写，正文不自动解析成待办。 */
@@ -177,6 +183,7 @@ export default function ImportDialog({
             <p className="req-import-kicker">需求 → 待办</p>
             <h2 id={titleId}>拆分并导入待办</h2>
             <p className="req-import-source">来源：{String(row.title ?? '')}</p>
+            <p className="req-import-meta">分类：<CategoryBadge value={row.category} testid="req-import-category" /></p>
           </div>
           <button type="button" className="icon-btn" data-testid="req-import-close" aria-label="关闭导入预览" disabled={busy} onClick={close}>×</button>
         </header>
@@ -189,7 +196,7 @@ export default function ImportDialog({
           : (
             <form id="req-import-form" onSubmit={submit}>
               {deleted && <p className="req-import-notice req-import-error" role="alert" data-testid="req-import-deleted-message">这条需求已被删除，无法继续导入。当前预览和编辑仍保留；关闭后可返回需求列表。</p>}
-              <p className="req-import-help">检查拆分结果，取消不需要的条目，也可以修改或新增。确认后会一起加入待办列表。</p>
+              <p className="req-import-help">Agent 默认整理一条待办；可以改标题、取消勾选，也可以新增更多条目。确认后会一起加入待办列表。</p>
               {conflict && <div className="req-import-conflict" role="alert" data-testid="req-import-conflict-message">
                 <p>当前预览与服务端记录有冲突。你的编辑仍保留。重新载入会用最新需求草稿替换当前预览；载入后仍需再次确认导入。</p>
                 {conflictError !== '' && <p data-testid="req-import-conflict-server-error">服务端说明：{conflictError}</p>}
@@ -259,7 +266,7 @@ export default function ImportDialog({
           )}
           {!hasExistingTasks && !deleted && (
             <button type="submit" form="req-import-form" className="btn btn-primary" disabled={busy || conflict || selectedCount === 0} data-testid="req-import-confirm">
-              {busy ? (saved ? '加载中…' : '导入中…') : saved ? '重新加载待办' : `确认导入 ${selectedCount} 条`}
+              {busy ? (saved ? '加载中…' : '导入中…') : saved ? '重新加载待办' : confirmLabel(selectedCount)}
             </button>
           )}
         </footer>

@@ -10,6 +10,8 @@ import {
 import path from 'node:path';
 import {
   createEditToolDefinition,
+  createFindToolDefinition,
+  createGrepToolDefinition,
   createLsToolDefinition,
   createReadToolDefinition,
   createWriteToolDefinition,
@@ -273,6 +275,25 @@ export function createRequirementsFileTools(workspaceDir: string): ToolDefinitio
         ...params,
         path: await sdkSafePath(guard, params.path ?? '.'),
         limit: Math.max(1, Math.min(MAX_LS_ENTRIES, Math.trunc(params.limit ?? MAX_LS_ENTRIES))),
+      }),
+    ),
+    // grep/find 的搜索本体是 rg/fd 子进程，SDK 的 operations 钩子管不住搜索根；
+    // 与文件工具同一条 guard：transformParams 先把搜索根归一化为工作区内的
+    // canonical 绝对路径，`..`/绝对路径越界与指向外部的符号链接一律拒绝。
+    bindToolToWorkspace(
+      createGrepToolDefinition(root),
+      root,
+      async (params: { pattern: string; path?: string; [key: string]: unknown }) => ({
+        ...params,
+        path: await sdkSafePath(guard, params.path ?? '.'),
+      }),
+    ),
+    bindToolToWorkspace(
+      createFindToolDefinition(root),
+      root,
+      async (params: { pattern: string; path?: string; [key: string]: unknown }) => ({
+        ...params,
+        path: await sdkSafePath(guard, params.path ?? '.'),
       }),
     ),
   ];

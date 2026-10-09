@@ -9,7 +9,7 @@
  * local paths). All assertions are scripted; no model runs.
  */
 import assert from 'node:assert/strict';
-import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -79,6 +79,7 @@ try {
     title: '投影渲染回归需求',
     note: '验收：快照必须与需求库一致。',
     priority: 'high',
+    category: 'change',
     taskDrafts: [{ title: '投影渲染待办', priority: 'high', due: '2026-12-31', tag: '投影回归' }],
   });
   await projection.sync();
@@ -97,6 +98,7 @@ try {
     '# 投影渲染回归需求',
     '- 状态：todo',
     '- 优先级：high',
+    '- 分类：需求变更',
     '- 当前版本：v1',
     `- 更新时间：${String(draft.updatedAt)}`,
     '验收：快照必须与需求库一致。',
@@ -126,6 +128,25 @@ try {
     cursor: cursorValue(),
   }, firstSync, '重复 sync 必须幂等：文件内容与游标都不变');
 
+  /* ---- 历史数据：没有 category 的旧记录不得平白多出分类行（确定性重建） ---- */
+  const legacyId = '9f4c1e2a-0000-4000-8000-00000000cafe';
+  store.sqlite.prepare('INSERT INTO workbench_records (module, id, payload) VALUES (?, ?, ?)').run(
+    'requirements', legacyId,
+    JSON.stringify({
+      id: legacyId, title: '历史需求（无分类）', priority: 'normal', status: 'todo', note: '',
+      sourceSessionId: 'projection-check-legacy', taskDrafts: [],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-02T00:00:00.000Z',
+    }),
+  );
+  await projection.sync();
+  const legacySeq = (store.sqlite.prepare('SELECT seq FROM requirement_lifecycle_roots WHERE requirement_id=?')
+    .get(legacyId) as { seq: number } | undefined)?.seq;
+  assert.ok(Number.isSafeInteger(legacySeq), '历史需求必须进入生命周期追踪');
+  const legacyMd = await readFile(join(projectionDir, `REQ-${String(legacySeq).padStart(6, '0')}`, 'requirement.md'), 'utf8');
+  assert.ok(legacyMd.includes('# 历史需求（无分类）'), '历史需求必须照常投影');
+  assert.ok(legacyMd.includes('- 优先级：normal'));
+  assert.ok(!legacyMd.includes('- 分类：'), '历史数据没有 category 时不得渲染分类行');
+
   /* ---- 修订：版本递增、内容刷新、时间线追加 ---- */
   store.updateRecord('requirements', draft.id, { title: '投影渲染回归需求（修订）', note: '修订后的验收备注。' });
   await projection.sync();
@@ -136,6 +157,7 @@ try {
   assert.ok(!revisedMd.includes('验收：快照必须与需求库一致。'), '修订后必须刷新为最新内容');
   assert.ok(revisedMd.includes('- 1. 投影渲染待办 · 优先级：high · 截止：2026-12-31 · 标签：投影回归'),
     '未修订的待办草稿必须保留');
+  assert.ok(revisedMd.includes('- 分类：需求变更'), '部分修订未给 category 时必须保留原分类');
   const revisedChanges = await readFile(changesFile, 'utf8');
   assert.ok(revisedChanges.includes('· requirement.updated · 需求内容已修订：投影渲染回归需求（修订）'),
     'changes.md 必须追加修订事件');
@@ -181,6 +203,7 @@ try {
     `REQ-${String(savedSeq).padStart(6, '0')}`, 'requirement.md'));
   assert.ok(triggeredMd.includes(`- 需求 ID：${savedDraftId}`) && triggeredMd.includes('工具触发投影刷新'),
     'saveDraft 成功后投影必须自动刷新');
+  assert.ok(triggeredMd.includes('- 分类：新功能'), '省略 category 的保存按默认新功能渲染分类行');
   const triggerReadme = await readFile(join(triggerWorkspace, 'requirements', 'README.md'), 'utf8');
   assert.ok(triggerReadme.includes('# 需求库只读投影'), '触发刷新必须同时写出 README');
   assertNoHostTerms('触发刷新后的 requirement.md', triggeredMd);
@@ -191,6 +214,25 @@ try {
   const writeTool = toolNamed(fileTools, 'write');
   const editTool = toolNamed(fileTools, 'edit');
   const lsTool = toolNamed(fileTools, 'ls');
+  const grepTool = toolNamed(fileTools, 'grep');
+  const findTool = toolNamed(fileTools, 'find');
+
+  /* ---- grep/find 搜索根守卫：与文件工具同一工作区边界 ---- */
+  assert.ok(grepTool && findTool, '需求会话装配的 grep/find 必须是带工作区守卫的版本');
+  for (const [name, tool] of [['grep', grepTool], ['find', findTool]] as const) {
+    await assert.rejects(
+      async () => tool.execute(`${name}-escape-rel`, { pattern: 'hosts', path: '../../../../../../../etc' }, undefined, undefined, {} as never),
+      /路径被拒绝/, `${name} 的 .. 越界搜索根必须被拒绝`);
+    await assert.rejects(
+      async () => tool.execute(`${name}-escape-abs`, { pattern: 'hosts', path: '/etc' }, undefined, undefined, {} as never),
+      /路径被拒绝/, `${name} 的绝对路径越界搜索根必须被拒绝`);
+  }
+  await symlink('/etc', join(workspace, 'requirements-gate-escape-link'));
+  for (const [name, tool] of [['grep', grepTool], ['find', findTool]] as const) {
+    await assert.rejects(
+      async () => tool.execute(`${name}-escape-symlink`, { pattern: 'hosts', path: 'requirements-gate-escape-link' }, undefined, undefined, {} as never),
+      /路径被拒绝/, `${name} 的指向工作区外的符号链接搜索根必须被拒绝`);
+  }
 
   const readBack = await readTool.execute('projection-read', { path: 'requirements/README.md' }, undefined, undefined, {} as never);
   assert.ok(JSON.stringify(readBack).includes('# 需求库只读投影'), 'read 必须放行投影目录');
@@ -220,9 +262,9 @@ try {
   const lsText = JSON.stringify(await lsTool.execute('projection-ls', { path: 'requirements' }, undefined, undefined, {} as never));
   assert.ok(lsText.includes('README.md') && lsText.includes('REQ-000001'), 'ls 必须放行投影目录');
 
-  /* ---- 文案红线：工具文案不得出现宿主术语 ---- */
-  for (const tool of [saveDraftTool, toolNamed(requirementTools, 'requirements_context')]) {
-    assertNoHostTerms(`${tool.name} 描述`, `${tool.description ?? ''}\n${tool.promptSnippet ?? ''}`);
+  /* ---- 文案红线：工具文案不得出现宿主术语（含文件与搜索工具的注入文案） ---- */
+  for (const tool of [saveDraftTool, toolNamed(requirementTools, 'requirements_context'), ...fileTools]) {
+    assertNoHostTerms(`${tool.name} 描述`, `${tool.description ?? ''}\n${tool.promptSnippet ?? ''}\n${(tool.promptGuidelines ?? []).join('\n')}`);
   }
   const dispatchTool = createRequirementsDispatchTool(store, getChatroomService(store, 'projection-dispatch'), triggerProjection);
   assertNoHostTerms('requirements_dispatch 描述', `${dispatchTool.description ?? ''}\n${dispatchTool.promptSnippet ?? ''}`);
@@ -253,7 +295,7 @@ try {
     await assembled.dispose();
   }
 
-  console.log('PASS requirements projection: README/需求快照/变更时间线渲染、幂等游标、修订与删除保留、投影写保护、saveDraft 触发刷新、codes 只读 requirements_context 装配');
+  console.log('PASS requirements projection: README/需求快照（含分类行）/变更时间线渲染、历史数据无分类行、幂等游标、修订与删除保留、投影写保护、saveDraft 触发刷新、codes 只读 requirements_context 装配');
 } finally {
   try { store.close(); } catch { /* already closed */ }
   if (savedConfigDir === undefined) delete process.env.PI_WEBX_AGENT_CONFIG_DIR;

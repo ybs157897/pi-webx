@@ -32,6 +32,19 @@
 .req-landing { margin: 0 auto var(--sp-6); padding-inline: var(--sp-4); text-align: center; }
 .req-landing-title { margin: 0; font-size: clamp(32px, 3.2vw, 48px); line-height: 1.25; letter-spacing: .06em; font-weight: 700; color: var(--text-1); }
 .req-landing-description { margin-top: var(--sp-3); color: var(--text-3); font-size: var(--fs-md); }
+/* 需求描述引导：四件事 + 可点击示例，居中首页里保持左对齐的一段紧凑卡片。 */
+.req-guide { max-width: 620px; margin: var(--sp-5) auto 0; padding: var(--sp-4); border: 1px solid var(--line-1); border-radius: var(--radius-lg); background: var(--surface-1); text-align: start; }
+.req-guide-title { color: var(--text-2); font-size: var(--fs-sm); font-weight: 650; }
+.req-guide-points { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-sm); }
+.req-guide-points li { overflow-wrap: anywhere; }
+.req-guide-points strong { color: var(--text-1); font-weight: 650; }
+.req-guide-examples { display: grid; gap: var(--sp-2); margin-top: var(--sp-3); }
+.req-guide-examples-label { color: var(--text-3); font-size: var(--fs-xs); }
+.req-example { display: block; width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--line-2); border-radius: var(--radius-md); background: var(--surface-0); color: var(--text-2); font: inherit; font-size: var(--fs-sm); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
+.req-example:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
+.req-example:disabled { cursor: default; opacity: .5; }
+/* 输入区旁的对齐提示：落在输入框与发送键之间的空档列，空输入时的一行小字。 */
+.req-align-hint { grid-column: 3; align-self: center; justify-self: end; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); }
 .req-starter-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: 44px; margin-inline: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-xs); }
 .req-starter-toolbar > span { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .req-starter-toolbar > span:first-child { flex: none; }
@@ -73,6 +86,9 @@
   .req-chat-panel .send-btn, .req-composer-new { width: 44px; height: 44px; }
   .req-landing { margin-bottom: var(--sp-5); }
   .req-landing-description { font-size: var(--fs-sm); }
+  .req-guide { padding: var(--sp-3); }
+  /* 窄屏空档列放不下：提示整行落到按钮下方，不截断。 */
+  .req-align-hint { grid-column: 1 / -1; justify-self: stretch; white-space: normal; text-align: end; }
   .req-starter-toolbar { margin-inline: var(--sp-2); padding-inline: var(--sp-3); }
   .req-starter-suggestions { gap: var(--sp-2); margin-top: var(--sp-5); }
   .req-starter-chip { min-height: 44px; }

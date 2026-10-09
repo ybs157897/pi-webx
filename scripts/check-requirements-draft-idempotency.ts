@@ -1,5 +1,6 @@
 /** Offline persistence and real-Pi-SDK replay regression for requirements_save_draft. */
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -15,7 +16,7 @@ import { profileRevision } from '../server/module-agents/snapshots';
 import { createRequirementsTools } from '../server/modules/requirements/tools';
 import { saveRequirementDraftIdempotently } from '../server/modules/requirements/draft-idempotency';
 import { getRequirementVersion } from '../server/modules/requirements/lifecycle';
-import { importRequirementTasks } from '../server/modules/requirements/import-tasks';
+import { importRequirementTasks, saveRequirementDraft } from '../server/modules/requirements/import-tasks';
 import { WorkbenchInputError, WorkbenchStore } from '../server/workbench/store';
 
 const root = await mkdtemp(join(tmpdir(), 'requirements-draft-idempotency-'));
@@ -34,6 +35,7 @@ function recordSnapshot(result: any) {
   return {
     id: result.requirementId,
     title: result.record.title,
+    category: result.record.category,
     createdAt: result.record.createdAt,
     updatedAt: result.record.updatedAt,
     requirementVersion: result.requirementVersion,
@@ -83,6 +85,7 @@ async function main(): Promise<void> {
       entryKey: 'stable-draft-key-A',
       title: '  Canonical requirement title  ',
       note: 'Same requirement body and acceptance conditions.',
+      category: 'change',
       taskDrafts: [{ title: '  Canonical task  ', tag: '  review  ' }],
     };
     const stableInputNormalized = {
@@ -90,12 +93,14 @@ async function main(): Promise<void> {
       title: 'Canonical requirement title',
       note: 'Same requirement body and acceptance conditions.',
       priority: 'normal',
+      category: 'change',
       taskDrafts: [{ title: 'Canonical task', priority: 'normal', due: null, tag: 'review' }],
     };
     const first = await tool.execute('sdk-call-first', stableInputA, undefined, undefined, context(sessionA));
     const firstData = (first.details as any).data;
     assert.equal(firstData.alreadySaved, false);
     assert.equal(firstData.record.sourceSessionId, sessionA);
+    assert.equal(firstData.record.category, 'change', 'the saved business record must carry the explicit category');
     assert.equal(Object.hasOwn(firstData.record, 'entryKey'), false, 'receipt keys stay outside the business record');
     assert.equal(Object.hasOwn(firstData.record, 'alreadySaved'), false, 'replay status stays outside the business record');
     const firstSnapshot = recordSnapshot(firstData);
@@ -117,6 +122,20 @@ async function main(): Promise<void> {
       }),
       assertConflict,
       'the same entryKey cannot be reused for different normalized business arguments',
+    );
+    await assert.rejects(
+      async () => saveRequirementDraftIdempotently(store, sessionA, 'changed-category-call', {
+        ...stableInputNormalized, category: 'fix',
+      }),
+      assertConflict,
+      'the category participates in the idempotency fingerprint',
+    );
+    await assert.rejects(
+      async () => saveRequirementDraftIdempotently(store, sessionA, 'invalid-category-call', {
+        title: 'Invalid category', category: 'bogus', taskDrafts: [{ title: 'Invalid category task' }],
+      }),
+      (error: unknown) => error instanceof WorkbenchInputError && error.status === 400,
+      'an unknown category must be rejected before any write',
     );
     await assert.rejects(
       async () => saveRequirementDraftIdempotently(store, sessionA, 'sdk-call-first', {
@@ -142,6 +161,7 @@ async function main(): Promise<void> {
     // Legacy calls without entryKey use the SDK toolCallId as their replay key.
     const legacyArgs = { title: 'Legacy saved draft', note: 'legacy call args', taskDrafts: [{ title: 'Legacy task' }] };
     const legacy = await saveRequirementDraftIdempotently(store, sessionA, 'legacy-call-id', legacyArgs);
+    assert.equal(legacy.record.category, 'new', 'an omitted category defaults to new');
     const legacyReplay = await saveRequirementDraftIdempotently(store, sessionA, 'legacy-call-id', {
       taskDrafts: [{ tag: '', due: null, priority: 'normal', title: 'Legacy task' }],
       note: 'legacy call args', title: 'Legacy saved draft',
@@ -151,6 +171,53 @@ async function main(): Promise<void> {
     const legacyNewCall = await saveRequirementDraftIdempotently(store, sessionA, 'legacy-call-id-2', legacyArgs);
     assert.notEqual(legacyNewCall.requirementId, legacy.requirementId,
       'legacy calls with no entryKey use toolCallId, not equal-content deduplication');
+    assert.equal(store.read().tasks.length, 0);
+
+    // Receipts persisted before the category field existed carry a fingerprint
+    // computed without it. The normalized fingerprint (create + default category
+    // omitted) must replay those receipts instead of raising 409, while an
+    // explicit non-default category still conflicts.
+    const preUpgradeRecord = saveRequirementDraft(store, sessionA, {
+      title: 'Pre-upgrade receipt draft', note: 'saved before the category field existed',
+      taskDrafts: [{ title: 'Pre-upgrade task' }],
+    });
+    const preUpgradeFingerprint = {
+      operation: 'create',
+      params: {
+        title: 'Pre-upgrade receipt draft', note: 'saved before the category field existed',
+        priority: 'normal', taskDrafts: [{ title: 'Pre-upgrade task', priority: 'normal', due: null, tag: '' }],
+      },
+    };
+    store.sqlite.prepare(`INSERT INTO requirements_draft_save_receipts
+      (id,session_id,entry_key,params_hash,requirement_id,result_json,created_at)
+      VALUES (?,?,?,?,?,?,?)`)
+      .run('pre-upgrade-receipt', sessionA, 'pre-upgrade-key',
+        createHash('sha256').update(JSON.stringify(preUpgradeFingerprint)).digest('hex'),
+        preUpgradeRecord.id,
+        JSON.stringify({ record: { ...preUpgradeRecord, requirementVersion: 1 },
+          requirementId: preUpgradeRecord.id, requirementVersion: 1 }),
+        new Date().toISOString());
+    const preUpgradeReplay = await saveRequirementDraftIdempotently(store, sessionA, 'pre-upgrade-call', {
+      entryKey: 'pre-upgrade-key', title: 'Pre-upgrade receipt draft',
+      note: 'saved before the category field existed', taskDrafts: [{ title: 'Pre-upgrade task' }],
+    });
+    assert.equal(preUpgradeReplay.alreadySaved, true,
+      'a receipt persisted before the category field must replay, not conflict');
+    assert.equal(preUpgradeReplay.requirementId, preUpgradeRecord.id);
+    const preUpgradeExplicitDefault = await saveRequirementDraftIdempotently(store, sessionA, 'pre-upgrade-call-explicit', {
+      entryKey: 'pre-upgrade-key', category: 'new', title: 'Pre-upgrade receipt draft',
+      note: 'saved before the category field existed', taskDrafts: [{ title: 'Pre-upgrade task' }],
+    });
+    assert.equal(preUpgradeExplicitDefault.alreadySaved, true,
+      'an explicit default category is fingerprint-equivalent to omitting it');
+    await assert.rejects(
+      async () => saveRequirementDraftIdempotently(store, sessionA, 'pre-upgrade-call-changed', {
+        entryKey: 'pre-upgrade-key', category: 'fix', title: 'Pre-upgrade receipt draft',
+        note: 'saved before the category field existed', taskDrafts: [{ title: 'Pre-upgrade task' }],
+      }),
+      assertConflict,
+      'changing to a non-default category still conflicts with the pre-upgrade receipt',
+    );
     assert.equal(store.read().tasks.length, 0);
 
     // A record imported after the original save remains bound to its receipt.
@@ -342,12 +409,13 @@ async function main(): Promise<void> {
     assert.ok(toolResults.every(item => item.error === false));
     assert.equal(toolResults[0]?.data?.requirementId, toolResults[1]?.data?.requirementId);
     assert.equal(toolResults[1]?.data?.alreadySaved, true);
+    assert.equal(toolResults[0]?.data?.record?.category, 'new', 'an SDK save without category defaults to new');
     assert.equal(store.listRecords('requirements').length, beforeSdkRequirements + 1);
     assert.equal(store.listRecords('tasks').length, beforeSdkTasks,
       'replayed SDK save calls create a single draft and no todo rows');
     await host.kill(hosted.id);
 
-    console.log('PASS requirements draft idempotency: normalized stable-key replay, session/tool-call scope, imported/deleted guard, durable receipts, atomic rollback, scripted real SDK retry');
+    console.log('PASS requirements draft idempotency: normalized stable-key replay, category in fingerprint with default/validation, session/tool-call scope, imported/deleted guard, durable receipts, atomic rollback, scripted real SDK retry');
   } finally {
     if (host) await host.disposeAll();
     store.close();

@@ -37,7 +37,9 @@ const PROJECT_README_SENTINEL = 'BOUND_PROJECT_README_FACT-15af';
 const PRIVATE_SOURCE_SENTINEL = 'PRIVATE-REQUIREMENT-SOURCE-SESSION-9d1c';
 const PRIVATE_NOTE_SENTINEL = 'HUGE_NOTE_PRIVATE_MARKER-4a2e';
 const NEEDLE = 'UNIQUE_CONTEXT_NEEDLE-81ac';
-const UNSCOPED_TOOLS = ['bash', 'powershell', 'grep', 'find'];
+/** Requirements sessions keep shell tools out; read-only search tools are allowed for impact analysis. */
+const SHELL_TOOLS = ['bash', 'powershell'];
+const SEARCH_TOOLS = ['grep', 'find'];
 
 type ScriptStep =
   | { kind: 'tool'; id: string; name: string; args: Record<string, unknown> }
@@ -243,8 +245,9 @@ async function main(): Promise<void> {
     maxToolOutputChars: safeContextSize + 1600,
   };
   // Simulate an older saved profile snapshot and prompt. Runtime policy must still
-  // remove unscoped shell/search tools and append the current bound-project context.
-  profile.config.tools = [...new Set([...profile.config.tools, ...UNSCOPED_TOOLS])];
+  // remove shell tools and append the current bound-project context, while
+  // read-only grep/find stay available for code impact analysis.
+  profile.config.tools = [...new Set([...profile.config.tools, ...SHELL_TOOLS, ...SEARCH_TOOLS])];
   profile.promptText = 'LEGACY_REQUIREMENTS_PROMPT: 先扫描上级目录并搜索可能相关的项目。';
   profile.profileRevision = profileRevision(profile);
 
@@ -286,8 +289,18 @@ async function main(): Promise<void> {
       'requirements_context', 'requirements_save_draft', 'requirements_dispatch', 'skills_read',
       'read', 'write', 'edit', 'ls', 'chatroom_send', 'chatroom_read', 'chatroom_work',
     ]) assert.ok(toolNames.includes(expected), `requirements Agent must expose ${expected}`);
-    for (const name of UNSCOPED_TOOLS) assert.ok(!toolNames.includes(name), `legacy snapshot must not restore ${name}`);
+    for (const name of SEARCH_TOOLS) assert.ok(toolNames.includes(name), `requirements Agent must expose read-only search tool ${name}`);
+    for (const name of SHELL_TOOLS) assert.ok(!toolNames.includes(name), `legacy snapshot must not restore ${name}`);
     assert.deepEqual(hosted.session.getActiveToolNames().sort(), toolNames, 'all assembled tools are active');
+
+    // 工具文案红线：所有模型可见的工具描述不得出现宿主术语（含 grep/find 的
+    // 工作区守卫注入文案与 chatroom_read 的话题限定文案）。
+    for (const item of hosted.session.getAllTools()) {
+      const copy = `${item.label ?? ''}\n${item.description ?? ''}\n${item.promptSnippet ?? ''}\n${(item.promptGuidelines ?? []).join('\n')}`;
+      for (const term of ['指挥台', '工作台', '宿主', 'pi-webx', '模块 Agent']) {
+        assert.ok(!copy.includes(term), `tool ${item.name} copy must not mention the host term「${term}」`);
+      }
+    }
 
     const systemPrompt = hosted.session.systemPrompt;
     assert.ok(systemPrompt.includes('<requirements_session_context>'), 'the curated session context must be injected into the module prompt');
@@ -342,8 +355,8 @@ async function main(): Promise<void> {
     assert.ok(endById(opening, 'opening-read-agents').text.includes(PROJECT_AGENTS_SENTINEL));
     assert.ok(endById(opening, 'opening-read-claude').text.includes(PROJECT_CLAUDE_SENTINEL));
     assert.ok(endById(opening, 'opening-read-readme').text.includes(PROJECT_README_SENTINEL));
-    assert.deepEqual(opening.toolEnds.map(item => item.toolName).filter(name => [...UNSCOPED_TOOLS, 'chatroom_read'].includes(name)), [],
-      'the module session keeps shell/search and unscoped chat tools out of the tool surface');
+    assert.deepEqual(opening.toolEnds.map(item => item.toolName).filter(name => [...SHELL_TOOLS, 'chatroom_read'].includes(name)), [],
+      'the module session keeps shell tools and unscoped chat reads out of the tool surface');
 
     const openingContext = contextData(endById(opening, 'opening-context'));
     assert.equal(openingContext.hostApplication, undefined, 'the context must not describe any host application');
@@ -354,6 +367,7 @@ async function main(): Promise<void> {
     assert.equal(openingContext.target?.source, 'server-binding');
     assert.equal(openingContext.requirements?.total, 7);
     assert.equal(openingContext.requirements?.items?.length, 5, 'the initial context is capped at five requirement summaries');
+    assert.equal(openingContext.requirements?.items?.[0]?.category, 'new', 'the context summary must expose the record category');
     assert.ok(!JSON.stringify(openingContext).includes(PRIVATE_SOURCE_SENTINEL));
     assert.ok(!JSON.stringify(openingContext).includes(PRIVATE_NOTE_SENTINEL));
     assert.ok(JSON.stringify(openingContext).includes(workspace));
@@ -380,6 +394,7 @@ async function main(): Promise<void> {
     assert.ok(hugeEnd.text.length <= profile.config.limits.maxToolOutputChars, 'JSON tool output must respect maxToolOutputChars');
     const hugeData = contextData(hugeEnd);
     assert.equal(hugeData.record?.id, hugeRequirement.id);
+    assert.equal(hugeData.record?.category, 'new', 'the single-record context must expose the category for change triage');
     assert.equal(hugeData.record?.noteLength, hugeRequirement.note.length);
     assert.equal(hugeData.record?.noteTruncated, true, 'large requirement notes must carry explicit truncation metadata');
     assert.ok((hugeData.record?.note?.length ?? 0) < hugeData.record?.noteLength);
@@ -509,7 +524,8 @@ async function main(): Promise<void> {
     assert.equal(restored.moduleAgent?.agentId, 'requirements');
     assert.equal(restored.moduleAgent?.profileRevision, profile.profileRevision);
     const restoredNames = restored.session.getAllTools().map(item => item.name).sort();
-    for (const name of UNSCOPED_TOOLS) assert.ok(!restoredNames.includes(name), `restore must not re-enable ${name}`);
+    for (const name of SHELL_TOOLS) assert.ok(!restoredNames.includes(name), `restore must not re-enable ${name}`);
+    for (const name of SEARCH_TOOLS) assert.ok(restoredNames.includes(name), `restore must keep read-only search tool ${name}`);
     assert.ok(restoredNames.includes('requirements_context') && restoredNames.includes('read'));
     assert.ok(restored.session.systemPrompt.includes('<requirements_session_context>'));
     assert.ok(restored.session.systemPrompt.includes('bound-project'));
@@ -517,7 +533,7 @@ async function main(): Promise<void> {
     assert.ok(!restored.session.systemPrompt.includes('服务端没有预选目标'));
     await host.kill(restored.id);
 
-    console.log('PASS requirements Agent: scripted SDK context input, bound-project files and cwd, bounded requirements_context, scoped chat history, guarded writes, read-only projection, restore/reset boundaries (no model-behavior claim)');
+    console.log('PASS requirements Agent: scripted SDK context input, bound-project files and cwd, bounded requirements_context, scoped chat history, read-only grep/find kept with shell tools removed, guarded writes, read-only projection, restore/reset boundaries (no model-behavior claim)');
   } finally {
     await host.disposeAll();
     store.close();

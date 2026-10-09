@@ -32,6 +32,34 @@ try {
   });
   const tasks = store.listRecords('tasks');
   assert.deepEqual(development!.context.taskIds, tasks.map(task => task.id));
+
+  // 分类的派工指纹归一化（一个群投递只关联一个需求，所以用独立投递验证）：
+  // 显式 change 保留且同参数重试幂等；省略与显式默认 new 互为重试；改非默认
+  // 分类才与派工指纹冲突。
+  const changeHandoff = room.sendUser(user, { body: '@需求管理 整理一条需求变更。', entryKey: 'handoff-change' });
+  await room.withDelivery('requirements-categorized', room.storage.claim(changeHandoff.id)!, 'requirements', async () => {
+    const changeRequest = {
+      entryKey: 'categorized', category: 'change', title: '带分类的交接',
+      note: '交付可运行代码，并给出验证证据', priority: 'normal', taskDrafts: [{ title: '实现变更' }],
+    };
+    const categorized = dispatchRequirementTasks(store, room, 'requirements-categorized', changeRequest);
+    assert.equal(categorized.requirement.category, 'change', 'dispatched requirements keep the explicit category');
+    assert.equal(dispatchRequirementTasks(store, room, 'requirements-categorized', changeRequest).alreadyDispatched, true,
+      'an identical categorized dispatch replays');
+  });
+  const defaultHandoff = room.sendUser(user, { body: '@需求管理 整理默认分类的需求。', entryKey: 'handoff-default' });
+  await room.withDelivery('requirements-default', room.storage.claim(defaultHandoff.id)!, 'requirements', async () => {
+    const defaultRequest = {
+      entryKey: 'default-equivalence', title: '默认分类等价',
+      note: '交付可运行代码，并给出验证证据', priority: 'normal', taskDrafts: [{ title: '默认任务' }],
+    };
+    assert.equal(dispatchRequirementTasks(store, room, 'requirements-default', defaultRequest).requirement.category, 'new',
+      'an omitted category defaults to new');
+    assert.equal(dispatchRequirementTasks(store, room, 'requirements-default', { ...defaultRequest, category: 'new' }).alreadyDispatched, true,
+      'omitted and explicit default categories share one dispatch fingerprint');
+    assert.throws(() => dispatchRequirementTasks(store, room, 'requirements-default', { ...defaultRequest, category: 'fix' }), /entryKey/,
+      'changing to a non-default category conflicts with the dispatch fingerprint');
+  });
   let report: ReturnType<typeof room.send>;
   let progress: ReturnType<typeof room.send>;
   await room.withDelivery('codes-work', room.storage.claim(development!.id)!, 'codes', async () => {
