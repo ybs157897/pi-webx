@@ -284,15 +284,17 @@ const data = fakeData();
   assert.ok(emptyLogs.includes('data-testid="logs-load-demo"'), '空库缺演示数据入口');
 }
 
-/* ================================================== 6. 需求管理：对话首页与历史记录 */
+/* ================================================== 6. 需求管理：画布主区 + 常驻对话右列（codes 同款双列） */
 
 {
   const conversation = render(Requirements, data);
-  assert.ok(conversation.includes('data-testid="req-conversation"'), '需求菜单应直接显示中央对话');
+  assert.ok(conversation.includes('data-testid="req-conversation"'), '需求菜单应常驻右列需求对话');
   assert.ok(conversation.includes('data-agent-id="requirements"'), '需求对话必须使用独立 Agent');
+  assert.ok(conversation.includes('data-testid="req-chat-column"'), '需求对话应挂在右列容器里');
   assert.ok(conversation.includes('data-testid="req-records-tab"'), '历史记录入口应保留');
   assert.ok(conversation.includes('data-testid="req-open-tasks"'), '待办列表入口应保留');
-  assert.ok(!conversation.includes('data-testid="req-split"'), '默认入口应为对话');
+  assert.ok(conversation.includes('data-testid="req-canvas"'), '默认主区应是画布');
+  assert.ok(!conversation.includes('data-testid="req-split"'), '默认主区是画布，记录未访问不渲染');
   assert.ok(conversation.includes('data-testid="req-new-conversation"'), '需求输入框应保留新对话入口');
   assert.ok(conversation.includes('data-empty="false"'), '服务端首屏仍在恢复会话，不应提前显示空闲首页');
   const markup = render(RequirementRecords, data);

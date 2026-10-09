@@ -1,12 +1,40 @@
 /* Requirement conversation owns its layout; the navigation stays available. */
 .main-inner.req-main-inner { display: flex; flex-direction: column; height: 100%; min-height: 0; padding-bottom: var(--sp-5); max-width: none; background: var(--surface-0); }
 .req-main-inner > .page-head { flex: none; margin-bottom: var(--sp-4); }
-.req-workspace { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-4); }
-.req-workspace-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex: none; }
-.req-workspace-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; }
+
+/* ================================================================ 双列骨架（与代码开发同款） */
+
+/* 左列画布/记录主区，右列需求对话常驻；窄屏收单列时用 data-mobile-view 换列。 */
+.req-workspace {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) clamp(320px, 29vw, 420px);
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--surface-0);
+}
+.req-workspace-left { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.req-workspace-toolbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--line-1);
+}
+.req-workspace-title { display: flex; flex: 1 1 220px; flex-direction: column; min-width: 0; font-size: var(--fs-sm); }
+.req-workspace-title span { color: var(--text-3); font-size: var(--fs-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.req-workspace-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; }
 .req-workspace-toolbar .segmented-item { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 36px; }
-.req-conversation-host { flex: 1; min-height: 0; display: flex; width: 100%; margin-inline: auto; }
-.req-conversation-host[hidden] { display: none; }
+/* 画布直接充当主区：外框已由工作区提供，去掉画布自带的边框与圆角，避免卡片套卡片。 */
+.req-workspace .req-canvas { border: 0; border-radius: 0; }
+.req-records-host { flex: 1; min-height: 0; overflow-y: auto; padding: var(--sp-3); }
+.req-records-host[hidden] { display: none; }
+/* 窄屏换列按钮：桌面隐藏，899px 以下与 codes-mobile-tabs 同形。 */
+.req-mobile-tabs { display: none; }
 .req-conversation { display: flex; flex-direction: column; width: 100%; min-width: 0; min-height: 0; overflow: hidden; background: var(--surface-0); }
 .req-chat-panel { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .req-chat-panel > div { display: flex; flex-direction: column; height: 100%; min-height: 0; }
@@ -15,6 +43,11 @@
 .req-chat-panel .aside-head { background: var(--surface-0); }
 .req-chat-panel .composer { padding: var(--sp-3) var(--sp-4); }
 .req-chat-panel .ai-fallback { max-height: 160px; overflow-y: auto; }
+/* 右列：对话常驻整列，嵌入式 AIPanel 的高度修正（.req-chat-panel .ai-overlay-embedded）照旧生效。 */
+.req-chat-column { display: flex; flex-direction: column; min-width: 0; min-height: 0; border-left: 1px solid var(--line-1); background: var(--surface-0); }
+.req-chat-column .req-conversation { flex: 1; height: 100%; }
+.req-chat-column .aside-head { gap: var(--sp-2); padding: var(--sp-3); }
+.req-chat-column .composer { padding: var(--sp-3); }
 /* 四列网格：附件回形针 | 新对话 | 弹性空档 | 发送/停止——附件键加入后发送钮仍钉在最右。 */
 .req-chat-panel .composer-box { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; gap: var(--sp-3); padding: var(--sp-4); border-color: var(--line-1); border-radius: calc(var(--radius-lg) + var(--sp-2)); background: var(--surface-0); box-shadow: var(--shadow-2); }
 .req-chat-panel .composer-box:focus-within { border-color: var(--accent); }
@@ -43,8 +76,8 @@
 .req-example { display: block; width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px dashed var(--line-2); border-radius: var(--radius-md); background: var(--surface-0); color: var(--text-2); font: inherit; font-size: var(--fs-sm); text-align: start; overflow-wrap: anywhere; cursor: pointer; }
 .req-example:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); color: var(--text-1); }
 .req-example:disabled { cursor: default; opacity: .5; }
-/* 输入区旁的对齐提示：落在输入框与发送键之间的空档列，空输入时的一行小字。 */
-.req-align-hint { grid-column: 3; align-self: center; justify-self: end; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); }
+/* 输入区旁的提示：空输入时的对齐提示与回合进行中的等待说明共用空档列，同一时刻只有其一。 */
+.req-align-hint, .req-waiting-hint { grid-column: 3; align-self: center; justify-self: end; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; color: var(--text-3); font-size: var(--fs-xs); }
 .req-starter-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); min-height: 44px; margin-inline: var(--sp-4); padding: var(--sp-2) var(--sp-4); border-radius: 0 0 var(--radius-lg) var(--radius-lg); background: var(--surface-2); color: var(--text-3); font-size: var(--fs-xs); }
 .req-starter-toolbar > span { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
 .req-starter-toolbar > span:first-child { flex: none; }
@@ -57,24 +90,35 @@
 .req-starter-chip:disabled { cursor: default; opacity: .5; }
 .req-chat-error { color: var(--danger); padding: var(--sp-2) var(--sp-4); font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .req-chat-error button { margin-left: var(--sp-2); }
-.req-drafts { flex: none; max-height: 180px; overflow-y: auto; border-top: 1px solid var(--line-1); background: var(--surface-1); }
 .req-draft { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); }
 .req-draft + .req-draft { border-top: 1px solid var(--line-1); }
 .req-draft > div { display: flex; flex-direction: column; min-width: 0; gap: var(--sp-1); }
 .req-draft strong { font-size: var(--fs-sm); overflow-wrap: anywhere; }
 .req-draft-label { font-size: var(--fs-xs); color: var(--accent); }
 .req-draft-count { font-size: var(--fs-xs); color: var(--text-3); }
+.req-draft-dispatched { font-size: var(--fs-xs); color: var(--warn); }
 .req-draft button { flex: none; }
-.req-records-host { flex: 1; min-height: 0; overflow-y: auto; }
+/* 899px 以下收单列：与 codes 同断点，两个切换按钮换列（对话保持挂载，只换显隐）。 */
+@media (max-width: 899px) {
+  .req-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
+  .req-mobile-tabs { display: flex; gap: var(--sp-2); padding: var(--sp-2); border-bottom: 1px solid var(--line-1); }
+  .req-mobile-tabs [aria-pressed="true"] { color: var(--accent); background: var(--accent-soft); }
+  .req-workspace[data-mobile-view="canvas"] .req-chat-column,
+  .req-workspace[data-mobile-view="chat"] .req-workspace-left { display: none; }
+  .req-chat-column { border-left: 0; }
+}
 @media (max-width: 639px) {
   .main-inner.req-main-inner { padding: var(--sp-3) var(--sp-3) calc(72px + env(safe-area-inset-bottom)); }
   .req-main-inner .page-title { font-size: var(--fs-lg); }
   .req-main-inner > .page-head { flex-direction: row; align-items: center; }
   .req-main-inner .page-desc { font-size: var(--fs-xs); }
-  .req-workspace { gap: var(--sp-2); }
-  .req-workspace-toolbar { align-items: stretch; flex-wrap: wrap; }
+  /* 窄屏工具栏换行：标题占满一行，分段与操作按钮各自随行。 */
+  .req-workspace-toolbar { align-items: stretch; }
+  .req-workspace-title { flex: 1 1 100%; }
+  .req-workspace-title span { white-space: normal; }
   .req-workspace-actions { width: 100%; justify-content: flex-start; }
   .req-workspace-toolbar button { min-height: 44px; }
+  .req-mobile-tabs button { flex: 1 1 auto; }
   .req-chat-panel .aside-head { padding: var(--sp-2); gap: var(--sp-2); }
   .req-chat-panel .aside-head .grow { min-width: 0; }
   .req-chat-panel .aside-sub { overflow-wrap: anywhere; }
@@ -88,11 +132,10 @@
   .req-landing-description { font-size: var(--fs-sm); }
   .req-guide { padding: var(--sp-3); }
   /* 窄屏空档列放不下：提示整行落到按钮下方，不截断。 */
-  .req-align-hint { grid-column: 1 / -1; justify-self: stretch; white-space: normal; text-align: end; }
+  .req-align-hint, .req-waiting-hint { grid-column: 1 / -1; justify-self: stretch; white-space: normal; text-align: end; }
   .req-starter-toolbar { margin-inline: var(--sp-2); padding-inline: var(--sp-3); }
   .req-starter-suggestions { gap: var(--sp-2); margin-top: var(--sp-5); }
   .req-starter-chip { min-height: 44px; }
   .req-draft { flex-wrap: wrap; padding: var(--sp-2); }
-  .req-drafts { max-height: 150px; }
   .req-draft button { min-height: 44px; }
 }

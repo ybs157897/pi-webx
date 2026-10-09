@@ -38,13 +38,18 @@ export function starterDraft(prefix, current, prompt) {
 }
 
 /**
- * 对齐提示的出场规则：Agent 回过一轮（正文里的 Q1/Q2 清单）、回合已结束、
- * 输入框还空着。不解析正文，也不在用户已经落笔时反复打扰。
+ * 对齐提示的出场规则：**最后一条**非空 assistant 正文里真的有 Q1、Q2… 编号清单
+ * （Agent 问完一轮）、回合已结束、输入框还空着。只看编号形态，不解析清单内容：
+ * 普通结论（如「布局测试通过」）不提示，更早的旧清单也不算，不在用户落笔时打扰。
  */
 export function alignHintVisible(entries, busy, draft) {
-  const replied = Array.isArray(entries)
-    && entries.some(entry => entry?.kind === 'assistant' && String(entry?.text ?? '').trim() !== '')
-  return replied && busy !== true && String(draft ?? '').trim() === ''
+  if (busy === true || String(draft ?? '').trim() !== '' || !Array.isArray(entries)) return false
+  for (let index = entries.length - 1; index >= 0; index -= 1) {
+    const entry = entries[index]
+    if (entry?.kind !== 'assistant' || String(entry?.text ?? '').trim() === '') continue
+    return /(^|\n)\s*Q\d+/.test(String(entry.text))
+  }
+  return false
 }
 
 export function RequirementsWelcome({ error, busy = false, onChoose }) {

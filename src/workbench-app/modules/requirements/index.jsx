@@ -1,17 +1,28 @@
-/** 需求菜单直达独立对话；需求记录与待办导入仍由本模块持有。 */
-import { useEffect, useRef, useState } from 'react'
+/**
+ * 需求工作区：与代码开发同款双列——左列画布主区（画布 / 记录互斥切换），右列需求对话常驻。
+ * 需求记录与待办导入仍由本模块持有，画布是对话与记录的第三个投影视图。
+ * 窄屏收单列，「画布 / 需求对话」两个切换按钮换列（对话始终挂载，会话不因换列中断）。
+ */
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '../../api.mjs'
+import { api as piApi } from '../../../lib/api'
 import { parseTranscriptViewMode } from '../../../lib/transcript/presentation'
 import { IconRequirements, IconTasks } from '../../icons.jsx'
 import RequirementsChat from './RequirementsChat.jsx'
+import RequirementCanvas from './Canvas.jsx'
 import Records from './Records.jsx'
 import ImportDialog from './ImportDialog.jsx'
 import TraceDrawer from './TraceDrawer.jsx'
+import { dispatchedRequirementIds } from './model.jsx'
 import './Conversation.css'
 
 export default function Requirements(props) {
   const { data, mutate, notify, refresh, navigate, navigationTarget, themeMode, prefs } = props
-  const [view, setView] = useState(navigationTarget?.selectedId ? 'records' : 'chat')
+  // 主区收敛为画布 / 记录两态，画布默认；从待办等入口带 selectedId 进来时直接落记录主区。
+  const [mainView, setMainView] = useState(navigationTarget?.selectedId ? 'records' : 'canvas')
+  // 记录一旦进过就保持挂载（hidden 切换），搜索与选中不因切回画布丢失——与 codes 的记录宿主同法。
+  const [recordsVisited, setRecordsVisited] = useState(Boolean(navigationTarget?.selectedId))
+  const [mobileView, setMobileView] = useState('canvas')
   const [importing, setImporting] = useState(null)
   const [busy, setBusy] = useState(false)
   const [importError, setImportError] = useState('')
@@ -24,10 +35,38 @@ export default function Requirements(props) {
   const [viewTasksError, setViewTasksError] = useState('')
   const [importGeneration, setImportGeneration] = useState(0)
   const [traceLookupOpen, setTraceLookupOpen] = useState(false)
+  // 对话把转写与会话 id 送上来（onTranscript）：画布要按会话过滤本会话产物，画布按钮要算未导入草稿。
+  const [transcriptProjection, setTranscriptProjection] = useState(null)
+  // 绑定工作区路径（Agent 配置的 workspace），工具栏副标题回显——与 codes 的项目路径同法。
+  const [workspacePath, setWorkspacePath] = useState('')
   const operationLock = useRef(false)
 
   useEffect(() => {
-    setView(navigationTarget?.selectedId ? 'records' : 'chat')
+    let active = true
+    piApi.moduleAgents()
+      .then(({ agents }) => { if (active) setWorkspacePath(agents.find(item => item.id === 'requirements')?.workspace ?? '') })
+      .catch(() => { /* 拉不到就保持 fallback 文案，不打断工作区 */ })
+    return () => { active = false }
+  }, [])
+
+  const handleTranscript = useCallback(projection => {
+    setTranscriptProjection(current => current?.transcript === projection.transcript && current?.sessionId === projection.sessionId
+      ? current : projection)
+  }, [])
+
+  const canvasEntries = transcriptProjection?.transcript?.entries
+  const canvasSessionId = transcriptProjection?.sessionId ?? null
+  // 末级目录名：副标题只展示这一层（deepseek-harness），完整路径在 title 悬停里。
+  const workspaceName = workspacePath ? (workspacePath.split('/').filter(Boolean).pop() ?? workspacePath) : ''
+  const canvasRecords = useMemo(() => (data?.requirements ?? [])
+    .filter(row => canvasSessionId && row.sourceSessionId === canvasSessionId)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt))), [data?.requirements, canvasSessionId])
+  const pendingDrafts = canvasRecords.filter(row => !row.importedAt).length
+
+  useEffect(() => {
+    const next = navigationTarget?.selectedId ? 'records' : 'canvas'
+    if (next === 'records') setRecordsVisited(true)
+    setMainView(next)
   }, [navigationTarget])
 
   function openImport(row) {
@@ -152,21 +191,42 @@ export default function Requirements(props) {
     }
   }
 
-  return <div className="req-workspace" data-module="requirements" data-testid="req-workspace">
-    <div className="req-workspace-toolbar">
-      <div className="segmented" role="group" aria-label="需求工作区">
-        <button type="button" className={`segmented-item ${view === 'chat' ? 'is-active' : ''}`} data-testid="req-chat-tab" aria-pressed={view === 'chat'} onClick={() => setView('chat')}>需求对话</button>
-        <button type="button" className={`segmented-item ${view === 'records' ? 'is-active' : ''}`} data-testid="req-records-tab" aria-pressed={view === 'records'} onClick={() => setView('records')}><IconRequirements size={15} />需求记录 · {data?.requirements?.length ?? 0}</button>
-      </div>
-      <div className="req-workspace-actions">
-        <button type="button" className="btn btn-sm" data-testid="req-trace-by-id" onClick={() => setTraceLookupOpen(true)}>按 ID 追踪</button>
-        <button type="button" className="btn btn-sm" data-testid="req-open-tasks" onClick={() => openTasks()}><IconTasks size={15} />待办列表</button>
-      </div>
+  return <section className="req-workspace" data-module="requirements" data-testid="req-workspace" data-mobile-view={mobileView}>
+    <div className="req-mobile-tabs" role="group" aria-label="需求工作区视图">
+      <button type="button" className="btn btn-sm" data-testid="req-show-canvas" aria-pressed={mobileView === 'canvas'} onClick={() => setMobileView('canvas')}>画布</button>
+      <button type="button" className="btn btn-sm" data-testid="req-show-chat" aria-pressed={mobileView === 'chat'} onClick={() => setMobileView('chat')}>需求对话</button>
     </div>
-    <div className="req-conversation-host" hidden={view !== 'chat'}>
-      <RequirementsChat data={data} themeMode={themeMode} stepsMode={parseTranscriptViewMode(prefs?.transcriptView)} onRefresh={refresh} onImport={openImport} onOpenTasks={openTasks} />
+    <div className="req-workspace-left">
+      <header className="req-workspace-toolbar">
+        <div className="req-workspace-title">
+          <strong>需求画布</strong>
+          {/* 副标题只显示末级目录名；完整路径放 title 悬停。 */}
+          <span title={workspacePath || undefined} data-testid="req-workspace-root">{workspaceName || '需求 Agent 配置中的工作区'}</span>
+        </div>
+        <div className="segmented" role="group" aria-label="需求主区">
+          <button type="button" className={`segmented-item ${mainView === 'canvas' ? 'is-active' : ''}`} data-testid="req-canvas-tab" aria-pressed={mainView === 'canvas'} onClick={() => setMainView('canvas')}>需求画布{pendingDrafts > 0 ? ` · ${pendingDrafts}` : ''}</button>
+          <button type="button" className={`segmented-item ${mainView === 'records' ? 'is-active' : ''}`} data-testid="req-records-tab" aria-pressed={mainView === 'records'} onClick={() => { setRecordsVisited(true); setMainView('records') }}><IconRequirements size={15} />需求记录 · {data?.requirements?.length ?? 0}</button>
+        </div>
+        <div className="req-workspace-actions">
+          <button type="button" className="btn btn-sm" data-testid="req-trace-by-id" onClick={() => setTraceLookupOpen(true)}>按 ID 追踪</button>
+          <button type="button" className="btn btn-sm" data-testid="req-open-tasks" onClick={() => openTasks()}><IconTasks size={15} />待办列表</button>
+        </div>
+      </header>
+      {mainView === 'canvas' && <RequirementCanvas
+        entries={canvasEntries}
+        records={canvasRecords}
+        dispatchedIds={dispatchedRequirementIds(canvasEntries, canvasRecords)}
+        busy={busy}
+        onImport={openImport}
+        onOpenTasks={openTasks}
+      />}
+      {recordsVisited && <div className="req-records-host" hidden={mainView !== 'records'}>
+        <Records {...props} mutate={mutate} onImport={openImport} initialSelectedId={navigationTarget?.selectedId ?? ''} />
+      </div>}
     </div>
-    {view === 'records' && <div className="req-records-host"><Records {...props} mutate={mutate} onImport={openImport} initialSelectedId={navigationTarget?.selectedId ?? ''} /></div>}
+    <aside className="req-chat-column" data-testid="req-chat-column" aria-label="需求助手对话">
+      <RequirementsChat themeMode={themeMode} stepsMode={parseTranscriptViewMode(prefs?.transcriptView)} onRefresh={refresh} onTranscript={handleTranscript} />
+    </aside>
     {importing && <ImportDialog
       key={`${importing.id}:${importing.updatedAt ?? ''}:${importGeneration}`}
       row={importing}
@@ -185,5 +245,5 @@ export default function Requirements(props) {
       onViewExistingTasks={viewExistingTasks}
     />}
     {traceLookupOpen && <TraceDrawer requirementId="" onClose={() => setTraceLookupOpen(false)} onChanged={() => refresh?.()} />}
-  </div>
+  </section>
 }

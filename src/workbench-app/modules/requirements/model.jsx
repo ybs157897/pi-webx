@@ -144,8 +144,23 @@ function parseTags(text) {
   return [...new Set(parts.map(part => part.trim()).filter(part => part !== ''))]
 }
 
+/** 从会话转写里找成功的 chatroom_send，其参数全文提及的需求记录 id 视为已转交。 */
+function dispatchedRequirementIds(entries, rows) {
+  const ids = new Set()
+  if (!Array.isArray(entries)) return ids
+  for (const entry of entries) {
+    const runs = entry?.kind === 'assistant' ? entry.tools ?? [] : entry?.kind === 'toolResult' ? [entry.run] : []
+    for (const run of runs) {
+      if (run?.toolName !== 'chatroom_send' || run.status !== 'success') continue
+      const text = JSON.stringify(run.args ?? '')
+      for (const row of rows ?? []) if (row?.id && text.includes(row.id)) ids.add(row.id)
+    }
+  }
+  return ids
+}
+
 export {
   TEXT, PRIORITY_OPTIONS, STATUS_STEPS, STATUS_FILTERS, CATEGORY_OPTIONS, EMPTY_FORM,
   byUpdatedDesc, priorityOf, statusOf, categoryOf, tagsOf, refsOf,
-  linksTo, parseTags,
+  linksTo, parseTags, dispatchedRequirementIds,
 }

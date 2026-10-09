@@ -11,7 +11,7 @@ export const requirementsAgentPanel = {
   inputPlaceholder: '说说你想做什么，也可以粘贴已有需求…',
 }
 
-export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh, onImport, onOpenTasks }) {
+export default function RequirementsChat({ themeMode, stepsMode, onRefresh, onTranscript }) {
   const chat = useModuleAgentChat('requirements')
   const [refreshError, setRefreshError] = useState('')
   const panelRef = useRef(null)
@@ -30,13 +30,14 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
     return () => { active = false }
   }, [sessionId, busy, savedTools, onRefresh])
 
+  // 转写与会话 id 送到宿主：需求画布按会话过滤本会话产物，页签徽标据此算未导入草稿数。
+  useEffect(() => { onTranscript?.({ transcript, sessionId }) }, [transcript, sessionId, onTranscript])
+
   async function refreshDrafts() {
     try { await onRefresh?.(); setRefreshError('') }
     catch (error) { setRefreshError(String(error?.message ?? error)) }
   }
 
-  const records = (data?.requirements ?? []).filter(row => sessionId && row.sourceSessionId === sessionId)
-    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)))
   const configError = capabilityError || (capability && !capability.ok ? capability.error || '需求助手未启用，请在 Agent 配置中检查。' : '')
   // 对齐提示：Agent 问完一轮（正文里的 Q1/Q2 清单）而用户还没落笔时露一次。
   const showAlignHint = alignHintVisible(transcript?.entries, busy, draft)
@@ -57,15 +58,10 @@ export default function RequirementsChat({ data, themeMode, stepsMode, onRefresh
         composerLeading={<>
           <RequirementsNewConversation busy={busy || canNewConversation === false} onNew={newConversation} />
           {showAlignHint && <span className="req-align-hint" data-testid="req-align-hint" title="Agent 的待确认清单以 Q1、Q2… 编号，逐条回复即可对齐">逐条回复 Q1、Q2… 编号即可对齐</span>}
+          {busy && status === 'live' && <span className="req-waiting-hint" data-testid="req-waiting-hint">正在检索项目材料与需求库，复杂需求的影响分析可能需要几分钟</span>}
         </>}
         composerFooter={<RequirementsStarterActions busy={busy} status={status} modelName={modelName} onChoose={chooseStarter} />} />
     </div>
     {refreshError && <p role="alert" className="req-chat-error" data-testid="req-refresh-error">草稿刷新失败：{refreshError}<button className="btn btn-sm" type="button" onClick={refreshDrafts}>重试</button></p>}
-    {records.length > 0 && <div className="req-drafts" aria-label="本次对话的需求草稿" data-testid="req-session-drafts">
-      {records.map(row => <div className="req-draft" key={row.id} data-testid="req-draft">
-        <div><span className="req-draft-label">{row.importedAt ? '已导入待办' : '需求草稿已整理'}</span><strong>{row.title}</strong><span className="req-draft-count">{row.taskDrafts?.length ?? 0} 项待办{row.importedAt ? ' · 可在待办中跟进' : ' · 预览并确认后导入'}</span></div>
-        <button type="button" className="btn btn-primary btn-sm" data-testid="req-draft-import" disabled={busy} onClick={() => row.importedAt ? onOpenTasks(row.id) : onImport(row)}>{row.importedAt ? '查看待办' : '预览并导入待办'}</button>
-      </div>)}
-    </div>}
   </section>
 }

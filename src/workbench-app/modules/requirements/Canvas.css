@@ -1,0 +1,218 @@
+/*
+ * 需求画布样式：诉求固定为题头，下面是横向决策树（问题列在左、选项向右缩进）+ 顶部收敛指示行。
+ *
+ * 连接线全部由 ::before/::after 的边框画：每个子项左侧一条横线接父节点，
+ * 一条竖向干线串起兄弟项，首尾各裁一半拼成 L 形——不测量坐标、不读尺寸，SSR 纯渲染即可成形。
+ * 类名一律 `req-canvas-` 前缀，颜色/间距/字号只取 styles.css 的令牌，亮暗主题自动跟随。
+ * 草稿卡（.req-draft）的外观由 Conversation.css 维护，这里只改它在节点里的排布。
+ */
+
+.req-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+  padding: var(--sp-4);
+  overflow: auto;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-lg);
+  background: var(--surface-1);
+}
+
+/* 收敛指示行：现在问到哪一步、收了几条产物、导入了多少。 */
+.req-canvas-summary {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+  margin: 0;
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+.req-canvas-converged {
+  padding: 2px var(--sp-2);
+  border-radius: var(--radius-pill);
+  background: var(--ok-soft);
+  color: var(--ok-strong);
+  font-size: var(--fs-xs);
+  font-weight: 650;
+}
+
+.req-canvas-empty {
+  margin: auto;
+  max-width: 420px;
+  padding: var(--sp-5);
+  color: var(--text-3);
+  font-size: var(--fs-sm);
+  text-align: center;
+}
+
+/* ================================================================ 横向树骨架 */
+
+.req-canvas-tree {
+  display: flex;
+  align-items: flex-start;
+  width: max-content;
+  min-width: 100%;
+  padding-block: var(--sp-2);
+}
+
+.req-canvas-tree ul {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: var(--sp-3);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* 一行 = 节点 + 它的子列表；padding-left 是连接线走廊。 */
+.req-canvas-tree li {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding-left: var(--sp-6);
+}
+
+/* 横线：从走廊左缘接到本节点的左边框（父节点右边框正好在走廊左缘）。 */
+.req-canvas-tree li::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: var(--sp-6);
+  border-top: 1px solid var(--line-2);
+}
+
+/* 竖向干线：首个子项只画下半、末个子项只画上半，独自一人时不画。 */
+.req-canvas-tree li::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  border-left: 1px solid var(--line-2);
+}
+
+.req-canvas-tree li:first-child::after { top: 50%; height: 50%; }
+.req-canvas-tree li:last-child::after { height: 50%; }
+.req-canvas-tree li:only-child::after { display: none; }
+
+/* 最外层没有父节点，不放连接线。 */
+.req-canvas-tree > ul > li { padding-left: 0; }
+.req-canvas-tree > ul > li::before,
+.req-canvas-tree > ul > li::after { display: none; }
+
+/* ================================================================ 节点 */
+
+.req-canvas-question,
+.req-canvas-choice,
+.req-canvas-answer {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  max-width: 280px;
+  padding: var(--sp-2) var(--sp-3);
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+  box-shadow: var(--shadow-1);
+}
+
+/* 根：用户原始诉求，固定为画布题头（不进树流——进树会被垂直居中到很深的滚动位置）。 */
+.req-canvas-root {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  max-width: 720px;
+  padding: var(--sp-2) var(--sp-3);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-md);
+  background: var(--accent-soft);
+  box-shadow: var(--shadow-1);
+}
+
+.req-canvas-root-label {
+  flex: none;
+  font-size: var(--fs-xs);
+  font-weight: 650;
+  color: var(--accent-strong, var(--accent));
+}
+
+.req-canvas-root-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  color: var(--text-1);
+  font-size: var(--fs-sm);
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.req-canvas-question { color: var(--text-1); }
+
+/* 选项边：没被选中的是灰底备选，被选中的加粗高亮。 */
+.req-canvas-choice { color: var(--text-2); }
+
+.req-canvas-choice.is-picked {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text-1);
+  font-weight: 650;
+}
+
+/* 答案节点：左侧色条标记收敛结果。 */
+.req-canvas-answer { border-left: 3px solid var(--ok); }
+
+.req-canvas-answer.is-cancelled {
+  border-left-color: var(--line-2);
+  color: var(--text-3);
+}
+
+.req-canvas-answer.is-waiting {
+  border-left-color: var(--warn);
+  color: var(--text-3);
+}
+
+/* 产物节点：内嵌草稿卡，窄列里改成竖向排布，导入按钮占满一行。 */
+.req-canvas-draft {
+  max-width: 320px;
+  overflow: hidden;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-md);
+  background: var(--surface-0);
+  box-shadow: var(--shadow-1);
+}
+
+.req-canvas-draft .req-draft {
+  flex-direction: column;
+  align-items: stretch;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+}
+
+.req-canvas-draft .req-draft button { width: 100%; }
+
+@media (max-width: 639px) {
+  .req-canvas { padding: var(--sp-3); }
+  .req-canvas-tree li { padding-left: var(--sp-4); }
+  .req-canvas-tree li::before { width: var(--sp-4); }
+  .req-canvas-root { max-width: none; }
+  .req-canvas-question,
+  .req-canvas-choice,
+  .req-canvas-answer { max-width: 220px; }
+  .req-canvas-draft { max-width: 260px; }
+  .req-canvas-draft .req-draft button { min-height: 44px; }
+}
