@@ -11,7 +11,7 @@ import { attachWebSocketGateway } from './ws';
 import { serveProductionAssets } from './static';
 import { createWorkbenchRouter } from './workbench/router';
 import { WorkbenchStore } from './workbench/store';
-import { defaultAgentsConfigRoot, loadAgentProfiles } from './module-agents/profiles';
+import { defaultAgentsConfigRoot, loadAgentProfiles, userAgentsConfigRoot } from './module-agents/profiles';
 import { createModuleAgentsRouter } from './module-agents/router';
 import { ModuleAgentSettingsService } from './module-agents/settings/service';
 import { createModuleAgentSettingsRouter } from './module-agents/settings/router';
@@ -56,7 +56,10 @@ async function main(): Promise<void> {
   // PI_WEBX_AGENT_CONFIG_DIR lets local acceptance run against a temporary clone.
   const agentConfigRoot = process.env.PI_WEBX_AGENT_CONFIG_DIR ?? defaultAgentsConfigRoot();
   if (!path.isAbsolute(agentConfigRoot)) throw new Error('PI_WEBX_AGENT_CONFIG_DIR 必须是绝对路径');
-  const agentProfiles = await loadAgentProfiles(agentConfigRoot);
+  // 用户层（~/.pi-webx/agents，PI_WEBX_USER_CONFIG_DIR 可覆盖）接管本机配置：
+  // 仓库 config/agents 是机器无关默认，设置页的保存全部 copy-on-write 到用户层。
+  const userConfigRoot = userAgentsConfigRoot();
+  const agentProfiles = await loadAgentProfiles([userConfigRoot, agentConfigRoot]);
   for (const [id, result] of agentProfiles) {
     if (!result.ok) console.warn(`[pi-webx] 模块 Agent 配置不可用 ${id}: ${result.error}`);
   }
@@ -67,6 +70,7 @@ async function main(): Promise<void> {
   }));
   app.use('/api/module-agents', createModuleAgentSettingsRouter(new ModuleAgentSettingsService({
     root: agentConfigRoot,
+    userRoot: userConfigRoot,
     profiles: agentProfiles,
     validateModel: async ({ provider, id }) => {
       await manager.syncModelConfig();

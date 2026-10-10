@@ -4,8 +4,14 @@
  * 一个文件坏掉只让它自己不可用，不拖垮同目录的其他配置——文件名必须是已注册
  * 的 Agent id 且与内容 `id` 一致，未知文件名也按该文件单独报错。配置目录与
  * 相对资源路径的稳定根由调用方给的 `rootDir` 固定，不随进程 cwd 漂移。
+ *
+ * 两层归属：仓库 `config/agents/` 是随版本走的机器无关默认；用户层
+ * `~/.pi-webx/agents/`（`PI_WEBX_USER_CONFIG_DIR` 可覆盖）是设置页的写入目标，
+ * 存放本机的模型、工作区与提示词改动。传入根目录数组时按序取第一个拥有
+ * `<id>.yaml` 的根——用户层一份完整配置整体接管该 Agent，不做字段级合并。
  */
 import { readdir, readFile, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -30,9 +36,23 @@ export function defaultAgentsConfigRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'config', 'agents');
 }
 
+/**
+ * 用户层配置根：设置页的写入目标，机器相关字段（模型、工作区、提示词改动）的家。
+ * 设置为空字符串视为未设置。
+ */
+export function userAgentsConfigRoot(): string {
+  const raw = process.env['PI_WEBX_USER_CONFIG_DIR'];
+  if (raw !== undefined && raw.trim().length > 0) {
+    if (!path.isAbsolute(raw)) throw new Error('PI_WEBX_USER_CONFIG_DIR 必须是绝对路径');
+    return path.resolve(raw);
+  }
+  return path.join(homedir(), '.pi-webx', 'agents');
+}
+
 class ProfileError extends Error {}
 
-export async function loadAgentProfiles(rootDir: string): Promise<Map<AgentId, ProfileLoadResult>> {
+export async function loadAgentProfiles(rootDir: string | readonly string[]): Promise<Map<AgentId, ProfileLoadResult>> {
+  if (typeof rootDir !== 'string') return await loadAgentProfileStack(rootDir);
   const results = new Map<AgentId, ProfileLoadResult>();
   let names: string[];
   try {
@@ -66,6 +86,56 @@ export async function loadAgentProfiles(rootDir: string): Promise<Map<AgentId, P
     }
   }
   return results;
+}
+
+/** 栈式加载：按根目录优先级为每个注册 Agent 找归属（第一个有 `<id>.yaml` 的根）。 */
+async function loadAgentProfileStack(roots: readonly string[]): Promise<Map<AgentId, ProfileLoadResult>> {
+  const results = new Map<AgentId, ProfileLoadResult>();
+  for (const id of AGENT_IDS) {
+    let owner: string | undefined;
+    for (const root of roots) {
+      if (await isFile(path.join(root, `${id}.yaml`))) { owner = root; break; }
+    }
+    if (owner === undefined) {
+      results.set(id, { ok: false, agentId: id, file: `${id}.yaml`, error: `配置缺失：任何配置根都没有 ${id}.yaml` });
+      continue;
+    }
+    try {
+      const profile = await loadOne(owner, `${id}.yaml`);
+      results.set(id, { ok: true, profile });
+    } catch (error) {
+      results.set(id, {
+        ok: false, agentId: id, file: path.join(owner, `${id}.yaml`),
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  // 用户层的未知文件名同样按文件单独报错（拼写错误要响，不能静默忽略）。
+  for (const root of roots) {
+    let names: string[];
+    try {
+      names = (await readdir(root, { withFileTypes: true }))
+        .filter((entry) => entry.isFile() && entry.name.endsWith('.yaml'))
+        .map((entry) => entry.name);
+    } catch { continue; }
+    for (const name of names) {
+      const stem = name.slice(0, -'.yaml'.length);
+      if ((AGENT_IDS as readonly string[]).includes(stem)) continue;
+      results.set(stem as AgentId, {
+        ok: false, agentId: null, file: path.join(root, name),
+        error: `未知 Agent 配置文件名：${name}（允许：${AGENT_IDS.join('、')}）`,
+      });
+    }
+  }
+  return results;
+}
+
+async function isFile(file: string): Promise<boolean> {
+  try {
+    return (await stat(file)).isFile();
+  } catch {
+    return false;
+  }
 }
 
 async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProfile> {

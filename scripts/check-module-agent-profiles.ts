@@ -167,7 +167,34 @@ try {
     process.chdir(previous);
   }
 
-  /* 仓库内真实配置：config/agents 四份文件可加载 */
+  /* 栈式加载：用户层同名文件整体接管该 Agent，资源相对路径随归属根走 */
+  const stackRepo = await fixture({
+    'requirements.yaml': yaml('requirements'),
+    'codes.yaml': yaml('codes'),
+    'logs.yaml': yaml('logs'),
+  });
+  const stackUser = await fixture({
+    'codes.yaml': yaml('codes', 'model:\n  provider: p\n  id: m\nworkspace: /tmp/codes-ws'),
+  });
+  const stacked = await loadAgentProfiles([stackUser, stackRepo]);
+  const stackedCodes = stacked.get('codes');
+  assert.ok(stackedCodes?.ok === true, '用户层接管后的 codes 应可加载');
+  if (stackedCodes.ok) {
+    assert.deepEqual(stackedCodes.profile.config.model, { provider: 'p', id: 'm' }, '用户层文件生效');
+    assert.equal(stackedCodes.profile.configPath, join(stackUser, 'codes.yaml'), '归属根是用户层');
+    assert.equal(stackedCodes.profile.promptText, 'PROMPT-codes', '提示词随归属根解析');
+  }
+  assert.ok(stacked.get('requirements')?.ok === true, '未接管的 Agent 仍从仓库层加载');
+  assert.equal(stacked.get('requirements')!.ok && stacked.get('requirements')!.profile.configPath, join(stackRepo, 'requirements.yaml'));
+  assert.ok(stacked.get('logs')?.ok === true);
+  const stackedMissing = await loadAgentProfiles([await mkdtemp(join(root, 'empty-')), await mkdtemp(join(root, 'empty-'))]);
+  assert.ok(!stackedMissing.get('logs')?.ok, '所有根都没有该文件必须报错');
+  const stackedUnknown = await fixture({ 'typo-name.yaml': yaml('logs') });
+  const stackedUnknownResults = await loadAgentProfiles([stackedUnknown, stackRepo]);
+  assert.ok(!stackedUnknownResults.get('typo-name' as never)?.ok, '用户层未知文件名同样要报错');
+  assert.ok(stackedUnknownResults.get('logs')?.ok === true, '未知文件不影响其他 Agent');
+
+  /* 仓库内真实配置：config/agents 四份文件可加载，且机器相关字段留在用户层 */
   const real = await loadAgentProfiles(defaultAgentsConfigRoot());
   for (const id of AGENT_IDS) assert.equal(real.get(id)?.ok, true, `config/agents/${id}.yaml 应可加载`);
   const realAssistant = real.get('assistant');
@@ -183,8 +210,16 @@ try {
     assert.equal(realLogs!.profile.skillPaths.length, 1);
     assert.ok(realLogs!.profile.promptText.includes('日志查询 Agent'));
   }
+  for (const id of ['codes', 'requirements', 'assistant'] as const) {
+    const loaded = real.get(id);
+    assert.ok(loaded?.ok === true);
+    if (loaded.ok) {
+      assert.equal(loaded.profile.config.model, undefined, `仓库默认 ${id}.yaml 不携带 model（随用户层走）`);
+      assert.equal(loaded.profile.config.workspace, undefined, `仓库默认 ${id}.yaml 不携带 workspace（随用户层走）`);
+    }
+  }
 
-  console.log('PASS 模块 Agent 配置：统一 YAML 目录、逐文件隔离、版本稳定、错误带文件与定位，cwd 漂移不改变结果');
+  console.log('PASS 模块 Agent 配置：统一 YAML 目录、逐文件隔离、版本稳定、错误带文件与定位、用户层整体接管与仓库默认机器无关，cwd 漂移不改变结果');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

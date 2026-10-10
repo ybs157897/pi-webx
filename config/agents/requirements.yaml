@@ -28,7 +28,4 @@ knowledge:
 limits:
   maxRunningSessions: 1
   maxToolOutputChars: 24000
-model:
-  provider: cmdc
-  id: deepseek/deepseek-v4.1-flash
-workspace: /Users/yin/Documents/ybs/code/agent/deepseek-harness
+# model 与 workspace 是本机相关字段：由用户层 ~/.pi-webx/agents/requirements.yaml 提供，仓库默认不设。

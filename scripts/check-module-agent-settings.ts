@@ -323,7 +323,39 @@ try {
     assert.equal(invalid.get('logs')?.ok, false, entry);
     assert.equal(invalid.get('codes')?.ok, true, 'invalid logs YAML stays isolated');
   }
-  console.log('PASS 模块设置：HTTP/临时资源、模型 A→B 与默认继承、Skill 选中/取消/重选、旧会话快照、真实发布失败回滚与串行 GET');
+
+  /* copy-on-write：仓库层持有的 Agent 首次保存整体迁到用户层，仓库层一字节不动 */
+  const cowRepoRoot = join(env.root, 'cow-repo-config');
+  await cp(defaultAgentsConfigRoot(), cowRepoRoot, { recursive: true });
+  const cowUserRoot = join(env.root, 'cow-user-config');
+  const cowProfiles = await loadAgentProfiles(cowRepoRoot);
+  const cowService = new ModuleAgentSettingsService({ root: cowRepoRoot, userRoot: cowUserRoot, profiles: cowProfiles, validateModel: async () => true });
+  const cowBefore = await cowService.get('logs');
+  const cowRepoYamlBefore = await readFile(join(cowRepoRoot, 'logs.yaml'));
+  const cowPromptBefore = await readFile(join(cowRepoRoot, 'prompts/logs.md'));
+  const cowSkillBefore = await readFile(join(cowRepoRoot, 'skills/logs/log-analysis/SKILL.md'));
+  const cowUpdate = update(cowBefore);
+  cowUpdate.prompt += '\nCOW-EDIT';
+  const cowSaved = await cowService.update('logs', cowUpdate);
+  assert.match(cowSaved.prompt, /COW-EDIT/, 'copy-on-write 保存成功');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'logs.yaml')), cowRepoYamlBefore, '仓库层 YAML 必须保持原样');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'prompts/logs.md')), cowPromptBefore, '仓库层提示词必须保持原样');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'skills/logs/log-analysis/SKILL.md')), cowSkillBefore, '仓库层 Skill 必须保持原样');
+  assert.match(await readFile(join(cowUserRoot, 'logs.yaml'), 'utf8'), /id: logs/, '用户层生成了接管 YAML');
+  assert.match(await readFile(join(cowUserRoot, 'prompts/logs.md'), 'utf8'), /COW-EDIT/, '改动落在用户层提示词');
+  assert.ok((await readFile(join(cowUserRoot, 'skills/logs/log-analysis/SKILL.md'), 'utf8')).length > 0, '声明的 Skill 候选随迁用户层');
+  const cowMigrated = (await loadAgentProfiles([cowUserRoot, cowRepoRoot])).get('logs');
+  assert.ok(cowMigrated?.ok === true, '迁移后栈式加载成功');
+  if (cowMigrated.ok) assert.equal(cowMigrated.profile.configPath, join(cowUserRoot, 'logs.yaml'), '归属根切到用户层');
+  const cowLive = cowProfiles.get('logs');
+  assert.ok(cowLive?.ok === true);
+  if (cowLive.ok) assert.equal(cowLive.profile.configPath, join(cowUserRoot, 'logs.yaml'), '服务把 profiles map 切到用户层');
+  const cowSecond = update(cowSaved);
+  cowSecond.prompt += '\nCOW-SECOND';
+  assert.match((await cowService.update('logs', cowSecond)).prompt, /COW-SECOND/, '接管后的再次保存在用户层生效');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'logs.yaml')), cowRepoYamlBefore, '第二次保存仓库层仍原样');
+
+  console.log('PASS 模块设置：HTTP/临时资源、模型 A→B 与默认继承、Skill 选中/取消/重选、旧会话快照、真实发布失败回滚与串行 GET、copy-on-write 用户层接管');
 } finally {
   server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   await host.disposeAll(); store.close();
