@@ -35,7 +35,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { request as httpRequest } from 'node:http';
 
@@ -111,7 +111,9 @@ async function check(name: string, fn: () => void | Promise<void>): Promise<void
  */
 // Windows 的 TEMP 常是 8.3 短路径（RUNNER~1），AppContainer 预检（landstrip -p）与
 // realpath 断言会短长形态打架；先展开 TEMP，本进程后续所有 mkdtemp 都是长路径。
-process.env['TEMP'] = process.env['TMP'] = realpathSync(tmpdir());
+process.env['TEMP'] = process.env['TMP'] = process.platform === 'win32'
+  ? join(homedir(), 'AppData', 'Local', 'Temp') // realpath 不展开 8.3 短名，homedir 恒为长路径
+  : tmpdir();
 const ROOT = mkdtempSync(join(tmpdir(), 'pi-webx-agent-team-'));
 const WORK = join(ROOT, 'work');
 const AGENTS_SENTINEL = 'AGENT-TEAM-AGENTS-SENTINEL-4b71';

@@ -139,8 +139,13 @@ try {
   await host.kill(codeId);
   await assert.rejects(originalCreate({ moduleAgent: await codeAssembly(), sessionPath: codeHosted.sessionFile!, cwd: codesB, ...fixtureModel }), /项目目录.*(?:不一致|不匹配)/,
     'direct host restoration cannot switch a code session to another project');
-  assert.equal(normalizeProjectCwd(`${codesA}/./`), codesA);
-  assert.notEqual(agentStorageKey('codes', codesA), agentStorageKey('codes', codesB));
+  // normalizeProjectCwd 是浏览器侧工具，契约只认 POSIX 路径；Windows 主机路径
+  // （C:\…）按设计归 null，宿主路径等价断言只在非 win32 上成立。
+  assert.equal(normalizeProjectCwd('/a/b/../c/./'), '/a/c', 'POSIX 契约：段归一化不依赖宿主');
+  if (process.platform !== 'win32') {
+    assert.equal(normalizeProjectCwd(`${codesA}/./`), codesA);
+    assert.notEqual(agentStorageKey('codes', codesA), agentStorageKey('codes', codesB));
+  }
   assert.equal(agentStorageKey('logs'), 'ai-workbench.agent-session:default:logs');
   assert.equal((await post({ requestId: 'assistant-with-cwd', cwd: codesA }, 'assistant')).status, 400);
   const assistantSession = await post({ requestId: 'assistant-create' }, 'assistant');

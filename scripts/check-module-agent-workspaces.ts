@@ -3,6 +3,7 @@ import express from 'express';
 import { once } from 'node:events';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { defaultAgentsConfigRoot, loadAgentProfiles } from '../server/module-agents/profiles';
 import { profileRevision, ProfileSnapshots } from '../server/module-agents/snapshots';
@@ -15,7 +16,10 @@ import {
   validateWorkspaceSelection,
 } from '../server/module-agents/workspace';
 
-const root = await mkdtemp(path.join(tmpdir(), 'module-agent-workspaces-'));
+// Windows runner 的 TEMP 是 8.3 短路径且 realpath 不展开短名；mkdtemp 根从 homedir
+// 推导（恒为长路径），断言两边就不会短长形态打架。
+const tmpBase = process.platform === 'win32' ? path.join(homedir(), 'AppData', 'Local', 'Temp') : tmpdir();
+const root = await mkdtemp(path.join(tmpBase, 'module-agent-workspaces-'));
 const previous = process.env.PI_WEBX_AGENT_WORKSPACE_ROOT;
 // 先建目录再设环境：Windows 的 TEMP 是 8.3 短路径，目录不存在时 canonical 化只能
 // 逐段回退，defaultAgentWorkspace 会留在短形态而 effectiveWorkspace 已展开，长短打架。

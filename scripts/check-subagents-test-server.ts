@@ -24,7 +24,7 @@
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import path from 'node:path';
+import path, { resolve } from 'node:path';
 
 import {
   DEFAULT_ALLOWED_COMMANDS,
@@ -363,7 +363,10 @@ assert.equal(unsupportedMessage.includes(SECRET), false, '阻塞消息里不得�
       '规范化不能把真实越界路径放进来',
     );
     assert.equal(canonicalize(path.join(runDir, 'fixtures')), fixtureRoot, 'canonicalize 必须与 realpath 一致');
-    assert.equal(canonicalize('/nonexistent/definitely/not/here'), '/nonexistent/definitely/not/here', '不存在路径必须回退为 resolve 结果而不是抛错');
+    // 不存在路径必须回退为 resolve 结果而不是抛错；resolve 在 win32 会补盘符，
+    // 期望值跟着 resolve 走，断言强度不变（仍是「原样回退」）。
+    assert.equal(canonicalize('/nonexistent/definitely/not/here'), resolve('/nonexistent/definitely/not/here'),
+      '不存在路径必须回退为 resolve 结果而不是抛错');
   } finally {
     rmSync(runDir, { recursive: true, force: true });
   }

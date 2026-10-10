@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import type { ToolDefinition } from '@earendil-works/pi-coding-agent';
@@ -29,7 +29,9 @@ if (process.platform !== 'win32') {
   console.log('SKIP Windows AppContainer runtime checks on this non-Windows host');
 } else {
   // Windows 的 TEMP 常是 8.3 短路径；landstrip -p 只接受长形态，先展开。
-  process.env['TEMP'] = process.env['TMP'] = realpathSync(tmpdir());
+  process.env['TEMP'] = process.env['TMP'] = process.platform === 'win32'
+    ? join(homedir(), 'AppData', 'Local', 'Temp') // realpath 不展开 8.3 短名
+    : tmpdir();
   const root = mkdtempSync(join(tmpdir(), 'pi-webx-team-win-check-'));
   const cwd = join(root, 'work');
   const agentDir = join(root, 'agent-dir');
