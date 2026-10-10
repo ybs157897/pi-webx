@@ -83,6 +83,16 @@ export function ChipButton({ tone = '', active = false, onClick, children, title
 }
 
 /** 图标按钮；必须给 `label`（进 `aria-label` 与 tooltip）。 */
+/**
+ * @param {object} props
+ * @param {string} props.label 可访问名称。
+ * @param {() => void} [props.onClick]
+ * @param {import('react').ReactNode} [props.children]
+ * @param {string} [props.tone]
+ * @param {boolean} [props.disabled]
+ * @param {'button' | 'submit' | 'reset'} [props.type] 原生 button type。
+ * @param {string} [props.className]
+ */
 export function IconButton({ label, onClick, children, tone = '', disabled = false, type = 'button', className = '' }) {
   return (
     <button

@@ -11,7 +11,7 @@
  * @returns 接受 `{ size, className, ...rest }` 的组件。
  */
 function icon(children) {
-  return function Icon({ size = 20, className, ...rest }) {
+  return function Icon({ size = 20, className = '', ...rest }) {
     return (
       <svg
         width={size}

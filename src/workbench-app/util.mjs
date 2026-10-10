@@ -42,7 +42,7 @@ export function lastNDays(n, today = todayISO()) {
 /** 某月天数。`month` 形如 `YYYY-MM`。 */
 export function daysInMonth(month) {
   const [y, m] = String(month).split('-').map(Number)
-  return new Date(y, m, 0).getDate()
+  return new Date(y ?? 0, m ?? 1, 0).getDate()
 }
 
 /** 某月全部日期，升序。 */

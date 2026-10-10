@@ -155,7 +155,7 @@ function dueWord(due, today) {
 }
 
 /** 添加成功后的提示：把解析出的标记回报一遍，确认小语法真的生效了。 */
-function captureToast(parsed, today) {
+function captureToast(parsed, _today) {
   const marks = []
   if (parsed.matched.tag) marks.push(`#${parsed.tag}`)
   if (parsed.matched.priority) marks.push(`${PRIORITY[parsed.priority].label}优先级`)
@@ -237,7 +237,7 @@ function durationOf(task) {
 /** 同一个标签永远同一个色点（字符和取模，不随机）。 */
 function tagTone(tag) {
   let sum = 0
-  for (const char of String(tag ?? '')) sum = (sum + char.codePointAt(0)) % 997
+  for (const char of String(tag ?? '')) sum = (sum + (char.codePointAt(0) ?? 0)) % 997
   return TAG_TONES[sum % TAG_TONES.length]
 }
 

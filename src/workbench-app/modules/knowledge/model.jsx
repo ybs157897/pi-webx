@@ -142,7 +142,7 @@ const WIKI_PATTERN = /\[\[([^\[\]\n]+?)\]\]/g
 function parseWikiTitles(body) {
   const titles = []
   for (const match of String(body ?? '').matchAll(WIKI_PATTERN)) {
-    const title = match[1].trim()
+    const title = (match[1] ?? '').trim()
     if (title !== '' && !titles.includes(title)) titles.push(title)
   }
   return titles

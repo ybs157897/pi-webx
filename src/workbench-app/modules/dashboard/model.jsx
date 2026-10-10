@@ -165,7 +165,7 @@ function ProgressRing({ done, total }) {
   return (
     <div
       className="dash-ring"
-      style={{ '--dash-pct': percent }}
+      style={/** @type {any} CSS 自定义属性不在 React 类型里 */ ({ '--dash-pct': percent })}
       role="img"
       aria-label={`今日完成度 ${percent}%，已完成 ${done} / ${total} 项`}
     >

@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "checkJs": true,
+    "noEmit": true,
+    "noImplicitAny": false
+  },
+  "include": [
+    "src/workbench-app/modules/**/*-model.js",
+    "src/workbench-app/modules/**/model.jsx",
+    "src/workbench-app/schema.mjs"
+  ],
+  "exclude": [
+    "src/workbench-app/modules/requirements/canvas-model.js"
+  ]
+}

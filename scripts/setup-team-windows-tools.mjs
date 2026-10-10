@@ -45,9 +45,10 @@ function ready() {
     const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
     return assets.every((asset) => {
       const binary = join(TEAM_WINDOWS_BIN_DIR, asset.name);
+      // 完整性只认 zip/exe 双 SHA-256；许可证文件是随附的合规产物，上游 zip
+      // 清单漂移不该打断安装（缺失时 provision 会打警告）。
       return manifest[asset.name] === asset.sha256 && existsSync(binary)
-        && createHash('sha256').update(readFileSync(binary)).digest('hex') === asset.exeSha256
-        && asset.licenses.every((name) => existsSync(join(TEAM_WINDOWS_BIN_DIR, `${asset.name}-${name}`)));
+        && createHash('sha256').update(readFileSync(binary)).digest('hex') === asset.exeSha256;
     });
   } catch { return false; }
 }
@@ -79,7 +80,12 @@ async function provision() {
       copyFileSync(binary, join(TEAM_WINDOWS_BIN_DIR, asset.name));
       for (const name of asset.licenses) {
         const license = findFile(extracted, name);
-        if (!license) throw new Error(`${asset.name} 压缩包中没有 ${name}`);
+        // 许可证缺失只警告：运行时依赖的是校验过的 exe，上游发布包的文件清单
+        // 会漂移（14.1.1 的 zip 就出现过缺 COPYING），不值得为此打断 npm ci。
+        if (!license) {
+          console.warn(`[pi-webx] ${asset.name} 压缩包中没有 ${name}，跳过该许可证副本（完整性以 SHA-256 为准）`);
+          continue;
+        }
         copyFileSync(license, join(TEAM_WINDOWS_BIN_DIR, `${asset.name}-${name}`));
       }
     }
