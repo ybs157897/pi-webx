@@ -21,15 +21,17 @@ npm install && npm run dev      # bridge :8787 + Vite :5173 → http://127.0.0.1
 npm run build && npm start      # production, single process → http://127.0.0.1:8787
 ```
 
-Requires Node 20 or newer (nothing else — no CLI on PATH, no global install). The bridge
-logs the embedded pi SDK version at startup; on older Node it fails there, at boot.
+Requires Node 22.19 or newer (`engines` in `package.json`; nothing else — no CLI on PATH, no
+global install). The bridge logs the embedded pi SDK version at startup; on older Node it
+fails there, at boot.
 
 ## Personal workbench
 
-The default page (`/`) is the eight-module AI personal workbench migrated from the
+The default page (`/`) is the nine-module AI personal workbench migrated from the
 `ai-workbench` frontend: 我的主页 (dashboard), 我的助理 (assistant), 问题修复 (fixes),
-日志查询 (logs), 需求管理 (requirements), 代码开发 (codes), 知识库 (knowledge) and
-Agent 配置 (agent-settings). The original full Pi interface remains at `/chat`; both pages
+日志查询 (logs), 需求管理 (requirements), 代码开发 (codes), 内部聊天室 (chatroom),
+知识库 (knowledge) and Agent 配置 (agent-settings) — the nav registry in
+`src/workbench-app/App.jsx` is the source of truth. The original full Pi interface remains at `/chat`; both pages
 use this repository's session client and one local bridge process. The workbench's
 records use the SQLite API below, while Pi conversations retain their own session
 logs. The agent can read the knowledge library through the knowledge REST tool —
@@ -192,16 +194,19 @@ than a loud failure. User preferences (last workspace, default model) persist in
 
 ## Known gaps
 
-- Extension **dialogs** (`select`/`confirm`/`input`/`editor`) are serviced by pi's mode
-  layer, which the plain SDK does not expose — in SDK mode they resolve with defaults rather
-  than prompting the user. Fire-and-forget extension UI (`notify`/`setStatus`/`setWidget`)
+- Extension **dialogs** (`select`/`confirm`/`input`/`editor`) are serviced through the
+  browser UI transport (`server/pi/extension-ui.ts`): the request is published to the page,
+  the composer turns into the question, and the answer resolves the pending call
+  (`askCard` additionally carries a `questionId` so the requirements canvas can bind an
+  answer to its node). Fire-and-forget extension UI (`notify`/`setStatus`/`setWidget`)
   works via the event stream.
 - `get_commands`, `export_html`, direct `bash`, and the `set_auto_*` settings are not yet
   mapped to SDK calls; the bridge reports them as unsupported and the UI degrades with a
   notice.
 - Live sessions are in-memory: restarting the bridge ends them. Persisted conversations
   remain resumable from the history list.
-- No automated browser tests. UI was verified by driving it manually; antd dropdown-option
-  clicks proved unreliable to automate.
+- Browser automation covers the agent-team flow only (`npm run check:team-browser`,
+  Playwright-driven, also run in CI); the rest of the UI is verified by SSR DOM assertions
+  (`check:workbench-ui` and friends) plus manual driving.
 - Models often emit the `render_ui` spec as a JSON-encoded string; both the extension and
   `normalizeUiSpec` unwrap that (up to two levels).

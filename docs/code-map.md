@@ -15,6 +15,7 @@
         ▼
  本地桥 server/index.ts（Express，127.0.0.1:8787）
  ├─ server/routes.ts            HTTP 面（提交门禁冻结，尽量别动）
+ ├─ server/security-middleware.ts 全局 Host 白名单 + 写请求 Origin 校验（先于一切 router 挂载；WS 握手同规则）
  ├─ server/ws.ts                WebSocket
  ├─ server/pi/                  pi 会话宿主（进程内 SDK）
  ├─ server/modules/             工作台领域字段与模块工具（tasks / plans / requirements / logs / knowledge …）
@@ -147,11 +148,11 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id |
+| 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id。仓库层是机器无关默认（不携带 model/workspace）；本机值由用户层 `~/.pi-webx/agents/`（`PI_WEBX_USER_CONFIG_DIR` 可覆盖）整体接管，设置页保存 copy-on-write 只写用户层 |
 | 需求 Agent 提示词与方法 Skill | `config/agents/prompts/requirements.md` 保留身份、证据/授权边界与协作纪律；`config/agents/skills/requirements/product-requirements/` 的 `SKILL.md` 按需读取需求质量/规格、产物/交接参考，正文映射到 note + taskDrafts，由 `requirements.yaml` 显式挂载 |
 | 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
-| 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要） | `server/module-agents/profiles.ts` |
-| 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆；新对话使用新配置 |
+| 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要；传根目录数组时按优先级整体接管） | `server/module-agents/profiles.ts`（`userAgentsConfigRoot()` 是用户层根） |
+| 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆（用户层用 `PI_WEBX_USER_CONFIG_DIR` 隔离）；新对话使用新配置；带 `userRoot` 时保存整体 copy-on-write 迁到用户层，仓库层只读 |
 | 模块工作区（默认目录、自定义绑定、真实路径校验，绑定目录整体作为项目） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录；不再限制与其他 Agent 的目录重叠 |
 | 绑定项目上下文（各 Agent 的项目身份与根指令） | `server/module-agents/project-context.ts`：整个绑定目录为当前项目；只自动加载绑定根的 AGENTS/CLAUDE 及 local 文件，受限大小、符号链接校验、内容去重；`assemble.ts` 注入身份并将指令交给 SDK `agentsFilesOverride`，不向上发现或加载全局资源 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
@@ -209,8 +210,8 @@
 | 功能 | 位置 |
 | --- | --- |
 | 菜单直达双列工作区、导入后跳待办 | `src/workbench-app/modules/requirements/index.jsx`：codes 同款双列——左列画布主区（`req-canvas-tab` / `req-records-tab` 互斥切换，记录进过即驻留 hidden 保持搜索/选中），右列 `req-chat-column` 需求对话常驻（不再有「需求对话」页签）；工具栏副标题经 `lib/api` 的 `moduleAgents()` 回显绑定工作区路径（`req-workspace-root`，拉取失败显 fallback 文案）；窄屏 899px 以下收单列，`data-mobile-view` + `req-show-canvas`/`req-show-chat` 两个按钮换列；布局 `Conversation.css`；`Landing.jsx` 维护对话列首页标题、输入工具栏与需求快捷入口，发送后回到消息布局 |
-| 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，回合结束/恢复后刷新 SQLite 投影，并把转写与会话 id 经 `onTranscript` 上报宿主（底部草稿条已退役）；草稿卡由 `DraftCard.jsx` 渲染（分类徽标、已导入转「查看待办」、被 `chatroom_send` 转交后锁定「已转交群处理」不重复导入，转交集合由 `model.jsx` 的 `dispatchedRequirementIds` 从转写推导） |
-| 需求画布（推进脉络投影） | `modules/requirements/canvas-model.js` 的纯函数 `buildRequirementCanvas` 把转写投影成决策树：根取第一条非空 user 正文（超 120 字截断，全文留 `fullText`），`ask_user` 每题一个分支节点（`assistant.tools` 与 `toolResult.run` 按 `toolCallId` 去重，答案按题 id 配对，`details.cancelled` 与「已结束却无答案」按未作答处理），`records` 每条一个产物节点，汇总 `{ asked, answered, drafts, imported }`；`Canvas.jsx` + `Canvas.css` 用嵌套 ul/li + CSS 连接线（`::before/::after`）渲染横向树——根 / 题干 / 选项边（选中加 `is-picked`）/ 答案 / 产物节点（内嵌 `DraftCard.jsx`）+ 收敛行与空态，SSR 纯渲染、不测坐标；`index.jsx` 把画布作为左列主区默认视图（`req-canvas-tab` 带未导入草稿徽标）承载按 `sourceSessionId` 过滤的本会话产物，确认导入入口从对话底栏移到画布 |
+| 独立需求会话与草稿投影 | `modules/requirements/RequirementsChat.jsx`；复用 `useModuleAgentChat('requirements')` 与 `AIPanel`，回合结束/恢复后刷新 SQLite 投影，并把转写与会话 id 经 `onTranscript` 上报宿主（底部草稿条已退役）；同时把待答 dialog 与 `respondToDialog` 经 `onDialogChannel` 上抛（画布作答通道，见下）；草稿卡由 `DraftCard.jsx` 渲染（分类徽标、已导入转「查看待办」、被 `chatroom_send` 转交后锁定「已转交群处理」不重复导入，转交集合由 `model.jsx` 的 `dispatchedRequirementIds` 从转写推导） |
+| 需求画布（推进脉络投影 + 第二作答面） | `modules/requirements/canvas-model.js` 的纯函数 `buildRequirementCanvas` 把转写投影成决策树：根取第一条非空 user 正文（超 120 字截断，全文留 `fullText`），`ask_user` 每题一个分支节点（`assistant.tools` 与 `toolResult.run` 按 `toolCallId` 去重，答案按题 id 配对，`details.cancelled` 与「已结束却无答案」按未作答处理），`records` 每条一个产物节点，汇总 `{ asked, answered, drafts, imported }`；画布同时可作答：`pendingDialog`（extension_ui_request，`askCard` 透传的 `request.questionId` 精确定位运行中 run 的题目）标记 `pending` 分支，`Canvas.jsx` 把该题选项升级为可点按钮、开放题渲染输入行，作答经 `index.jsx` 的 `answerChannel` 走与聊天提问卡相同的 `extension_ui_response` 命令（`optimisticAnswers` 乐观上屏、toolResult 落地由 `activeOptimisticAnswers` 自动失效，对话列 `req-canvas-echo` 回执本轮画布作答）；`Canvas.jsx` + `Canvas.css` 用嵌套 ul/li + CSS 连接线（`::before/::after`）渲染横向树——根 / 题干 / 选项边（选中加 `is-picked`，待答加 `is-clickable`）/ 答案 / 产物节点（内嵌 `DraftCard.jsx`）+ 收敛行与空态，SSR 纯渲染、不测坐标；`index.jsx` 把画布作为左列主区默认视图（`req-canvas-tab` 带未导入草稿徽标）承载按 `sourceSessionId` 过滤的本会话产物，确认导入入口从对话底栏移到画布 |
 | 原有需求列表、阅读和编辑 | `modules/requirements/Records.jsx`、`Reader.jsx`、`Dialogs.jsx`；保留旧 `req-*` testid |
 | 需求分类与输入引导 | `modules/requirements/CategoryBadge.jsx`（new/change/fix/enhancement 中文徽标，映射在 `model.jsx` 的 `categoryOf`，缺失按 new）；`Landing.jsx` 首页需求描述引导与可点示例（`starterDraft` 纯函数填入输入框）；`RequirementsChat.jsx` 输入区提示（`alignHintVisible`：最后一条非空 assistant 正文含 Q1/Q2… 编号清单、回合结束、输入为空才出现；回合进行中同槽位改用 `req-waiting-hint` 说明影响分析可能需要几分钟）；`ImportDialog.jsx` 头部显示分类、单条待办默认文案 |
 | 确认导入弹窗 | `modules/requirements/ImportDialog.jsx`、`ImportDialog.css`；预览、编辑/勾选、焦点与错误反馈；`index.jsx` 管理 409 后保留编辑、显式读取最新需求及关联任务、再次确认；已关联任务转为只读查看 |
@@ -297,6 +298,8 @@
 
 | 门禁脚本 | 盯什么 |
 | --- | --- |
+| `scripts/check-server-origin.ts` | `server/index.ts` 必须在第一个 router 之前挂 `hostAllowlist()`/`originGuard()`；`server/ws.ts` 的 upgrade 处理器必须先 `guardUpgrade(req)` 再分发；`agent-definitions-routes.ts` 复用共享 `isCrossSiteRequest` |
+| `scripts/run-checks.mjs` | 全量 check 清单的登记处（新增门禁在这里加一行）；`npm run check` 并行执行、汇总全部失败 |
 | `scripts/check-agent-definitions-ui.ts` | 读 `AgentDefinitionsSection.tsx` 源码：表单字段（COPY.*）顺序、隐藏字段禁现、无 `type="number"`；读其 `.module.css` 断言窄屏断点 |
 | `scripts/check-agent-team-journal.ts` | `team-journal.ts`、`team-runtime.ts` 及 `team-ops-*` 新文件源码**不得含 "durable"** 一词 |
 | `scripts/check-task-panel.ts` | 读 `TaskPanel.tsx` 源码与图标 path |
@@ -316,6 +319,7 @@
 ## 相关文档
 
 - 根 `AGENTS.md` — 必跑门禁与硬规则
+- 工作台前端类型试点：`tsconfig.workbench.json` 对模型层（`*-model.js` / `model.jsx`）开 `checkJs`，`npm run typecheck:workbench`；`requirements/canvas-model.js` 暂排除（并行会话进行中，落地后纳入）
 - `docs/architecture/assistant.md` — 我的助理（待办与今天）的契约、合并决策与验收
 - `docs/workbench-knowledge-protocol.md` — 知识库写入契约与读/写口子
 - `docs/workbench-ai-chat-compact-mode.md` — AI 对话全屏浮层形态与简洁模式输出规范
