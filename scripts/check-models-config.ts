@@ -32,9 +32,11 @@ function check(name: string, fn: () => void | Promise<void>): Promise<void> {
 }
 
 // The config path follows pi's own agent dir, which is resolved at module load,
-// so HOME must move before the first import of the module under test.
+// so HOME must move before the first import of the module under test. On
+// Windows os.homedir() answers USERPROFILE, so both must point at the sandbox.
 const sandbox = mkdtempSync(path.join(os.tmpdir(), 'piwebx-models-'));
 process.env['HOME'] = sandbox;
+if (process.platform === 'win32') process.env['USERPROFILE'] = sandbox;
 const agentDir = path.join(sandbox, '.pi', 'agent');
 mkdirSync(agentDir, { recursive: true });
 

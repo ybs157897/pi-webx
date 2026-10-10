@@ -17,6 +17,9 @@ import {
 
 const root = await mkdtemp(path.join(tmpdir(), 'module-agent-workspaces-'));
 const previous = process.env.PI_WEBX_AGENT_WORKSPACE_ROOT;
+// 先建目录再设环境：Windows 的 TEMP 是 8.3 短路径，目录不存在时 canonical 化只能
+// 逐段回退，defaultAgentWorkspace 会留在短形态而 effectiveWorkspace 已展开，长短打架。
+await mkdir(path.join(root, 'dedicated'), { recursive: true });
 process.env.PI_WEBX_AGENT_WORKSPACE_ROOT = path.join(root, 'dedicated');
 const config = path.join(root, 'config');
 await cp(defaultAgentsConfigRoot(), config, { recursive: true });

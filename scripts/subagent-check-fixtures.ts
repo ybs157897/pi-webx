@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -45,7 +45,9 @@ export async function until(predicate: () => boolean): Promise<void> {
 export const memorySettings = () => SettingsManager.inMemory({ retry: { enabled: false }, compaction: { enabled: false } }, { projectTrusted: false });
 
 export async function sandbox() {
-  const root = await mkdtemp(join(tmpdir(), 'pi-subagent-boundaries-'));
+  // Windows 的 TEMP 常是 8.3 短路径（RUNNER~1），mkdtemp 原样返回；下游一处
+  // realpath 一处字符串拼接就会短长形态不一致。统一在入口展开成长路径。
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'pi-subagent-boundaries-')));
   const cwd = join(root, 'work'), agentDir = join(root, 'agent');
   await mkdir(cwd); await mkdir(join(agentDir, 'extensions'), { recursive: true });
   const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath: null, allowModelNetwork: false, refreshOnCreate: false });

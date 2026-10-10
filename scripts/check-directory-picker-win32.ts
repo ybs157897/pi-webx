@@ -602,11 +602,16 @@ for (const failure of [
     seen.push({ command, args });
     return '/Users/yin/work\n';
   };
-  assert.equal(await pickNativeDirectory({ initial: process.cwd(), signal: live() }, { platform: 'darwin', run }),
-    '/Users/yin/work');
-  assert.equal(seen[0]?.command, 'osascript');
-  assert.ok(seen[0]?.args[1]?.includes(`default location POSIX file "${process.cwd()}"`),
-    'darwin opens the chooser at the current directory');
+  // darwin 断言要用「真实存在」的目录（不存在的 initial 会被生产代码丢弃），期望值
+  // 还要按 AppleScript 字面量转义——Windows 的临时目录带反斜杠，不转义就随平台漂移。
+  const darwinInitial = mkdtempSync(join(tmpdir(), 'picker-darwin-'));
+  const darwinLiteral = darwinInitial.replaceAll('\\', '\\\\').replaceAll('"', '\\"');
+  try {
+    assert.equal(await pickNativeDirectory({ initial: darwinInitial, signal: live() }, { platform: 'darwin', run }),
+      '/Users/yin/work');
+    assert.equal(seen[0]?.command, 'osascript');
+    assert.ok(seen[0]?.args[1]?.includes(`default location POSIX file "${darwinLiteral}"`),
+      'darwin opens the chooser at the given directory');
 
   const cancelled = async (): Promise<string> => {
     // Node reports osascript's dismissal as exit 1 with the text on stderr.
@@ -624,6 +629,9 @@ for (const failure of [
   await assert.rejects(pickNativeDirectory({ signal: live() }, { platform: 'freebsd' }),
     (error: unknown) => error instanceof DirectoryPickerUnsupportedError && error.message.includes('freebsd'),
     'unknown platforms refuse rather than pretend');
+  } finally {
+    rmSync(darwinInitial, { recursive: true, force: true });
+  }
 }
 
 {

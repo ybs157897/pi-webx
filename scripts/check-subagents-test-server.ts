@@ -116,9 +116,12 @@ withRunDir((runDir) => {
   const resolved = resolveRunDir({ RUN_DIR: runDir }, PROJECT_ROOT);
   assert.equal(resolved, realpathSync(runDir), 'RUN_DIR 必须解析成 realpath');
   assert.ok(contains(TMP, resolved), 'RUN_DIR 必须落在 OS tmp 根之下');
-  // 0700：同机其他用户不该看到这份转录。
-  const mode = statSync(resolved).mode & 0o777;
-  assert.equal(mode, 0o700, `RUN_DIR 权限必须是 0700，实际 ${mode.toString(8)}`);
+  // 0700：同机其他用户不该看到这份转录。NTFS 没有 POSIX 权限位（stat 恒为 0666），
+  // Windows 上由用户 profile 的 ACL 兜底，这里只验 Unix。
+  if (process.platform !== 'win32') {
+    const mode = statSync(resolved).mode & 0o777;
+    assert.equal(mode, 0o700, `RUN_DIR 权限必须是 0700，实际 ${mode.toString(8)}`);
+  }
 });
 
 /* ------------------------------------------------------------------- the port */

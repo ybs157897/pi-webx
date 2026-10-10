@@ -17,7 +17,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -84,6 +84,8 @@ async function check(name: string, fn: () => void | Promise<void>): Promise<void
 
 /* ---------------------------------------------------------------- fixtures -- */
 
+// Windows 的 TEMP 常是 8.3 短路径，与 realpath 断言短长形态打架；先展开（见 check-agent-team.ts）。
+process.env['TEMP'] = process.env['TMP'] = realpathSync(tmpdir());
 const ROOT = mkdtempSync(join(tmpdir(), 'pi-webx-team-inject-'));
 mkdirSync(join(ROOT, 'agent'), { recursive: true });
 mkdirSync(join(ROOT, 'work'), { recursive: true });

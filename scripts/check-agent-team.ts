@@ -33,7 +33,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -109,6 +109,9 @@ async function check(name: string, fn: () => void | Promise<void>): Promise<void
  * assertion looks for. The user's real agent dir is only ever touched for the one
  * host section, and only through `PI_CODING_AGENT_DIR`, which is restored.
  */
+// Windows 的 TEMP 常是 8.3 短路径（RUNNER~1），AppContainer 预检（landstrip -p）与
+// realpath 断言会短长形态打架；先展开 TEMP，本进程后续所有 mkdtemp 都是长路径。
+process.env['TEMP'] = process.env['TMP'] = realpathSync(tmpdir());
 const ROOT = mkdtempSync(join(tmpdir(), 'pi-webx-agent-team-'));
 const WORK = join(ROOT, 'work');
 const AGENTS_SENTINEL = 'AGENT-TEAM-AGENTS-SENTINEL-4b71';

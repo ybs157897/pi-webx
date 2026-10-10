@@ -1,0 +1,14 @@
+# 全仓 LF：源码文本断言（CSS 块、路径匹配）以 \n 为界，Windows runner 的
+# autocrlf 检出会把它们变 CRLF 打红门禁；二进制按扩展名豁免。
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.zip binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp4 binary

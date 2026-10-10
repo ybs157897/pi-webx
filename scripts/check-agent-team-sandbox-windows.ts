@@ -1,7 +1,7 @@
 /** Real Windows LPAC checks. Never report a skip on the Windows acceptance lane. */
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,6 +11,8 @@ import { createIsolatedToolDefinitions, TeamSandboxUnavailableError } from '../s
 
 function appContainerAclEntries(path: string): string[] {
   const command = [
+    // GH 的 Windows runner 上 Get-Acl 的模块自动加载会被卡掉，显式导入绕开。
+    'Import-Module Microsoft.PowerShell.Security -ErrorAction Stop;',
     '(Get-Acl -LiteralPath $env:PI_WEBX_ACL_PATH).Access | ForEach-Object {',
     'try { $_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value }',
     'catch { $_.IdentityReference.Value }',
@@ -26,6 +28,8 @@ function appContainerAclEntries(path: string): string[] {
 if (process.platform !== 'win32') {
   console.log('SKIP Windows AppContainer runtime checks on this non-Windows host');
 } else {
+  // Windows 的 TEMP 常是 8.3 短路径；landstrip -p 只接受长形态，先展开。
+  process.env['TEMP'] = process.env['TMP'] = realpathSync(tmpdir());
   const root = mkdtempSync(join(tmpdir(), 'pi-webx-team-win-check-'));
   const cwd = join(root, 'work');
   const agentDir = join(root, 'agent-dir');
