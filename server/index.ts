@@ -6,6 +6,7 @@ import { resolvePiVersion } from './config';
 import { PiHost } from './pi/host';
 import { JSON_BODY_LIMIT, createApiRouter } from './routes';
 import { responseErrorMessage, statusFromError } from './http-errors';
+import { hostAllowlist, originGuard } from './security-middleware';
 import { attachWebSocketGateway } from './ws';
 import { serveProductionAssets } from './static';
 import { createWorkbenchRouter } from './workbench/router';
@@ -45,6 +46,11 @@ async function main(): Promise<void> {
 
   app.disable('x-powered-by');
   app.use(express.json({ limit: JSON_BODY_LIMIT }));
+  // Loopback bridge with shell access: refuse foreign Host headers (DNS
+  // rebinding) and cross-site writes (form POST needs no preflight) before any
+  // router sees the request. See server/security-middleware.ts.
+  app.use(hostAllowlist());
+  app.use(originGuard());
   app.use('/api/workbench', createWorkbenchRouter(workbench));
   // Use one absolute configuration root for loading, editing and subsequent session creation.
   // PI_WEBX_AGENT_CONFIG_DIR lets local acceptance run against a temporary clone.

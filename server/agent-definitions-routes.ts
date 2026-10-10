@@ -42,6 +42,7 @@ import {
 } from './agent-definitions';
 import { buildModelCatalog } from './model-catalog';
 import type { PiHost } from './pi/host';
+import { isCrossSiteRequest } from './security-middleware';
 
 export interface AgentDefinitionsRouterDeps {
   store: AgentDefinitionStore;
@@ -124,16 +125,9 @@ function paramId(req: Request): string {
  * This exists so a proxied or test deployment can be allowed *deliberately*. It
  * is never populated from request headers: trusting something a caller sends
  * (`X-Forwarded-Host` and friends) would turn the check into a formality, and
- * nothing here quietly widens same-origin for everyone.
+ * nothing here quietly widens same-origin for everyone. The list itself now
+ * lives in `server/security-middleware.ts`, shared with the global guards.
  */
-function configuredAllowedOrigins(): string[] {
-  const raw = process.env['PI_WEBX_ALLOWED_ORIGIN'];
-  if (raw === undefined) return [];
-  return raw
-    .split(',')
-    .map((entry) => entry.trim())
-    .filter((entry) => entry.length > 0);
-}
 
 /**
  * Refuse cross-site writers.
@@ -163,25 +157,13 @@ function configuredAllowedOrigins(): string[] {
  * `Sec-Fetch-Site: cross-site` is the second opinion for browsers that send it;
  * the header's absence (native caller, curl, tests) is not a refusal.
  */
+/**
+ * The cross-site rules themselves live in `server/security-middleware.ts` and
+ * guard every router; the comment block above still documents *this* surface's
+ * contract (deliberate `PI_WEBX_ALLOWED_ORIGIN` allowances, no token theatre).
+ */
 function isCrossSite(req: Request): boolean {
-  const fetchSite = req.headers['sec-fetch-site'];
-  if (typeof fetchSite === 'string' && fetchSite.trim().toLowerCase() === 'cross-site') {
-    return true;
-  }
-  const origin = req.headers['origin'];
-  if (typeof origin !== 'string' || origin.trim().length === 0) return false;
-  let parsed: URL;
-  try {
-    parsed = new URL(origin);
-  } catch {
-    // An unparseable Origin is not something a same-origin caller sends.
-    return true;
-  }
-  const normalized = parsed.origin;
-  if (configuredAllowedOrigins().includes(normalized)) return false;
-  const host = req.headers['host'];
-  if (typeof host !== 'string' || host.length === 0) return true;
-  return parsed.host.toLowerCase() !== host.trim().toLowerCase();
+  return isCrossSiteRequest(req);
 }
 
 function guardWrite(req: Request, res: Response, next: () => void): void {

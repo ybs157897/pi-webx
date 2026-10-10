@@ -14,6 +14,7 @@ import { WebSocket, WebSocketServer } from 'ws';
 
 import type { WsClientMessage, WsServerMessage } from '../src/shared/protocol';
 import type { HostSubscriber, PiHost } from './pi/host';
+import { guardUpgrade } from './security-middleware';
 
 export const WS_PATH = '/api/ws';
 
@@ -39,6 +40,12 @@ export function attachWebSocketGateway(
   pinger.unref();
 
   server.on('upgrade', (req, socket, head) => {
+    // Same rules as HTTP: a rebinned Host or a cross-site Origin never gets a
+    // socket. This guards /api/ws and the codes IDE upgrade alike.
+    if (!guardUpgrade(req)) {
+      socket.destroy();
+      return;
+    }
     const { pathname } = new URL(req.url ?? '/', 'http://localhost');
     if (pathname !== WS_PATH) {
       if (handleCodesUpgrade?.(req, socket, head)) return;
