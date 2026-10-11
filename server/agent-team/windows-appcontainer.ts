@@ -173,9 +173,13 @@ async function verifyPolicy(binary: string, workspace: string, agentDir: string)
       timeout: 120_000, maxBuffer: 1024 * 1024, windowsHide: true,
       }));
     } catch (cause) {
+      const detail = cause instanceof Error ? cause.message.slice(0, 400) : String(cause);
+      // spawnSync/execFile 的失败详情在 stderr 里（exit code 之外唯一线索），带出来才可诊断。
+      const stderr = typeof (cause as { stderr?: unknown }).stderr === 'string'
+        ? `\nstderr: ${(cause as { stderr: string }).stderr.slice(0, 600)}` : '';
       throw new TeamSandboxUnavailableError(
         501,
-        `Windows AppContainer 预检进程失败：${cause instanceof Error ? cause.message.slice(0, 400) : String(cause)}`,
+        `Windows AppContainer 预检进程失败：${detail}${stderr}`,
       );
     }
     if (stdout !== 'APP_CONTAINER_DENIED') {

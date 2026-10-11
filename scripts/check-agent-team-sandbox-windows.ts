@@ -20,7 +20,13 @@ function appContainerAclEntries(path: string): string[] {
   ].join(' ');
   const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
     encoding: 'utf8', windowsHide: true, timeout: 10_000,
-    env: { ...process.env, PI_WEBX_ACL_PATH: path },
+    env: (() => {
+      // GH runner 的 PSModulePath 指向 PowerShell 7 的模块目录，Windows PowerShell 5.1
+      // 拿到它加载 Microsoft.PowerShell.Security 会 FormatXml 崩；删掉让 5.1 重建默认值。
+      const childEnv: NodeJS.ProcessEnv = { ...process.env, PI_WEBX_ACL_PATH: path };
+      delete childEnv['PSModulePath'];
+      return childEnv;
+    })(),
   });
   return output.trim().split(/\r?\n/u).filter(Boolean);
 }

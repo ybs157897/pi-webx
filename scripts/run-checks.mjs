@@ -139,7 +139,8 @@ for (const check of CHECKS) {
     const tag = result.code === 0 ? 'ok  ' : 'FAIL';
     process.stdout.write(`[${tag}] ${String(settled).padStart(2)}/${CHECKS.length} ${result.name} (${result.seconds}s)\n`);
     if (result.code !== 0) {
-      const tail = result.output.trimEnd().split('\n').slice(-15).join('\n');
+      // 失败尾巴留长一点：CI 上正是这里的细节决定能不能远程归因。
+      const tail = result.output.trimEnd().split('\n').slice(-40).join('\n');
       process.stdout.write(`----- ${result.name} 输出末尾 -----\n${tail}\n------------------------------\n`);
     }
     running.delete(task);
