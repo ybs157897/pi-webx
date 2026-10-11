@@ -27,9 +27,12 @@ const assets = [
 
 function findFile(directory, name, depth = 0) {
   if (depth > 5) return undefined;
+  const wanted = name.toLowerCase();
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     const path = join(directory, entry.name);
-    if (entry.isFile() && entry.name.toLowerCase() === name) return path;
+    // 大小写不敏感要两边都折叠：zip 里的许可证是大写（COPYING），此前只有一侧
+    // 转小写，导致永远找不到、安装被误判成「上游清单漂移」。
+    if (entry.isFile() && entry.name.toLowerCase() === wanted) return path;
     if (entry.isDirectory()) {
       const nested = findFile(path, name, depth + 1);
       if (nested) return nested;
@@ -48,7 +51,8 @@ function ready() {
       // 完整性只认 zip/exe 双 SHA-256；许可证文件是随附的合规产物，上游 zip
       // 清单漂移不该打断安装（缺失时 provision 会打警告）。
       return manifest[asset.name] === asset.sha256 && existsSync(binary)
-        && createHash('sha256').update(readFileSync(binary)).digest('hex') === asset.exeSha256;
+        && createHash('sha256').update(readFileSync(binary)).digest('hex') === asset.exeSha256
+        && asset.licenses.every((name) => existsSync(join(TEAM_WINDOWS_BIN_DIR, `${asset.name}-${name}`)));
     });
   } catch { return false; }
 }
@@ -80,12 +84,9 @@ async function provision() {
       copyFileSync(binary, join(TEAM_WINDOWS_BIN_DIR, asset.name));
       for (const name of asset.licenses) {
         const license = findFile(extracted, name);
-        // 许可证缺失只警告：运行时依赖的是校验过的 exe，上游发布包的文件清单
-        // 会漂移（14.1.1 的 zip 就出现过缺 COPYING），不值得为此打断 npm ci。
-        if (!license) {
-          console.warn(`[pi-webx] ${asset.name} 压缩包中没有 ${name}，跳过该许可证副本（完整性以 SHA-256 为准）`);
-          continue;
-        }
+        // zip 的 SHA-256 钉死，内容不会漂移；许可证找不到就是解压或查找出了问题，
+        // 必须失败而不是静默跳过（合规副本是随发行物一起落盘的）。
+        if (!license) throw new Error(`${asset.name} 压缩包中没有 ${name}`);
         copyFileSync(license, join(TEAM_WINDOWS_BIN_DIR, `${asset.name}-${name}`));
       }
     }
