@@ -74,7 +74,8 @@ export default function AgentSettingsPage({ registerNavigationGuard, onNavigateC
           onModuleChange={requestModule} onEdit={state.edit} onReload={state.reload}
           onConfirmPending={confirmPending} onCancelPending={cancelPending} />
         {state.view && state.draft && <AgentSettingsActions dirty={state.dirty} saving={state.saving}
-          pending={pending} onSave={state.save} />}
+          pending={pending} onSave={state.save}
+          overrides={state.view.userOverrides ?? []} onReset={state.reset} />}
       </div>
     </section>
   )

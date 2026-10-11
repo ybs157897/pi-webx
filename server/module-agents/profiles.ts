@@ -10,6 +10,7 @@
  * 存放本机的模型、工作区与提示词改动。传入根目录数组时按序取第一个拥有
  * `<id>.yaml` 的根——用户层一份完整配置整体接管该 Agent，不做字段级合并。
  */
+import { existsSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -88,24 +89,39 @@ export async function loadAgentProfiles(rootDir: string | readonly string[]): Pr
   return results;
 }
 
-/** 栈式加载：按根目录优先级为每个注册 Agent 找归属（第一个有 `<id>.yaml` 的根）。 */
+/**
+ * 栈式加载：仓库默认（数组末位）+ 用户层字段覆盖（高位优先）。
+ *
+ * 用户层的 `<id>.yaml` 是**薄覆盖**，只携带与仓库默认不同的字段（model、
+ * workspace、enabled、skills 选择、tools）；提示词与 Skill 文件按「同名文件
+ * 高位根优先」逐个影子解析。这样仓库里的提示词/工具/Skill 演进在用户没有
+ * 改过的部分持续生效，用户真正改过的部分才被冻结在用户层。
+ */
 async function loadAgentProfileStack(roots: readonly string[]): Promise<Map<AgentId, ProfileLoadResult>> {
   const results = new Map<AgentId, ProfileLoadResult>();
   for (const id of AGENT_IDS) {
-    let owner: string | undefined;
-    for (const root of roots) {
-      if (await isFile(path.join(root, `${id}.yaml`))) { owner = root; break; }
-    }
-    if (owner === undefined) {
+    const owners = await Promise.all(roots.map(root => isFile(path.join(root, `${id}.yaml`))));
+    const baseIndex = lastIndexOfTrue(owners);
+    if (baseIndex === -1) {
       results.set(id, { ok: false, agentId: id, file: `${id}.yaml`, error: `配置缺失：任何配置根都没有 ${id}.yaml` });
       continue;
     }
     try {
-      const profile = await loadOne(owner, `${id}.yaml`);
-      results.set(id, { ok: true, profile });
+      const baseRoot = roots[baseIndex]!;
+      const config = await readConfigFile(path.join(baseRoot, `${id}.yaml`), id);
+      // 从低优先级到高优先级逐层套覆盖，最高位（用户层）最后生效。
+      for (let index = baseIndex - 1; index >= 0; index -= 1) {
+        if (!owners[index]) continue;
+        const overlayRoot = roots[index]!;
+        const overlay = await readOverlayFile(path.join(overlayRoot, `${id}.yaml`), id);
+        applyOverlay(config, overlay);
+      }
+      const topIndex = owners.indexOf(true);
+      const configPath = path.join(roots[topIndex]!, `${id}.yaml`);
+      results.set(id, { ok: true, profile: await hydrateProfile(roots, config, configPath) });
     } catch (error) {
       results.set(id, {
-        ok: false, agentId: id, file: path.join(owner, `${id}.yaml`),
+        ok: false, agentId: id, file: path.join(roots[0]!, `${id}.yaml`),
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -130,6 +146,101 @@ async function loadAgentProfileStack(roots: readonly string[]): Promise<Map<Agen
   return results;
 }
 
+function lastIndexOfTrue(flags: readonly boolean[]): number {
+  for (let index = flags.length - 1; index >= 0; index -= 1) {
+    if (flags[index]) return index;
+  }
+  return -1;
+}
+
+/** 薄覆盖的合法字段：结构性字段（schemaVersion/id）只允许原值出现。 */
+const OVERLAY_KEYS = ['schemaVersion', 'id', 'model', 'workspace', 'enabled', 'skills', 'tools'] as const;
+
+interface OverlayFields {
+  model?: { provider: string; id: string } | null;
+  workspace?: string | null;
+  enabled?: boolean;
+  skills?: { path: string; enabled: boolean }[];
+  tools?: string[];
+}
+
+async function readOverlayFile(file: string, id: AgentId): Promise<OverlayFields> {
+  const text = await readFile(file, 'utf8');
+  const doc = parseDocument(text, { uniqueKeys: true, version: '1.2' });
+  if (doc.errors.length > 0) {
+    throw new ProfileError(`用户层 ${id}.yaml 解析失败：${doc.errors[0]!.message.split('\n')[0]}`);
+  }
+  const raw: unknown = doc.toJS();
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    throw new ProfileError(`用户层 ${id}.yaml 必须是单个 YAML 对象`);
+  }
+  const obj = raw as Record<string, unknown>;
+  for (const key of Object.keys(obj)) {
+    if (!(OVERLAY_KEYS as readonly string[]).includes(key)) {
+      throw new ProfileError(`用户层 ${id}.yaml 存在非覆盖字段 "${key}"（该字段随仓库默认走）`);
+    }
+  }
+  if (obj.schemaVersion !== undefined && obj.schemaVersion !== 1) throw new ProfileError('用户层 schemaVersion 必须是 1');
+  if (obj.id !== undefined && obj.id !== id) throw new ProfileError(`用户层配置 id "${String(obj.id)}" 与文件名 "${id}" 不一致`);
+  const overlay: OverlayFields = {};
+  if (obj.model !== undefined && obj.model !== null) {
+    if (!isObject(obj.model)) failOverlay(id, 'model 必须是对象');
+    requireKeys(obj.model, ['provider', 'id'], `用户层 ${id} model `);
+    overlay.model = {
+      provider: needString(obj.model.provider, `用户层 ${id} model.provider`),
+      id: needString(obj.model.id, `用户层 ${id} model.id`),
+    };
+  } else if (obj.model === null) {
+    overlay.model = null; // 显式回退默认模型
+  }
+  if (obj.workspace !== undefined) {
+    if (obj.workspace === null) overlay.workspace = null;
+    else {
+      const workspace = needString(obj.workspace, `用户层 ${id} workspace`);
+      if (!path.isAbsolute(workspace) || workspace.includes('\0')) failOverlay(id, 'workspace 必须是绝对路径');
+      overlay.workspace = workspace;
+    }
+  }
+  if (obj.enabled !== undefined) overlay.enabled = needBool(obj.enabled, `用户层 ${id} enabled`);
+  if (obj.tools !== undefined) overlay.tools = needStringArray(obj.tools, `用户层 ${id} tools`);
+  if (obj.skills !== undefined) {
+    if (!Array.isArray(obj.skills)) failOverlay(id, 'skills 必须是数组');
+    overlay.skills = (obj.skills as unknown[]).map((item, index) => {
+      if (typeof item === 'string') return { path: item, enabled: true };
+      if (!isObject(item)) failOverlay(id, `skills[${index}] 必须是路径或对象`);
+      requireKeys(item, ['path', 'enabled'], `用户层 ${id} skills[${index}] `);
+      return { path: needString(item.path, `用户层 ${id} skills[${index}].path`), enabled: needBool(item.enabled, `用户层 ${id} skills[${index}].enabled`) };
+    });
+  }
+  return overlay;
+}
+
+function failOverlay(id: AgentId, message: string): never {
+  throw new ProfileError(`用户层 ${id}.yaml：${message}`);
+}
+
+function applyOverlay(config: AgentProfileConfig, overlay: OverlayFields): void {
+  if (overlay.model === null) delete config.model;
+  else if (overlay.model !== undefined) config.model = overlay.model;
+  if (overlay.workspace === null) delete config.workspace;
+  else if (overlay.workspace !== undefined) config.workspace = overlay.workspace;
+  if (overlay.enabled !== undefined) config.enabled = overlay.enabled;
+  if (overlay.tools !== undefined) config.tools = [...overlay.tools];
+  if (overlay.skills !== undefined) {
+    config.skillEntries = overlay.skills.map(entry => ({ ...entry }));
+    config.skills = overlay.skills.filter(entry => entry.enabled).map(entry => entry.path);
+  }
+}
+
+/** 按栈优先级找第一个存在该相对文件的根；都不存在时回落到默认根（读失败会带出明确报错）。 */
+function resolveStackFile(roots: readonly string[], relPath: string): string {
+  for (const root of roots) {
+    const candidate = path.join(root, relPath);
+    if (existsSync(candidate)) return candidate;
+  }
+  return path.join(roots[roots.length - 1]!, relPath);
+}
+
 async function isFile(file: string): Promise<boolean> {
   try {
     return (await stat(file)).isFile();
@@ -140,9 +251,14 @@ async function isFile(file: string): Promise<boolean> {
 
 async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProfile> {
   const file = path.join(rootDir, name);
-  const stem = name.slice(0, -'.yaml'.length);
+  const config = await readConfigFile(file, name.slice(0, -'.yaml'.length));
+  return await hydrateProfile([rootDir], config, file);
+}
+
+/** 读 + 校验一份完整配置（不含资源解析），栈式加载也用它读仓库默认。 */
+async function readConfigFile(file: string, stem: string): Promise<AgentProfileConfig> {
   if (!(AGENT_IDS as readonly string[]).includes(stem)) {
-    throw new ProfileError(`未知 Agent 配置文件名：${name}（允许：${AGENT_IDS.join('、')}）`);
+    throw new ProfileError(`未知 Agent 配置文件名：${stem}.yaml（允许：${AGENT_IDS.join('、')}）`);
   }
   const text = await readFile(file, 'utf8');
 
@@ -162,25 +278,34 @@ async function loadOne(rootDir: string, name: string): Promise<ResolvedAgentProf
   if (config.id !== stem) {
     throw new ProfileError(`配置 id "${config.id}" 与文件名 "${stem}" 不一致`);
   }
+  return config;
+}
 
+/** 资源水合：提示词与 Skill 按栈优先级逐文件解析，mcp 相对命令锚定默认根。 */
+async function hydrateProfile(
+  roots: readonly string[],
+  config: AgentProfileConfig,
+  configPath: string,
+): Promise<ResolvedAgentProfile> {
+  const baseRoot = roots[roots.length - 1]!;
   for (const entry of config.mcp) {
     if (entry.connection.transport === 'stdio') {
-      if (entry.connection.command.startsWith('.')) entry.connection.command = path.resolve(rootDir, entry.connection.command);
+      if (entry.connection.command.startsWith('.')) entry.connection.command = path.resolve(baseRoot, entry.connection.command);
     }
   }
-  const promptPath = path.resolve(rootDir, config.promptFile);
+  const promptPath = resolveStackFile(roots, config.promptFile);
   const promptText = await readTextFile(promptPath, `promptFile ${config.promptFile}`);
 
   const skillPaths: string[] = [];
   for (const skill of config.skills) {
-    const skillPath = path.resolve(rootDir, skill);
+    const skillPath = resolveStackFile(roots, skill);
     await readTextFile(skillPath, `skill ${skill}`);
     skillPaths.push(skillPath);
   }
 
   const skills = await snapshotSkills(skillPaths);
   const effectiveWorkspace = await captureEffectiveWorkspace(config.id, config.workspace);
-  const profile = { config, configPath: file, effectiveWorkspace, promptText, skillPaths, skills };
+  const profile = { config, configPath, effectiveWorkspace, promptText, skillPaths, skills };
   return { ...profile, profileRevision: profileRevision(profile) };
 }
 

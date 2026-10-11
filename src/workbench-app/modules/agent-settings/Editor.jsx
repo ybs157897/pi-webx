@@ -78,10 +78,20 @@ export function AgentSettingsEditor({
   )
 }
 
-export function AgentSettingsActions({ dirty, saving, pending, onSave }) {
+export function AgentSettingsActions({ dirty, saving, pending, onSave, overrides = [], onReset }) {
+  const overrideLabel = overrides.length > 0 ? `已覆盖默认：${overrides.join('、')}` : ''
   return (
     <div className="agent-settings-actions">
       <span className="small muted">{dirty ? '有未保存的修改' : '当前配置已同步'}</span>
+      {overrides.length > 0 && (
+        <span className="agent-settings-badge is-warn" title="这些字段与仓库默认不同，存在本机用户层"
+          data-testid="agent-settings-overrides">{overrideLabel}</span>
+      )}
+      {overrides.length > 0 && (
+        <button type="button" className="btn" disabled={saving || dirty || Boolean(pending)}
+          onClick={onReset} data-testid="agent-settings-reset"
+          title={dirty ? '先保存或放弃当前草稿' : '清除本机覆盖，回到仓库默认'}>恢复仓库默认</button>
+      )}
       <button type="button" className="btn btn-primary" disabled={saving || !dirty || Boolean(pending)}
         onClick={onSave} data-testid="agent-settings-save">{saving ? '保存中…' : '保存配置'}</button>
     </div>

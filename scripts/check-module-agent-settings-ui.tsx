@@ -26,13 +26,15 @@ const draft = copyDraft(view);
 const catalog = { groups: [{ provider: 'fixture', name: 'Fixture Provider', models: [{ id: 'model-a', name: 'Model A' }] }] };
 const callbacks = {
   onModuleChange: () => {}, onEdit: () => {}, onSave: () => {}, onReload: () => {},
-  onConfirmPending: () => {}, onCancelPending: () => {},
+  onConfirmPending: () => {}, onCancelPending: () => {}, onReset: () => {},
 };
 
 function render(extra: Record<string, unknown> = {}): string {
   const props = {
     id: 'logs', view, draft, loading: false, saving: false, feedback: null,
     errors: {}, catalog, catalogError: '', dirty: false, pending: null,
+    // 真实接线（index.jsx）把 view.userOverrides 传给 Actions 的 overrides。
+    overrides: (extra.view as { userOverrides?: string[] } | undefined)?.userOverrides ?? [],
     ...callbacks, ...extra,
   };
   return renderToStaticMarkup(h('div', {},
@@ -92,6 +94,15 @@ assert.ok(missing.includes('role="alertdialog"'), '确认区应有语义角色')
 assert.ok(missing.includes('data-testid="agent-settings-keep-editing"'), '确认区应可回到编辑');
 assert.ok(missing.includes('data-testid="agent-settings-discard"'), '确认区应可明确放弃');
 assert.ok(render({ dirty: true, pending: { kind: 'switch', id: 'codes' } }).includes('切换 Agent'), '切换 Agent 应显示草稿确认');
+/* 用户层覆盖面：有覆盖时展示标注与「恢复仓库默认」，无覆盖时不出现 */
+assert.ok(!markup.includes('data-testid="agent-settings-reset"'), '无覆盖时不显示恢复默认');
+const overriddenView = { ...view, userOverrides: ['model', 'workspace'] };
+const overridden = render({ view: overriddenView, draft: copyDraft(overriddenView) });
+assert.ok(overridden.includes('data-testid="agent-settings-overrides"'), '覆盖标注应有 DOM 门禁标识');
+assert.ok(overridden.includes('已覆盖默认：model、workspace'), '覆盖标注应列出字段');
+assert.ok(overridden.includes('data-testid="agent-settings-reset"') && overridden.includes('恢复仓库默认'));
+const overriddenDirty = render({ view: overriddenView, draft: { ...copyDraft(overriddenView), prompt: '改了一半' }, dirty: true });
+assert.ok(overriddenDirty.includes('disabled=""'), '有未保存草稿时恢复默认应禁用');
 const assistantView = { ...view, id: 'assistant', enabled: true, prompt: '我的助理独立提示词',
   workspacePath: '/tmp/agent-workspaces/assistant', workspaceDefaultPath: '/tmp/agent-workspaces/assistant', skills: [] };
 const assistantMarkup = render({ id: 'assistant', view: assistantView, draft: copyDraft(assistantView) });

@@ -167,26 +167,56 @@ try {
     process.chdir(previous);
   }
 
-  /* 栈式加载：用户层同名文件整体接管该 Agent，资源相对路径随归属根走 */
+  /* 栈式加载：用户层薄覆盖只带差异字段，未覆盖部分跟随仓库默认演进 */
   const stackRepo = await fixture({
     'requirements.yaml': yaml('requirements'),
     'codes.yaml': yaml('codes'),
     'logs.yaml': yaml('logs'),
   });
   const stackUser = await fixture({
-    'codes.yaml': yaml('codes', 'model:\n  provider: p\n  id: m\nworkspace: /tmp/codes-ws'),
+    'codes.yaml': 'model:\n  provider: p\n  id: m\n',
+    'requirements.yaml': 'model:\n  provider: p\n  id: m\n',
   });
   const stacked = await loadAgentProfiles([stackUser, stackRepo]);
   const stackedCodes = stacked.get('codes');
-  assert.ok(stackedCodes?.ok === true, '用户层接管后的 codes 应可加载');
+  assert.ok(stackedCodes?.ok === true, '带覆盖的 codes 应可加载');
   if (stackedCodes.ok) {
-    assert.deepEqual(stackedCodes.profile.config.model, { provider: 'p', id: 'm' }, '用户层文件生效');
-    assert.equal(stackedCodes.profile.configPath, join(stackUser, 'codes.yaml'), '归属根是用户层');
-    assert.equal(stackedCodes.profile.promptText, 'PROMPT-codes', '提示词随归属根解析');
+    assert.deepEqual(stackedCodes.profile.config.model, { provider: 'p', id: 'm' }, '用户层 model 生效');
+    assert.equal(stackedCodes.profile.configPath, join(stackUser, 'codes.yaml'), '配置路径指向用户层覆盖');
+    assert.equal(stackedCodes.profile.promptText, 'PROMPT-codes', '提示词从仓库默认解析');
   }
-  assert.ok(stacked.get('requirements')?.ok === true, '未接管的 Agent 仍从仓库层加载');
-  assert.equal(stacked.get('requirements')!.ok && stacked.get('requirements')!.profile.configPath, join(stackRepo, 'requirements.yaml'));
-  assert.ok(stacked.get('logs')?.ok === true);
+  assert.ok(stacked.get('logs')?.ok === true, '无覆盖的 Agent 直接用仓库默认');
+  const stackedLogs = stacked.get('logs')!;
+  assert.ok(stackedLogs.ok && stackedLogs.profile.configPath === join(stackRepo, 'logs.yaml'));
+
+  /* 仓库默认演进会穿透：用户层只盖 model，仓库 workspace 更新后合并结果跟随仓库 */
+  await writeFile(join(stackRepo, 'requirements.yaml'), yaml('requirements', 'workspace: /tmp/evolved-ws'), 'utf8');
+  const evolved = (await loadAgentProfiles([stackUser, stackRepo])).get('requirements');
+  assert.ok(evolved?.ok === true);
+  if (evolved.ok) {
+    assert.deepEqual(evolved.profile.config.model, { provider: 'p', id: 'm' }, '覆盖字段仍由用户层提供');
+    assert.equal(evolved.profile.config.workspace, '/tmp/evolved-ws', '未覆盖字段随仓库默认演进');
+  }
+
+  /* 用户层资源影子：同名提示词/Skill 文件高位根优先 */
+  const shadowUser = await fixture({ 'codes.yaml': 'workspace: /tmp/ws\n' });
+  await writeFile(join(shadowUser, 'prompts', 'codes.md'), 'USER-PROMPT-codes', 'utf8');
+  const shadowed = (await loadAgentProfiles([shadowUser, stackRepo])).get('codes');
+  assert.ok(shadowed?.ok === true);
+  if (shadowed.ok) {
+    assert.equal(shadowed.profile.promptText, 'USER-PROMPT-codes', '用户层提示词影子优先');
+    assert.equal(shadowed.profile.config.workspace, '/tmp/ws');
+  }
+
+  /* 薄覆盖的边界：未知字段、非覆盖字段、YAML 坏文件都要报错 */
+  const badOverlay = await fixture({ 'codes.yaml': 'model: {provider: p, id: m}\nknowledge: {}' });
+  const badResult = (await loadAgentProfiles([badOverlay, stackRepo])).get('codes');
+  assert.ok(badResult && !badResult.ok, '非覆盖字段必须报错');
+  if (!badResult.ok) assert.match(badResult.error, /非覆盖字段 "knowledge"/, '报错指出字段名');
+  const brokenOverlay = await fixture({ 'codes.yaml': 'id: [codes\n  broken: {' });
+  const brokenResult = (await loadAgentProfiles([brokenOverlay, stackRepo])).get('codes');
+  assert.ok(brokenResult && !brokenResult.ok, '坏的用户层 YAML 要拖垮该 Agent 并报错');
+
   const stackedMissing = await loadAgentProfiles([await mkdtemp(join(root, 'empty-')), await mkdtemp(join(root, 'empty-'))]);
   assert.ok(!stackedMissing.get('logs')?.ok, '所有根都没有该文件必须报错');
   const stackedUnknown = await fixture({ 'typo-name.yaml': yaml('logs') });
@@ -219,7 +249,7 @@ try {
     }
   }
 
-  console.log('PASS 模块 Agent 配置：统一 YAML 目录、逐文件隔离、版本稳定、错误带文件与定位、用户层整体接管与仓库默认机器无关，cwd 漂移不改变结果');
+  console.log('PASS 模块 Agent 配置：统一 YAML 目录、逐文件隔离、版本稳定、错误带文件与定位、用户层薄覆盖与资源影子且仓库默认可演进，cwd 漂移不改变结果');
 } finally {
   await rm(root, { recursive: true, force: true });
 }

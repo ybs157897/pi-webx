@@ -324,38 +324,65 @@ try {
     assert.equal(invalid.get('codes')?.ok, true, 'invalid logs YAML stays isolated');
   }
 
-  /* copy-on-write：仓库层持有的 Agent 首次保存整体迁到用户层，仓库层一字节不动 */
+  /* delta 覆盖：保存只落差异字段；Skill 正文改动整目录影子（附属文件随迁）；恢复默认清用户层 */
   const cowRepoRoot = join(env.root, 'cow-repo-config');
   await cp(defaultAgentsConfigRoot(), cowRepoRoot, { recursive: true });
   const cowUserRoot = join(env.root, 'cow-user-config');
   const cowProfiles = await loadAgentProfiles(cowRepoRoot);
   const cowService = new ModuleAgentSettingsService({ root: cowRepoRoot, userRoot: cowUserRoot, profiles: cowProfiles, validateModel: async () => true });
-  const cowBefore = await cowService.get('logs');
-  const cowRepoYamlBefore = await readFile(join(cowRepoRoot, 'logs.yaml'));
-  const cowPromptBefore = await readFile(join(cowRepoRoot, 'prompts/logs.md'));
-  const cowSkillBefore = await readFile(join(cowRepoRoot, 'skills/logs/log-analysis/SKILL.md'));
-  const cowUpdate = update(cowBefore);
-  cowUpdate.prompt += '\nCOW-EDIT';
-  const cowSaved = await cowService.update('logs', cowUpdate);
-  assert.match(cowSaved.prompt, /COW-EDIT/, 'copy-on-write 保存成功');
-  assert.deepEqual(await readFile(join(cowRepoRoot, 'logs.yaml')), cowRepoYamlBefore, '仓库层 YAML 必须保持原样');
-  assert.deepEqual(await readFile(join(cowRepoRoot, 'prompts/logs.md')), cowPromptBefore, '仓库层提示词必须保持原样');
-  assert.deepEqual(await readFile(join(cowRepoRoot, 'skills/logs/log-analysis/SKILL.md')), cowSkillBefore, '仓库层 Skill 必须保持原样');
-  assert.match(await readFile(join(cowUserRoot, 'logs.yaml'), 'utf8'), /id: logs/, '用户层生成了接管 YAML');
-  assert.match(await readFile(join(cowUserRoot, 'prompts/logs.md'), 'utf8'), /COW-EDIT/, '改动落在用户层提示词');
-  assert.ok((await readFile(join(cowUserRoot, 'skills/logs/log-analysis/SKILL.md'), 'utf8')).length > 0, '声明的 Skill 候选随迁用户层');
-  const cowMigrated = (await loadAgentProfiles([cowUserRoot, cowRepoRoot])).get('logs');
-  assert.ok(cowMigrated?.ok === true, '迁移后栈式加载成功');
-  if (cowMigrated.ok) assert.equal(cowMigrated.profile.configPath, join(cowUserRoot, 'logs.yaml'), '归属根切到用户层');
-  const cowLive = cowProfiles.get('logs');
-  assert.ok(cowLive?.ok === true);
-  if (cowLive.ok) assert.equal(cowLive.profile.configPath, join(cowUserRoot, 'logs.yaml'), '服务把 profiles map 切到用户层');
-  const cowSecond = update(cowSaved);
-  cowSecond.prompt += '\nCOW-SECOND';
-  assert.match((await cowService.update('logs', cowSecond)).prompt, /COW-SECOND/, '接管后的再次保存在用户层生效');
-  assert.deepEqual(await readFile(join(cowRepoRoot, 'logs.yaml')), cowRepoYamlBefore, '第二次保存仓库层仍原样');
+  const cowRepoYamlBefore = await readFile(join(cowRepoRoot, 'requirements.yaml'));
+  const cowPromptBefore = await readFile(join(cowRepoRoot, 'prompts/requirements.md'));
+  const cowSkillKey = './skills/requirements/product-requirements/SKILL.md';
+  const cowSkillBefore = await readFile(join(cowRepoRoot, 'skills/requirements/product-requirements/SKILL.md'));
+  const cowSkillRef = join(cowUserRoot, 'skills/requirements/product-requirements/references/quality-and-specification.md');
+  const cowUserYaml = join(cowUserRoot, 'requirements.yaml');
+  const cowUserPrompt = join(cowUserRoot, 'prompts/requirements.md');
 
-  console.log('PASS 模块设置：HTTP/临时资源、模型 A→B 与默认继承、Skill 选中/取消/重选、旧会话快照、真实发布失败回滚与串行 GET、copy-on-write 用户层接管');
+  const cowFirst = await cowService.get('requirements');
+  assert.deepEqual(cowFirst.userOverrides, [], '初始无覆盖');
+  // 1) 只改模型：用户层 YAML 只含 model，提示词/Skill 不落影子
+  const cowModelUpdate = update(cowFirst);
+  cowModelUpdate.model = modelA;
+  const cowSavedModel = await cowService.update('requirements', cowModelUpdate);
+  assert.equal(cowSavedModel.model?.id, modelA.id);
+  assert.deepEqual(cowSavedModel.userOverrides, ['model'], '只有 model 被覆盖');
+  const overlayText = await readFile(cowUserYaml, 'utf8');
+  assert.match(overlayText, /provider: settings-fixture/);
+  assert.ok(!overlayText.includes('promptFile') && !overlayText.includes('tools:'), '覆盖文件不携带未改字段');
+  await assert.rejects(() => readFile(cowUserPrompt), /ENOENT/, '提示词不落影子');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'requirements.yaml')), cowRepoYamlBefore, '仓库层 YAML 保持原样');
+
+  // 2) 提示词改动：落影子文件；仓库提示词不动
+  const cowPromptUpdate = update(cowSavedModel);
+  cowPromptUpdate.prompt += '\nDELTA-EDIT';
+  const cowSavedPrompt = await cowService.update('requirements', cowPromptUpdate);
+  assert.match(cowSavedPrompt.prompt, /DELTA-EDIT/);
+  assert.deepEqual([...cowSavedPrompt.userOverrides].sort(), ['model', 'prompt'], '覆盖面如实上报');
+  assert.match(await readFile(cowUserPrompt, 'utf8'), /DELTA-EDIT/);
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'prompts/requirements.md')), cowPromptBefore, '仓库提示词原样');
+
+  // 3) Skill 正文改动：整目录影子——references 附属文件必须随迁（首迁丢附属文件的回归钉）
+  const cowSkillUpdate = update(cowSavedPrompt);
+  const skillItem = cowSkillUpdate.skills.find(skill => skill.key === cowSkillKey);
+  assert.ok(skillItem, 'requirements 声明了 product-requirements Skill');
+  const priorSkillContent = cowSavedPrompt.skills.find(skill => skill.key === cowSkillKey)!.content;
+  skillItem.content = `${priorSkillContent}\n<!-- SKILL-EDIT -->`;
+  const cowSavedSkill = await cowService.update('requirements', cowSkillUpdate);
+  assert.match(cowSavedSkill.skills.find(skill => skill.key === cowSkillKey)!.content, /SKILL-EDIT/);
+  assert.ok((await readFile(cowSkillRef, 'utf8')).length > 0, 'Skill 附属 references 随目录影子拷贝');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'skills/requirements/product-requirements/SKILL.md')), cowSkillBefore, '仓库 Skill 原样');
+
+  // 4) 恢复默认：用户层覆盖清空，合并结果回到仓库默认
+  const cowReset = await cowService.reset('requirements');
+  assert.deepEqual(cowReset.userOverrides, [], '恢复后无覆盖');
+  assert.equal(cowReset.model, null);
+  assert.equal(cowReset.prompt, cowPromptBefore.toString(), '提示词回到仓库默认');
+  await assert.rejects(() => readFile(cowUserYaml), /ENOENT/, '用户层覆盖文件已删除');
+  await assert.rejects(() => readFile(cowUserPrompt), /ENOENT/, '用户层提示词影子已删除');
+  await assert.rejects(() => readFile(cowSkillRef), /ENOENT/, '用户层 Skill 影子目录已删除');
+  assert.deepEqual(await readFile(join(cowRepoRoot, 'requirements.yaml')), cowRepoYamlBefore, '恢复不动仓库层');
+
+  console.log('PASS 模块设置：HTTP/临时资源、模型 A→B 与默认继承、Skill 选中/取消/重选、旧会话快照、真实发布失败回滚与串行 GET、用户层字段级覆盖（提示词/Skill 目录影子含附属文件）与恢复默认');
 } finally {
   server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()));
   await host.disposeAll(); store.close();

@@ -44,6 +44,9 @@ export const agentSettingsApi = {
       body: JSON.stringify(update),
     });
   },
+  reset(id: ModuleAgentSettingsId): Promise<AgentSettingsView> {
+    return request(id, { method: 'DELETE' });
+  },
   async polish(id: ModuleAgentSettingsId, prompt: string, model: AgentSettingsView['model'], signal: AbortSignal): Promise<string> {
     let response: Response;
     try {

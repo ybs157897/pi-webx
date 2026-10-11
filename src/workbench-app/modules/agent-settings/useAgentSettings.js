@@ -94,6 +94,29 @@ export function useAgentSettings(id) {
     }
   }, [view, draft, id])
 
+  /** 恢复仓库默认：清掉本机用户层覆盖，草稿重置为默认配置。 */
+  const reset = useCallback(async () => {
+    if (savingRef.current !== null || view?.id !== id) return
+    const request = generation.current
+    savingRef.current = request
+    setSaving(true)
+    setFeedback(null)
+    try {
+      const next = await agentSettingsApi.reset(id)
+      if (generation.current !== request) return
+      setView(next)
+      setDraft(copyDraft(next))
+      setShowValidation(false)
+      setFeedback({ tone: 'ok', message: '已恢复仓库默认。' })
+    } catch (error) {
+      if (generation.current !== request) return
+      setFeedback({ tone: 'error', message: error.message || '恢复默认失败。' })
+    } finally {
+      if (savingRef.current === request) savingRef.current = null
+      if (generation.current === request) setSaving(false)
+    }
+  }, [view, id])
+
   return {
     view: view?.id === id ? view : null,
     draft: view?.id === id ? draft : null,
@@ -101,6 +124,6 @@ export function useAgentSettings(id) {
     saving, feedback: requestedId === id ? feedback : null,
     errors: showValidation && draft ? validateDraft(draft) : {}, catalog, catalogError,
     dirty: view?.id === id && isDirty(view, draft),
-    edit, save, reload, isSaving,
+    edit, save, reload, reset, isSaving,
   }
 }

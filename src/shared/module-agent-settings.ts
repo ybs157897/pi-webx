@@ -24,6 +24,8 @@ export interface AgentSettingsView {
   workspacePath: string;
   workspaceDefaultPath: string;
   skills: AgentSettingsSkill[];
+  /** 与仓库默认不同的字段（model/workspace/prompt/skills/tools）；空数组 = 完全跟随仓库。 */
+  userOverrides: string[];
 }
 
 export interface AgentSettingsUpdate {

@@ -20,5 +20,10 @@ export function createModuleAgentSettingsRouter(service: ModuleAgentSettingsServ
     if (typeof id !== 'string' || !isSettingsId(id)) { res.status(404).json({ error: '未知模块 Agent' }); return; }
     try { res.json(await service.update(id, req.body)); } catch (error) { respond(res, error); }
   });
+  router.delete('/:agentId/settings', async (req: Request, res: Response) => {
+    const id = req.params.agentId;
+    if (typeof id !== 'string' || !isSettingsId(id)) { res.status(404).json({ error: '未知模块 Agent' }); return; }
+    try { res.json(await service.reset(id)); } catch (error) { respond(res, error); }
+  });
   return router;
 }
