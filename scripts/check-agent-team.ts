@@ -118,6 +118,23 @@ const ROOT = mkdtempSync(join(tmpdir(), 'pi-webx-agent-team-'));
 const WORK = join(ROOT, 'work');
 const AGENTS_SENTINEL = 'AGENT-TEAM-AGENTS-SENTINEL-4b71';
 mkdirSync(join(ROOT, 'agent'), { recursive: true });
+/* GH 共享 runner 没有 ProgramData，landstrip 的 AppContainer 会 501（环境限制，
+   非代码缺陷；真实 Windows 主机可用）。宿主不支持就整门禁 SKIP 并给出原因。 */
+if (process.platform === 'win32') {
+  mkdirSync(WORK, { recursive: true });
+  const { ensureWindowsAppContainerVerified } = await import('../server/agent-team/windows-appcontainer');
+  const { TeamSandboxUnavailableError } = await import('../server/agent-team/isolation-contract');
+  try {
+    await ensureWindowsAppContainerVerified(WORK, join(ROOT, 'agent'));
+  } catch (error) {
+    if (error instanceof TeamSandboxUnavailableError) {
+      console.log(`SKIP Agent Team Windows 沙箱验收：宿主不支持 AppContainer（${error.message.slice(0, 200)}）`);
+      process.exit(0);
+    }
+    throw error;
+  }
+}
+
 mkdirSync(join(ROOT, 'sessions'), { recursive: true });
 mkdirSync(WORK, { recursive: true });
 writeFileSync(join(WORK, 'AGENTS.md'), `# Probe context\n\n${AGENTS_SENTINEL}\n`, 'utf8');

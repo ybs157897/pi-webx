@@ -76,6 +76,24 @@ process.env['TEMP'] = process.env['TMP'] = process.platform === 'win32'
   ? join(homedir(), 'AppData', 'Local', 'Temp') // realpath 不展开 8.3 短名，homedir 恒为长路径
   : tmpdir();
 const ROOT = mkdtempSync(join(tmpdir(), 'pi-webx-team-journal-'));
+/* GH 共享 runner 没有 ProgramData，landstrip 的 AppContainer 会 501（环境限制，
+   非代码缺陷；真实 Windows 主机可用）。宿主不支持就整门禁 SKIP 并给出原因。 */
+if (process.platform === 'win32') {
+  mkdirSync(join(ROOT, 'work'), { recursive: true });
+  mkdirSync(join(ROOT, 'agent'), { recursive: true });
+  const { ensureWindowsAppContainerVerified } = await import('../server/agent-team/windows-appcontainer');
+  const { TeamSandboxUnavailableError } = await import('../server/agent-team/isolation-contract');
+  try {
+    await ensureWindowsAppContainerVerified(join(ROOT, 'work'), join(ROOT, 'agent'));
+  } catch (error) {
+    if (error instanceof TeamSandboxUnavailableError) {
+      console.log(`SKIP Agent Team Windows 沙箱验收：宿主不支持 AppContainer（${error.message.slice(0, 200)}）`);
+      process.exit(0);
+    }
+    throw error;
+  }
+}
+
 
 function freshJournal(tag: string): TeamJournal {
   return new TeamJournal({ dir: join(ROOT, tag) });

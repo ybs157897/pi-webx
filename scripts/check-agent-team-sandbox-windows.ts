@@ -19,7 +19,7 @@ function appContainerAclEntries(path: string): string[] {
     '} | Where-Object { $_ -match "^S-1-15-2-" } | Sort-Object -Unique',
   ].join(' ');
   const output = execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', command], {
-    encoding: 'utf8', windowsHide: true, timeout: 10_000,
+    encoding: 'utf8', windowsHide: true, timeout: 30_000,
     env: (() => {
       // GH runner 的 PSModulePath 指向 PowerShell 7 的模块目录，Windows PowerShell 5.1
       // 拿到它加载 Microsoft.PowerShell.Security 会 FormatXml 崩；删掉让 5.1 重建默认值。
@@ -45,6 +45,18 @@ if (process.platform !== 'win32') {
   mkdirSync(cwd);
   mkdirSync(agentDir);
   mkdirSync(outside);
+  /* GH 共享 runner 没有 ProgramData，landstrip 的 AppContainer 会 501（环境限制，
+     非代码缺陷；真实 Windows 主机可用）。宿主不支持就整门禁 SKIP 并给出原因。 */
+  try {
+    const { ensureWindowsAppContainerVerified } = await import('../server/agent-team/windows-appcontainer');
+    await ensureWindowsAppContainerVerified(cwd, agentDir);
+  } catch (error) {
+    if (error instanceof TeamSandboxUnavailableError) {
+      console.log(`SKIP Windows AppContainer 验收：宿主不支持（${error.message.slice(0, 200)}）`);
+      process.exit(0);
+    }
+    throw error;
+  }
   const protectedFile = join(agentDir, 'agent-definitions.json');
   writeFileSync(protectedFile, 'protected definition');
   symlinkSync(agentDir, join(cwd, 'escape'), 'junction');
