@@ -38,21 +38,22 @@
     "dev:requirement-trace-fixture": "tsx scripts/requirement-trace-browser-fixture.ts"
   },
   "dependencies": {
-    "@earendil-works/pi-ai": "^1.0.0",
-    "@earendil-works/pi-coding-agent": "^1.0.0",
+    "@earendil-works/pi-ai": "1.0.0",
+    "@earendil-works/pi-coding-agent": "1.0.0",
     "@jboltai/tokui": "^0.2.6",
     "@landstrip/landstrip-api": "0.19.2",
     "@lobehub/fluent-emoji": "^4.1.1",
-    "@lobehub/icons": "^5.18.0",
-    "@lobehub/ui": "^5.47.1",
-    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@lobehub/icons": "5.18.0",
+    "@lobehub/ui": "5.47.1",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "anser": "^2.3.5",
-    "antd": "^6.6.4",
+    "antd": "6.6.4",
     "antd-style": "^4.1.0",
-    "better-sqlite3": "^12.6.2",
+    "better-sqlite3": "12.6.2",
+    "brace-expansion": "5.0.12",
     "clsx": "^2.1.1",
     "cross-env": "^10.1.0",
-    "express": "^5.2.1",
+    "express": "5.2.1",
     "katex": "^0.18.11",
     "koffi": "^3.3.2",
     "lucide-react": "^0.562.0",
@@ -66,8 +67,9 @@
     "yaml": "^2.9.1"
   },
   "overrides": {
-    "brace-expansion": "^5.0.12",
-    "katex": "^0.18.11"
+    "brace-expansion": "5.0.12",
+    "katex": "^0.18.11",
+    "shell-quote": "1.12.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
@@ -80,6 +82,6 @@
     "concurrently": "^9.2.1",
     "playwright-core": "^1.63.0",
     "typescript": "^5.9.3",
-    "vite": "^8.3.0"
+    "vite": "8.3.0"
   }
 }

@@ -1,6 +1,7 @@
 import { ActionIcon, Flexbox, Text, Tooltip } from '@lobehub/ui';
 import { ChatInputAreaInner } from '@lobehub/ui/chat';
 import { theme } from 'antd';
+import type { TextAreaRef } from 'antd/es/input/TextArea';
 import { Paperclip } from 'lucide-react';
 import type { ClipboardEvent, ReactNode } from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -98,7 +99,7 @@ export function Composer({
     for (const image of imagesRef.current) URL.revokeObjectURL(image.previewUrl);
   }, []);
   const [notice, setNotice] = useState<string | null>(null);
-  const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const inputRef = useRef<TextAreaRef | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   /**
    * Whether the Enter being handled carried Cmd/Ctrl.
@@ -128,7 +129,7 @@ export function Composer({
   const insertCommand = useCallback((command: PiSlashCommand) => {
     const snippet = `/${command.name} `;
     setText((previous) => {
-      const area = inputRef.current;
+      const area = inputRef.current?.resizableTextArea?.textArea;
       const start = area?.selectionStart ?? previous.length;
       const end = area?.selectionEnd ?? previous.length;
       return `${previous.slice(0, start)}${snippet}${previous.slice(end)}`;
