@@ -161,9 +161,18 @@ This UI can run arbitrary shell commands on your machine, by design — that is 
 agent does.
 
 - The bridge binds to `127.0.0.1` only, never `0.0.0.0`.
+- **Every** request passes a Host allowlist (`server/security-middleware.ts`): only loopback
+  hosts on any port answer, so a DNS-rebinding page (whose Host is the attacker's own domain)
+  is refused before any router — or the JSON body parser — runs. Non-loopback hosts can be
+  allowed deliberately via `PI_WEBX_EXTRA_HOSTS`.
+- State-changing methods (POST/PUT/PATCH/DELETE) additionally verify the caller is same-origin
+  or a native client (`Origin` vs `Host`, plus `Sec-Fetch-Site`); the WebSocket upgrade
+  handshake applies the same two rules. Proxied origins can be named in
+  `PI_WEBX_ALLOWED_ORIGIN`.
 - The bridge makes **no outbound network requests** (model/provider traffic is the agent's
   own, in-process). The only `fetch` in the codebase is browser-side and same-origin.
 - Directory browsing and session deletion are path-guarded.
+- `scripts/check-server-origin.ts` pins all of the above as a gate.
 
 ## Scripts
 
@@ -186,6 +195,10 @@ agent does.
 | `PI_WEBX_PROVIDER` | *(pi's default)* | provider for sessions created without an explicit one |
 | `PI_WEBX_MODEL` | *(pi's default)* | model for those sessions |
 | `AI_WORKBENCH_DB_PATH` | `~/.pi-webx/workbench.sqlite` | personal workbench SQLite file |
+| `PI_WEBX_USER_CONFIG_DIR` | `~/.pi-webx/agents` | user layer for module-agent config: field-level overrides (model, workspace, prompt/skill edits) live here; the repo's `config/agents/` stays machine-neutral defaults and is never written at runtime |
+| `PI_WEBX_AGENT_CONFIG_DIR` | `<repo>/config/agents` | repo layer config root (acceptance runs point it at a temp clone) |
+| `PI_WEBX_EXTRA_HOSTS` | *(empty)* | extra `Host` values the bridge answers to (comma-separated, optional port) |
+| `PI_WEBX_ALLOWED_ORIGIN` | *(empty)* | exact origins allowed to drive writes despite differing from Host (comma-separated) |
 
 `PI_WEBX_PROVIDER` / `PI_WEBX_MODEL` matter when pi's configured default provider is not
 usable — without them, a broken credential surfaces as an *empty* assistant reply rather

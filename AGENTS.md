@@ -15,8 +15,9 @@
 - `npm run check:workbench` — SQLite 持久化 + HTTP 行为断言
 - `npm run check:workbench-ui` — SSR 渲染真实 DOM，断言只认 `data-testid` 的 DOM 证据
 - `npm run typecheck` — tsc --noEmit
+- `npm run typecheck:workbench` — 工作台前端模型层的 checkJs 试点（清单在 `tsconfig.workbench.json`）
 - `npm run check:module-agents` — 模块 Agent：配置加载、知识隔离、SDK 装配收口
-- 提交前跑全量链 `npm run check`；stderr 出现 `Error: 未知模块：unknown` 是门禁故意的 400 断言，不是失败。
+- 提交前跑全量链 `npm run check`（并行 runner，汇总全部失败）；stderr 出现 `Error: 未知模块：unknown` 是门禁故意的 400 断言，不是失败。
 
 ## 硬规则
 

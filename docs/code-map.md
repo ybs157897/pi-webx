@@ -148,11 +148,11 @@
 
 | 功能 | 位置 |
 | --- | --- |
-| 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id。仓库层是机器无关默认（不携带 model/workspace）；本机值由用户层 `~/.pi-webx/agents/`（`PI_WEBX_USER_CONFIG_DIR` 可覆盖）整体接管，设置页保存 copy-on-write 只写用户层 |
+| 配置真相源（YAML） | `config/agents/*.yaml` + `prompts/` + `skills/`；文件名必须等于注册 id。仓库层是机器无关默认（不携带 model/workspace）；用户层 `~/.pi-webx/agents/`（`PI_WEBX_USER_CONFIG_DIR` 可覆盖）按**字段级薄覆盖**（model/workspace/enabled/skills/tools）+ 提示词/Skill 同名文件影子生效——没改过的部分持续跟随仓库演进，设置页保存只写差异并支持一键恢复默认 |
 | 需求 Agent 提示词与方法 Skill | `config/agents/prompts/requirements.md` 保留身份、证据/授权边界与协作纪律；`config/agents/skills/requirements/product-requirements/` 的 `SKILL.md` 按需读取需求质量/规格、产物/交接参考，正文映射到 note + taskDrafts，由 `requirements.yaml` 显式挂载 |
 | 契约（AgentId/AgentScope/配置/装配产物） | `server/module-agents/contracts.ts` |
-| 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要；传根目录数组时按优先级整体接管） | `server/module-agents/profiles.ts`（`userAgentsConfigRoot()` 是用户层根） |
-| 左侧 Agent 配置页的后端设置（GET/PUT、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆（用户层用 `PI_WEBX_USER_CONFIG_DIR` 隔离）；新对话使用新配置；带 `userRoot` 时保存整体 copy-on-write 迁到用户层，仓库层只读 |
+| 统一加载器（逐文件隔离、Skill YAML 字符串/`{path,enabled}`、仅快照选中项、profileRevision 摘要；传根目录数组时用户层薄覆盖 + 资源影子解析） | `server/module-agents/profiles.ts`（`userAgentsConfigRoot()` 是用户层根；覆盖文件出现非覆盖字段会按文件报错） |
+| 左侧 Agent 配置页的后端设置（GET/PUT/DELETE 恢复默认、提示词/模型/Skill 正文编辑与目录导入、乐观并发、原子回滚含删除） | `server/module-agents/settings/{router,service,validation,imports,persistence}.ts`；共享 HTTP 类型 `src/shared/module-agent-settings.ts`。`server/index.ts` 先挂设置路由，配置根可用绝对路径 `PI_WEBX_AGENT_CONFIG_DIR` 指向临时克隆（用户层用 `PI_WEBX_USER_CONFIG_DIR` 隔离）；新对话使用新配置；带 `userRoot` 时保存只写差异到用户层（Skill 正文改动整目录影子，references 附属文件随迁），视图的 `userOverrides` 驱动前端「恢复仓库默认」；仓库层只读 |
 | 模块工作区（默认目录、自定义绑定、真实路径校验，绑定目录整体作为项目） | `server/module-agents/workspace.ts`；YAML 可选 `workspace`，配置快照固定有效目录，新会话按绑定创建，恢复保留原目录；不再限制与其他 Agent 的目录重叠 |
 | 绑定项目上下文（各 Agent 的项目身份与根指令） | `server/module-agents/project-context.ts`：整个绑定目录为当前项目；只自动加载绑定根的 AGENTS/CLAUDE 及 local 文件，受限大小、符号链接校验、内容去重；`assemble.ts` 注入身份并将指令交给 SDK `agentsFilesOverride`，不向上发现或加载全局资源 |
 | 提示词 AI 润色（无工具单次模型调用、预览后应用、超时与取消） | `server/module-agents/settings/polish.ts`；复用 PiHost 模型配置与凭据，不创建会话或写配置 |
