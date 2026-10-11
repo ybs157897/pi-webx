@@ -11,6 +11,10 @@ import { defaultAgentsConfigRoot, loadAgentProfiles } from '../server/module-age
 import { ProfileSnapshots, profileRevision } from '../server/module-agents/snapshots';
 import { getChatroomService } from '../server/modules/chatroom/service';
 import { createModuleAgentChatroomRuntime, formatChatroomPrompt, formatClaimPrompt, parseClaimVerdict } from '../server/modules/chatroom/runtime';
+
+/* Windows runner 在并行门禁负载下脚本回合常压 2s 线；非「故意超时」的回合与准入
+   预算在 win32 上放宽 4 倍（故意超时的极小值保持原样，测的就是超时）。 */
+const budget = (ms: number): number => (process.platform === 'win32' ? ms * 4 : ms);
 import { sandbox, memorySettings, scripted, until, within } from './subagent-check-fixtures';
 
 const env = await sandbox();
@@ -149,7 +153,7 @@ try {
   busyRequirements.streaming = true;
 
   relay = createModuleAgentChatroomRuntime({ host, profiles, workspaceKey: 'default', sessionService, chatroom,
-    admissionTimeoutMs: 2000, turnTimeoutMs: 2000, pollMs: 5 });
+    admissionTimeoutMs: budget(2000), turnTimeoutMs: budget(2000), pollMs: 5 });
   const first = chatroom.sendUser(userSessionKey, {
     body: '@需求管理 请实现内部交接。现在直接整理需求、建立待办并交给代码开发；完成后让助理更新状态。',
     entryKey: 'user-request',
@@ -272,7 +276,7 @@ try {
   assert.ok(followUpPrompt.includes(first.body), '回复同一话题时包含前文');
   await relay.stop();
   relay = createModuleAgentChatroomRuntime({ host, profiles, workspaceKey: 'default', sessionService, chatroom,
-    admissionTimeoutMs: 4000, turnTimeoutMs: 2000, claimTimeoutMs: 2000, pollMs: 5 });
+    admissionTimeoutMs: budget(4000), turnTimeoutMs: budget(2000), claimTimeoutMs: budget(2000), pollMs: 5 });
   await within(chatroom.drain(), 5000);
 
   broadcastPhase = true;
@@ -319,7 +323,7 @@ try {
 
   await relay.stop();
   relay = createModuleAgentChatroomRuntime({ host, profiles, workspaceKey: 'default', sessionService, chatroom,
-    admissionTimeoutMs: 1000, turnTimeoutMs: 5000, claimTimeoutMs: 3000, pollMs: 5 });
+    admissionTimeoutMs: budget(1000), turnTimeoutMs: budget(5000), claimTimeoutMs: budget(3000), pollMs: 5 });
   const originalCommand = host.command.bind(host);
   let slowBroadcastId: string | undefined;
   let delayedFullTurn = false;
@@ -344,7 +348,7 @@ try {
   } finally { host.command = originalCommand; }
   await relay.stop();
   relay = createModuleAgentChatroomRuntime({ host, profiles, workspaceKey: 'default', sessionService, chatroom,
-    admissionTimeoutMs: 4000, turnTimeoutMs: 2000, claimTimeoutMs: 2000, pollMs: 5 });
+    admissionTimeoutMs: budget(4000), turnTimeoutMs: budget(2000), claimTimeoutMs: budget(2000), pollMs: 5 });
 
   logsUnreadable = true;
   const mixedBroadcast = chatroom.sendUser(userSessionKey, {
