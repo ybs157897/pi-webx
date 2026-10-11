@@ -45,12 +45,13 @@ async function main(): Promise<void> {
   const app = express();
 
   app.disable('x-powered-by');
-  app.use(express.json({ limit: JSON_BODY_LIMIT }));
   // Loopback bridge with shell access: refuse foreign Host headers (DNS
   // rebinding) and cross-site writes (form POST needs no preflight) before any
-  // router sees the request. See server/security-middleware.ts.
+  // router — and before body parsing, so a forged request never gets the cost
+  // of a JSON parse. See server/security-middleware.ts.
   app.use(hostAllowlist());
   app.use(originGuard());
+  app.use(express.json({ limit: JSON_BODY_LIMIT }));
   app.use('/api/workbench', createWorkbenchRouter(workbench));
   // Use one absolute configuration root for loading, editing and subsequent session creation.
   // PI_WEBX_AGENT_CONFIG_DIR lets local acceptance run against a temporary clone.
